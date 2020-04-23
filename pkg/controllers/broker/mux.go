@@ -22,6 +22,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"os"
 	"sync"
 
 	"github.com/gardener/controller-manager-library/pkg/logger"
@@ -177,7 +178,7 @@ func (this *Mux) FindConnection(packet []byte) *TunnelConnection {
 			this.Infof("to %q: ipv4[%d]: (%d) hdr: %d, total: %d, prot: %d,  %s->%s\n", t.remoteAddress, header.Version, len(packet), header.Len, header.TotalLen, header.Protocol, header.Src, header.Dst)
 			return t
 		}
-		this.Warnf("drop packet to unknown destination %s", header.Dst)
+		this.Warnf("drop unknown dest: ipv4[%d]: (%d) hdr: %d, total: %d, prot: %d,  %s->%s\n", header.Version, len(packet), header.Len, header.TotalLen, header.Protocol, header.Src, header.Dst)
 	} else {
 		this.Warnf("drop unknown packet (type %d)", vers)
 	}
@@ -190,6 +191,11 @@ func (this *Mux) HandleTun() error {
 	for {
 		n, err := this.tun.Read(bytes)
 		if n <= 0 || err != nil {
+			if err.Error()== "read /dev/net/tun: not pollable" {
+				this.Infof("shit")
+				this.tun.tun.ReadWriteCloser.(*os.File).Fd()
+				continue
+			}
 			this.Errorf("END: %d bytes, err=%s", n, err)
 			if n <= 0 {
 				err = io.EOF

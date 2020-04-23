@@ -24,8 +24,9 @@ import (
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/gardener/controller-manager-library/pkg/logger"
-	"github.com/pkg/taptun"
 	"github.com/vishvananda/netlink"
+
+	"github.com/mandelsoft/k8sbridge/pkg/taptun"
 )
 
 const IPTAB = "nat"

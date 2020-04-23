@@ -528,7 +528,7 @@ func (this *Server) Serve(l net.Listener) error {
 				if max := 1 * time.Second; tempDelay > max {
 					tempDelay = max
 				}
-				this.logf("http: Accept error: %v; retrying in %v", err, tempDelay)
+				this.logf("tcp: Accept error: %v; retrying in %v", err, tempDelay)
 				time.Sleep(tempDelay)
 				continue
 			}

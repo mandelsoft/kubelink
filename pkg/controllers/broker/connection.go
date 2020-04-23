@@ -50,8 +50,10 @@ func (this *TunnelConnection) String() string {
 }
 
 func DialTunnelConnection(mux *Mux, link *kubelink.Link, handlers ...ConnectionFailHandler) (*TunnelConnection, error) {
+	mux.Infof("dialing to %s", link.Endpoint)
 	conn, err := net.Dial("tcp", link.Endpoint)
 	if err != nil {
+		mux.Errorf("dialing failed: %s", err)
 		return nil, err
 	}
 
@@ -64,6 +66,7 @@ func DialTunnelConnection(mux *Mux, link *kubelink.Link, handlers ...ConnectionF
 	}
 	go func() {
 		defer t.mux.RemoveTunnel(t)
+		mux.Infof("serving connection to %s", t.String())
 		t.mux.NotifyFailed(t, t.Serve())
 	}()
 	return t, nil
@@ -90,7 +93,9 @@ func ServeTunnelConnection(mux *Mux, conn net.Conn) {
 		conn:          conn,
 		remoteAddress: conn.RemoteAddr().String(),
 	}
-	t.Serve()
+	mux.Infof("serving connection from %s", t.String())
+	err:=t.Serve()
+	mux.Infof(" connection from %s aborted: %s", t.String(), err)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -147,10 +152,13 @@ func (this *TunnelConnection) Serve() error {
 
 func (this *TunnelConnection) read(r io.Reader, data []byte) error {
 	start := 0
-	for start == len(data) {
+	for start < len(data) {
 		n, err := r.Read(data[start:])
-		if err != nil {
+		if  err != nil {
 			return err
+		}
+		if  n <= 0 {
+			return io.EOF
 		}
 		start += n
 	}
