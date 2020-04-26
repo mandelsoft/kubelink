@@ -17,10 +17,13 @@ github.com/emicklei/go-restful/log
 github.com/evanphx/json-patch
 # github.com/fatih/color v1.7.0
 github.com/fatih/color
-# github.com/gardener/controller-manager-library v0.1.1-0.20200422091041-58003542ee99
+# github.com/gardener/controller-manager-library v0.1.1-0.20200426112521-e3c295a0ac4f
 github.com/gardener/controller-manager-library/hack
 github.com/gardener/controller-manager-library/pkg/certmgmt
+github.com/gardener/controller-manager-library/pkg/certmgmt/secret
 github.com/gardener/controller-manager-library/pkg/certs
+github.com/gardener/controller-manager-library/pkg/certs/access
+github.com/gardener/controller-manager-library/pkg/certs/file
 github.com/gardener/controller-manager-library/pkg/config
 github.com/gardener/controller-manager-library/pkg/configmain
 github.com/gardener/controller-manager-library/pkg/controllermanager
@@ -154,8 +157,6 @@ github.com/onsi/gomega/matchers/support/goraph/util
 github.com/onsi/gomega/types
 # github.com/pkg/errors v0.8.1
 github.com/pkg/errors
-# github.com/pkg/taptun v0.0.0-20160424131934-bbbd335672ab
-github.com/pkg/taptun
 # github.com/russross/blackfriday/v2 v2.0.1
 github.com/russross/blackfriday/v2
 # github.com/shurcooL/sanitized_anchor_name v1.0.0
@@ -431,8 +432,11 @@ k8s.io/client-go/tools/pager
 k8s.io/client-go/tools/record
 k8s.io/client-go/tools/record/util
 k8s.io/client-go/tools/reference
+k8s.io/client-go/tools/watch
 k8s.io/client-go/transport
 k8s.io/client-go/util/cert
+k8s.io/client-go/util/certificate
+k8s.io/client-go/util/certificate/csr
 k8s.io/client-go/util/connrotation
 k8s.io/client-go/util/flowcontrol
 k8s.io/client-go/util/homedir

@@ -17,7 +17,7 @@ import (
 	"github.com/mandelsoft/k8sbridge/pkg"
 	"github.com/mandelsoft/k8sbridge/pkg/play"
 	//"github.com/mandelsoft/k8sbridge/pkg/taptun"
-	"github.com/pkg/taptun"
+	"github.com/mandelsoft/k8sbridge/pkg/taptun"
 )
 
 const TUNCIDR = play.TUNCIDR
@@ -30,7 +30,7 @@ func configureO(name string) {
 }
 
 func echo(name string) {
-	c := exec.Command("echo",  fmt.Sprintf("ip link set up cheese && ip a a %s dev cheese", TUNCIDR))
+	c := exec.Command("echo", fmt.Sprintf("ip link set up cheese && ip a a %s dev cheese", TUNCIDR))
 	var out bytes.Buffer
 	c.Stdout = &out
 	c.Start()
@@ -38,26 +38,24 @@ func echo(name string) {
 	fmt.Printf("-> %s\n", out.String())
 }
 
-
 func cstringToGoString(cstring []byte) string {
 	strs := bytes.Split(cstring, []byte{0x00})
 	return string(strs[0])
 }
 
-
 type ifreq struct {
 	name  [unix.IFNAMSIZ]byte // c string
-	flags uint16                 // c short
+	flags uint16              // c short
 	_pad  [24 - unsafe.Sizeof(uint16(0))]byte
 }
 
 func createInterfaceT(flags uint16, name string) (string, *os.File, error) {
-	t, err:=taptun.NewTun(name)
+	t, err := taptun.NewTun(name)
 	if err != nil {
-	    return "", nil, err
+		return "", nil, err
 	}
 
-	fd:=t.ReadWriteCloser.(*os.File)
+	fd := t.ReadWriteCloser.(*os.File)
 	fd.Fd()
 	return t.String(), fd, err
 }
@@ -134,10 +132,10 @@ func createInterfaceO(flags uint16, name string) (string, *os.File, error) {
 
 func main() {
 
-	name:= ""
+	name := ""
 
 	echo(name)
-	name, fd, err:= createInterfaceO(unix.IFF_TUN|unix.IFF_NO_PI, name)
+	name, fd, err := createInterfaceO(unix.IFF_TUN|unix.IFF_NO_PI, name)
 	pkg.ExitOnErr("cannot create tun", err)
 	fmt.Printf("tun: %s\n", name)
 	wait := sync.WaitGroup{}

@@ -98,6 +98,7 @@ type Links struct {
 	lock        sync.RWMutex
 	initialized bool
 	links       map[string]*Link
+	endpoints   map[string]*Link
 }
 
 func NewLinks() *Links {
@@ -142,7 +143,12 @@ func (this *Links) updateLink(link *v1alpha1.KubeLink) (*Link, error) {
 	if err != nil {
 		return nil, err
 	}
+	old := this.links[link.Name]
+	if old != nil && old.Endpoint != l.Endpoint {
+		delete(this.endpoints, old.Endpoint)
+	}
 	this.links[link.Name] = l
+	this.endpoints[l.Endpoint] = l
 	return l, nil
 }
 
@@ -170,6 +176,12 @@ func (this *Links) GetLinkForIP(ip net.IP) (*Link, *net.IPNet) {
 		}
 	}
 	return nil, nil
+}
+
+func (this *Links) GetLinkForEndpoint(dnsname string) *Link {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+	return this.endpoints[dnsname]
 }
 
 func (this *Links) GetRoutes(ifce *NodeInterface) Routes {

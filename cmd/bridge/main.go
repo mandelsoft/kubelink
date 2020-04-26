@@ -8,15 +8,14 @@ import (
 	"sync"
 
 	"github.com/coreos/go-iptables/iptables"
-	"github.com/pkg/taptun"
 
 	"github.com/mandelsoft/k8sbridge/pkg"
 	"github.com/mandelsoft/k8sbridge/pkg/play"
+	"github.com/mandelsoft/k8sbridge/pkg/taptun"
 )
 
 const IPTAB = "nat"
 const IPCHAIN = "POSTROUTING"
-
 
 // Runs "iptables --version" to get the version string
 func getIptablesVersionString(path string) (string, error) {
@@ -31,22 +30,22 @@ func getIptablesVersionString(path string) (string, error) {
 	return out.String(), nil
 }
 
-func x() (*iptables.IPTables) {
+func x() *iptables.IPTables {
 
-/*
-	path, err := exec.LookPath("iptables")
-	if err != nil {
+	/*
+		path, err := exec.LookPath("iptables")
+		if err != nil {
+			return nil
+		}
+
+		vstring, err := getIptablesVersionString(path)
+		if err != nil {
+			return nil
+		}
 		return nil
-	}
 
-	vstring, err := getIptablesVersionString(path)
-	if err != nil {
-		return nil
-	}
-	return nil
-
-	fmt.Printf("version %s\n", vstring)
-*/
+		fmt.Printf("version %s\n", vstring)
+	*/
 
 	ipt, err := iptables.New()
 	pkg.ExitOnErr("cannot create iptables access", err)
@@ -58,13 +57,13 @@ func main() {
 	tun, err := taptun.NewTun("")
 	//name, fd, err:=taptun.CreateInterface(unix.IFF_TUN|unix.IFF_NO_PI, "")
 	pkg.ExitOnErr("cannot create tun", err)
-	fd:=tun.ReadWriteCloser.(*os.File)
-	name:= tun.String()
+	fd := tun.ReadWriteCloser.(*os.File)
+	name := tun.String()
 	fmt.Printf("created %q\n", name)
 	//defer tun.Close()
 
-    ipt=x()
-	if ipt!=nil {
+	ipt = x()
+	if ipt != nil {
 		rule := []string{"-o", tun.String(), "-j", "SNAT", "--to-source", play.TUNIP}
 		ok, err := ipt.Exists(IPTAB, IPCHAIN, rule...)
 		pkg.ExitOnErr("cannot check nat", err)
@@ -83,25 +82,25 @@ func main() {
 	play.ConfigureTun(name)
 
 	/*
-	link, err := netlink.LinkByName(tun.String())
-	pkg.ExitOnErr("cannot get link %q", tun, err)
+		link, err := netlink.LinkByName(tun.String())
+		pkg.ExitOnErr("cannot get link %q", tun, err)
 
-	addr, err := netlink.ParseAddr(TUNCIDR)
-	pkg.ExitOnErr("cannot create addr %q", TUNCIDR, err)
+		addr, err := netlink.ParseAddr(TUNCIDR)
+		pkg.ExitOnErr("cannot create addr %q", TUNCIDR, err)
 
-	err = netlink.AddrAdd(link, addr)
-	pkg.ExitOnErr("cannot add addr %q", TUNCIDR, err)
+		err = netlink.AddrAdd(link, addr)
+		pkg.ExitOnErr("cannot add addr %q", TUNCIDR, err)
 
-	err = netlink.LinkSetUp(link)
-	pkg.ExitOnErr("cannot bring up %q", tun, err)
+		err = netlink.LinkSetUp(link)
+		pkg.ExitOnErr("cannot bring up %q", tun, err)
 
-	_, dst, err := net.ParseCIDR(ROUTE)
-	pkg.ExitOnErr("cannot parse cidr %q", ROUTE, err)
-	route := &netlink.Route{LinkIndex: link.Attrs().Index, Dst: dst}
-	err = netlink.RouteAdd(route)
-	pkg.ExitOnErr("cannot add route", err)
+		_, dst, err := net.ParseCIDR(ROUTE)
+		pkg.ExitOnErr("cannot parse cidr %q", ROUTE, err)
+		route := &netlink.Route{LinkIndex: link.Attrs().Index, Dst: dst}
+		err = netlink.RouteAdd(route)
+		pkg.ExitOnErr("cannot add route", err)
 
-    */
+	*/
 	/*
 			ifce, err := net.InterfaceByName(tun.String())
 			ExitOnErr("cannot get tun %q", tun, err)
@@ -114,7 +113,7 @@ func main() {
 		ShowRoutes(tun.String())
 	*/
 
-	wg:=sync.WaitGroup{}
+	wg := sync.WaitGroup{}
 	wg.Add(1)
 
 	go func() {

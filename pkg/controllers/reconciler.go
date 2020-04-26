@@ -19,6 +19,7 @@
 package controllers
 
 import (
+	"fmt"
 	"net"
 
 	"github.com/gardener/controller-manager-library/pkg/config"
@@ -35,9 +36,8 @@ import (
 type StatusUpdater func(obj *v1alpha1.KubeLink, err error) (bool, error)
 
 type ReconcilerImplementation interface {
-	IsManagedRoute(*netlink.Route) bool
+	IsManagedRoute(*netlink.Route, kubelink.Routes) bool
 	RequiredRoutes() kubelink.Routes
-	ActualRoutes() (kubelink.Routes, error)
 	Config(interface{}) *Config
 
 	Gateway(obj *v1alpha1.KubeLink) (net.IP, error)
@@ -188,40 +188,66 @@ func (this *Reconciler) Deleted(logger logger.LogContext, key resources.ClusterO
 	return reconcile.Succeeded(logger)
 }
 
+type notifier struct {
+	logger.LogContext
+	pending []string
+}
+
+func (this *notifier) add(print bool, msg string, args ...interface{}) {
+	if print {
+		if len(this.pending) > 0 {
+			for _, p := range this.pending {
+				this.Info(p)
+			}
+			this.pending = nil
+		}
+		this.Infof(msg, args...)
+	} else {
+		this.pending = append(this.pending, fmt.Sprintf(msg, args...))
+	}
+}
+
 func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.Status {
-	routes, err := this.impl.ActualRoutes()
+	routes, err := kubelink.ListRoutes()
 	if err != nil {
 		return reconcile.Delay(logger, err)
 	}
 	required := this.impl.RequiredRoutes()
-	logger.Infof("update routes (%d routes found, %d routes required)", len(routes), len(required))
+	mcnt := 0
+	dcnt := 0
+	ocnt := 0
+	ccnt := 0
+	n := &notifier{LogContext: logger}
 	for i, r := range routes {
-		if this.impl.IsManagedRoute(&r) {
-			logger.Infof("match route %3d: %s", i, r)
+		if this.impl.IsManagedRoute(&r, required) {
+			mcnt++
+			if required.Lookup(r) < 0 {
+				dcnt++
+				n.add(dcnt > 0, "obsolete    %d: %s", i, r)
+				err := netlink.RouteDel(&r)
+				if err != nil {
+					logger.Errorf("cannot delete route %s: %s", r, err)
+				}
+			} else {
+				n.add(dcnt > 0, "keep        %3d: %s", i, r)
+			}
 		} else {
-			logger.Infof("other route %3d: %s", i, r)
+			ocnt++
 		}
 	}
 
 	for i, r := range required {
-		if o := routes.Lookup(r); o >= 0 {
-			logger.Infof("keep        %3d: %s", o, r)
-		} else {
-			logger.Infof("missing     %3d: %s", i, r)
+		if o := routes.Lookup(r); o < 0 {
+			ccnt++
+			n.add(true, "missing    *%3d: %s", i, r)
 			err := netlink.RouteAdd(&r)
 			if err != nil {
 				logger.Errorf("cannot add route %s: %s", r, err)
 			}
 		}
 	}
-	for i, r := range routes {
-		if this.impl.IsManagedRoute(&r) && required.Lookup(r) < 0 {
-			logger.Infof("obsolete    %d: %s", i, r)
-			err := netlink.RouteDel(&r)
-			if err != nil {
-				logger.Errorf("cannot delete route %s: %s", r, err)
-			}
-		}
-	}
+
+	logger.Infof("found %d managed (%d deleted) and %d created routes (%d other)", mcnt, dcnt, ccnt, ocnt)
+
 	return reconcile.Succeeded(logger)
 }

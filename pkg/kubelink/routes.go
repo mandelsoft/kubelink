@@ -20,11 +20,12 @@ package kubelink
 
 import (
 	"fmt"
-	"reflect"
 
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netlink/nl"
+
+	"github.com/mandelsoft/k8sbridge/pkg/tcp"
 )
 
 type Routes []netlink.Route
@@ -33,7 +34,7 @@ func (this Routes) Lookup(route netlink.Route) int {
 	for i, r := range this {
 		if r.LinkIndex == route.LinkIndex &&
 			r.Gw.Equal(route.Gw) &&
-			reflect.DeepEqual(r.Dst, route.Dst) {
+			tcp.EqualCIDR(r.Dst, route.Dst) {
 			return i
 		}
 	}
@@ -50,7 +51,7 @@ func (this Routes) LookupAndLogMismatchReason(logger logger.LogContext, route ne
 			logger.Infof("gateway mismatch for %s (%s!=%s)", r, r.Gw, route.Gw.String())
 			continue
 		}
-		if !reflect.DeepEqual(r.Dst, route.Dst) {
+		if !tcp.EqualCIDR(r.Dst, route.Dst) {
 			logger.Infof("destination mismatch for %s (%s!=%s)", r, r.Dst, route.Dst)
 			continue
 		}
@@ -83,7 +84,7 @@ func ShowRoutes(name string) error {
 	return nil
 }
 
-func ListRoutes(name string) (Routes, error) {
+func ListRoutesForInterface(name string) (Routes, error) {
 	link, err := netlink.LinkByName(name)
 	if err != nil {
 		return nil, fmt.Errorf("cannot get link %q: %s", name, err)
@@ -94,4 +95,22 @@ func ListRoutes(name string) (Routes, error) {
 		return nil, fmt.Errorf("cannot get routes: %s", err)
 	}
 	return Routes(routes), nil
+}
+
+func ListRoutes() (Routes, error) {
+	var routes Routes
+	links, err := netlink.LinkList()
+	if err != nil {
+		return nil, fmt.Errorf("cannot get link list: %s", err)
+	}
+
+	for _, link := range links {
+		r, err := netlink.RouteList(link, nl.FAMILY_V4)
+		if err != nil {
+			return nil, fmt.Errorf("cannot get routes: %s", err)
+		}
+		routes = append(routes, r...)
+
+	}
+	return routes, nil
 }

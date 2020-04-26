@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"net"
 
-
 	"github.com/mandelsoft/k8sbridge/pkg/tcp"
 )
 
@@ -45,7 +44,7 @@ func (this *handler) ServeConnection(ctx context.Context, conn net.Conn) {
 
 	for {
 		n, err := conn.Read(buf[:])
-		if n<=0 || err!=nil {
+		if n <= 0 || err != nil {
 			fmt.Printf("finish connection: %s\n", err)
 			conn.Close()
 			return

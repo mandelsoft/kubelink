@@ -60,16 +60,17 @@ func (this *Tun) Read(buf []byte) (int, error) {
 ////////////////////////////////////////////////////////////////////////////////
 
 func NewTun(logger logger.LogContext, clusterAddress net.IP, clusterCIDR *net.IPNet) (*Tun, error) {
-	ipt, err := iptables.New()
-	if err != nil {
-		return nil, fmt.Errorf("cannot create iptables access: %s", err)
-	}
 
 	tun, err := taptun.NewTun("")
 	if err != nil {
 		return nil, fmt.Errorf("cannot create tun %q: %s", tun, err)
 	}
 	logger.Infof("created tun device %q", tun)
+
+	ipt, err := iptables.New()
+	if err != nil {
+		return nil, fmt.Errorf("cannot create iptables access: %s", err)
+	}
 
 	link, err := netlink.LinkByName(tun.String())
 	if err != nil {

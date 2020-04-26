@@ -19,6 +19,7 @@
 package broker
 
 import (
+	"fmt"
 	"net"
 	"strings"
 
@@ -28,6 +29,12 @@ import (
 	"github.com/mandelsoft/k8sbridge/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/k8sbridge/pkg/controllers"
 )
+
+const MANAGE_MODE_NONE = "none"
+const MANAGE_MODE_SELF = "self"
+const MANAGE_MODE_CERT = "cert"
+
+var valid_modes = utils.NewStringSet(MANAGE_MODE_NONE, MANAGE_MODE_SELF, MANAGE_MODE_CERT)
 
 type Config struct {
 	controllers.Config
@@ -43,6 +50,15 @@ type Config struct {
 
 	Responsible utils.StringSet
 	Port        int
+
+	CertFile   string
+	KeyFile    string
+	CACertFile string
+
+	Secret     string
+	ManageMode string
+	DNSName    string
+	Service    string
 }
 
 func (this *Config) AddOptionsToSet(set config.OptionSet) {
@@ -51,6 +67,13 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.address, "link-address", "", "", "CIDR of cluster in cluster network")
 	set.AddStringOption(&this.responsible, "served-links", "", "all", "Comma separated list of links to serve")
 	set.AddIntOption(&this.Port, "broker-port", "", 8088, "Port for broker")
+	set.AddStringOption(&this.CertFile, "certfile", "", "", "TLS certificate file")
+	set.AddStringOption(&this.KeyFile, "keyfile", "", "", "TLS certificate key file")
+	set.AddStringOption(&this.CACertFile, "cacertfile", "", "", "TLS ca certificate file")
+	set.AddStringOption(&this.Secret, "secret", "", "", "TLS secret")
+	set.AddStringOption(&this.ManageMode, "secret-manage-mode", "", MANAGE_MODE_NONE, "Manage mode for TLS secret")
+	set.AddStringOption(&this.DNSName, "dns-name", "", "", "DNS Name for managed certificate")
+	set.AddStringOption(&this.Service, "service", "", "", "Service name for managed certificate")
 }
 
 func (this *Config) Prepare() error {
@@ -73,6 +96,32 @@ func (this *Config) Prepare() error {
 	}
 	if this.Responsible.Contains("all") {
 		this.Responsible = utils.NewStringSet("all")
+	}
+	if strings.TrimSpace(this.Secret) == "" {
+		return fmt.Errorf("TLS secret must be set")
+	}
+	if this.Secret != "" && this.CertFile != "" {
+		return fmt.Errorf("only secret or cert file can be specified")
+	}
+	if this.ManageMode != "" {
+		if !valid_modes.Contains(this.ManageMode) {
+			return fmt.Errorf("invalid management mode (possible %s): %s", valid_modes, this.ManageMode)
+		}
+		if this.ManageMode == MANAGE_MODE_SELF {
+			if this.DNSName == "" {
+				return fmt.Errorf("dns name required for managed TLS secret")
+			}
+		}
+	} else {
+		this.ManageMode = MANAGE_MODE_NONE
+	}
+	if this.CertFile != "" {
+		if this.KeyFile == "" {
+			return fmt.Errorf("key file must be specified if cert file is set")
+		}
+		if this.CACertFile == "" {
+			return fmt.Errorf("ca cert file must be specified if cert file is set")
+		}
 	}
 	return nil
 }

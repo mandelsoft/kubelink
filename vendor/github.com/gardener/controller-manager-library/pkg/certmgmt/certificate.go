@@ -113,16 +113,13 @@ func UpdateCertificate(old CertificateInfo, cfg *Config) (CertificateInfo, error
 	var err error
 	var ok bool
 
-	// var test string
-	// names:=cfg.Hosts.GetDNSNames()
-	// if len(names)>0 {
-	//	test=names[0]
-	// } else {
-	//	ips:=cfg.Hosts.GetIPs()
-	//	if len(ips)>0 {
-	//		test="["+ips[0].String()+"]"
-	//	}
-	// }
+	if cfg == nil {
+		valid := IsValid(new, 0, "")
+		if !valid {
+			return new, fmt.Errorf("no valid certificate")
+		}
+		return new, nil
+	}
 
 	valid := IsValid(new, cfg.Rest, "")
 	if valid {

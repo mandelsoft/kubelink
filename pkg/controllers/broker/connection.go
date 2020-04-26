@@ -19,11 +19,13 @@
 package broker
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
 	"sync"
 
+	"github.com/gardener/controller-manager-library/pkg/logger"
 	"golang.org/x/net/ipv4"
 
 	"github.com/mandelsoft/k8sbridge/pkg/kubelink"
@@ -50,8 +52,15 @@ func (this *TunnelConnection) String() string {
 }
 
 func DialTunnelConnection(mux *Mux, link *kubelink.Link, handlers ...ConnectionFailHandler) (*TunnelConnection, error) {
+	var conn net.Conn
+	var err error
+
 	mux.Infof("dialing to %s", link.Endpoint)
-	conn, err := net.Dial("tcp", link.Endpoint)
+	if mux.certInfo != nil {
+		conn, err = tls.Dial("tcp", link.Endpoint, mux.certInfo.ClientConfig())
+	} else {
+		conn, err = net.Dial("tcp", link.Endpoint)
+	}
 	if err != nil {
 		mux.Errorf("dialing failed: %s", err)
 		return nil, err
@@ -87,15 +96,58 @@ func (this *TunnelConnection) notify(err error) {
 	}
 }
 
-func ServeTunnelConnection(mux *Mux, conn net.Conn) {
-	t := &TunnelConnection{
-		mux:           mux,
-		conn:          conn,
-		remoteAddress: conn.RemoteAddr().String(),
+func printConnState(log logger.LogContext, state tls.ConnectionState) {
+	log.Info(">>>>>>>>>>>>>>>> State <<<<<<<<<<<<<<<<")
+	log.Infof("Version: %x", state.Version)
+	log.Infof("HandshakeComplete: %t", state.HandshakeComplete)
+	log.Infof("DidResume: %t", state.DidResume)
+	log.Infof("CipherSuite: %x", state.CipherSuite)
+	log.Infof("NegotiatedProtocol: %s", state.NegotiatedProtocol)
+	log.Infof("NegotiatedProtocolIsMutual: %t", state.NegotiatedProtocolIsMutual)
+
+	log.Info("Certificate chain:")
+	for i, cert := range state.PeerCertificates {
+		subject := cert.Subject
+		issuer := cert.Issuer
+		log.Infof(" %d s:/C=%v/ST=%v/L=%v/O=%v/OU=%v/CN=%s", i, subject.Country, subject.Province, subject.Locality, subject.Organization, subject.OrganizationalUnit, subject.CommonName)
+		log.Infof("   i:/C=%v/ST=%v/L=%v/O=%v/OU=%v/CN=%s", issuer.Country, issuer.Province, issuer.Locality, issuer.Organization, issuer.OrganizationalUnit, issuer.CommonName)
 	}
-	mux.Infof("serving connection from %s", t.String())
-	err:=t.Serve()
-	mux.Infof(" connection from %s aborted: %s", t.String(), err)
+	log.Info(">>>>>>>>>>>>>>>> State End <<<<<<<<<<<<<<<<")
+}
+
+func ServeTunnelConnection(mux *Mux, conn net.Conn) {
+	var clusterAddress net.IP
+	remote := conn.RemoteAddr().String()
+
+	defer conn.Close()
+
+	tlsConn, ok := conn.(*tls.Conn)
+	if ok {
+		err := tlsConn.Handshake()
+		if err != nil {
+			mux.Error("handshake error on connection from %s: %s", remote, err)
+			return
+		}
+		state := tlsConn.ConnectionState()
+		printConnState(mux, state)
+		if len(state.PeerCertificates) > 0 {
+			cn := state.PeerCertificates[0].Subject.CommonName
+			l := mux.links.GetLinkForEndpoint(cn)
+			if l == nil {
+				mux.Errorf("unknown endpoint %s for connection from %s", cn, remote)
+				return
+			}
+			mux.Infof("new tunnel conection for %s[%s] from %s", l.Name, l.ClusterAddress, remote)
+			clusterAddress = l.ClusterAddress
+		}
+	}
+	t := &TunnelConnection{
+		mux:            mux,
+		conn:           conn,
+		clusterAddress: clusterAddress,
+		remoteAddress:  remote,
+	}
+	t.Serve()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -106,18 +158,24 @@ func (this *TunnelConnection) Close() error {
 
 func (this *TunnelConnection) Serve() error {
 	var buffer [BufferSize]byte
-	bytes := buffer[:]
+	working := false
 	log := this.mux.NewContext("remote", this.remoteAddress)
 	for {
-		n, err := this.ReadPacket(bytes)
+		n, err := this.ReadPacket(buffer[:])
 		if n <= 0 || err != nil {
-			log.Errorf("END: %d bytes, err=%s", n, err)
+			if working {
+				log.Infof("connection aborted: %d bytes, err=%s", n, err)
+			}
 			if n <= 0 {
 				err = io.EOF
 			}
 			return err
 		}
-		packet := bytes[:n]
+		if !working {
+			log.Infof("serving connection")
+			working = true
+		}
+		packet := buffer[:n]
 		vers := int(packet[0]) >> 4
 		if vers == ipv4.Version {
 			header, err := ipv4.ParseHeader(packet)
@@ -126,6 +184,17 @@ func (this *TunnelConnection) Serve() error {
 			} else {
 				log.Infof("receiving ipv4[%d]: (%d) hdr: %d, total: %d, prot: %d,  %s->%s\n",
 					header.Version, len(packet), header.Len, header.TotalLen, header.Protocol, header.Src, header.Dst)
+				if !this.mux.clusterCIDR.Contains(header.Src) {
+					log.Warnf("  dropping packet because of non-matching source address [%s]", this.mux.clusterCIDR, header.Src)
+					continue
+				} else {
+					if this.clusterAddress == nil {
+						this.clusterAddress = header.Src
+					} else {
+						log.Warnf("  dropping packet because of non-matching source address [%s]", this.clusterAddress, header.Dst)
+						continue
+					}
+				}
 			}
 			if len(this.mux.local) > 0 {
 				use := false
@@ -140,8 +209,9 @@ func (this *TunnelConnection) Serve() error {
 				}
 			}
 		}
-		o, err := this.mux.tun.Write(bytes[:n])
+		o, err := this.mux.tun.Write(buffer[:n])
 		if err != nil {
+			log.Infof(" connection aborted: %s", err)
 			return err
 		}
 		if n != o {
@@ -154,10 +224,10 @@ func (this *TunnelConnection) read(r io.Reader, data []byte) error {
 	start := 0
 	for start < len(data) {
 		n, err := r.Read(data[start:])
-		if  err != nil {
+		if err != nil {
 			return err
 		}
-		if  n <= 0 {
+		if n <= 0 {
 			return io.EOF
 		}
 		start += n

@@ -20,8 +20,11 @@ package broker
 
 import (
 	"fmt"
+	"io"
 	"net"
+	"time"
 
+	"github.com/gardener/controller-manager-library/pkg/certs"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
 	"github.com/gardener/controller-manager-library/pkg/ctxutil"
 	"github.com/gardener/controller-manager-library/pkg/resources"
@@ -30,12 +33,14 @@ import (
 	"github.com/mandelsoft/k8sbridge/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/k8sbridge/pkg/controllers"
 	"github.com/mandelsoft/k8sbridge/pkg/kubelink"
+	"github.com/mandelsoft/k8sbridge/pkg/tcp"
 )
 
 type reconciler struct {
 	*controllers.Reconciler
-	config *Config
-	mux    *Mux
+	config   *Config
+	certInfo *CertInfo
+	mux      *Mux
 }
 
 var _ reconcile.Interface = &reconciler{}
@@ -70,12 +75,18 @@ func (this *reconciler) UpdateGateway(link *v1alpha1.KubeLink) *string {
 	return nil
 }
 
-func (this *reconciler) ActualRoutes() (kubelink.Routes, error) {
-	return kubelink.ListRoutes(this.mux.tun.link.Attrs().Name)
-}
-
-func (this *reconciler) IsManagedRoute(r *netlink.Route) bool {
-	return CheckManaged(r, this.mux.tun.link.Attrs().Index)
+func (this *reconciler) IsManagedRoute(route *netlink.Route, routes kubelink.Routes) bool {
+	if route.LinkIndex == this.mux.tun.link.Attrs().Index {
+		return true
+	}
+	if route.Dst != nil {
+		for _, r := range routes {
+			if tcp.EqualCIDR(route.Dst, r.Dst) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (this *reconciler) RequiredRoutes() kubelink.Routes {
@@ -91,11 +102,32 @@ func (this *reconciler) Setup() {
 	if err != nil {
 		panic(fmt.Errorf("cannot setup tun device: %s", err))
 	}
+
+	var certificate certs.CertificateSource
+	var certInfo *CertInfo
+	if this.config.CertFile != "" {
+		certificate, err = this.CreateFileCertificateSource()
+	} else {
+		if this.config.Secret != "" {
+			certificate, err = this.CreateSecretCertificateSource()
+		}
+	}
+	if err != nil {
+		panic(fmt.Errorf("cannot setup tls: %s", err))
+	}
+
+	if certificate != nil {
+		if _, err := certificate.GetCertificate(nil); err != nil {
+			panic(fmt.Errorf("no TLS certificate: %s", err))
+		}
+		certInfo = NewCertInfo(this.Controller(), certificate)
+	}
+
 	var local []net.IPNet
 	if this.config.ServiceCIDR != nil {
 		local = append(local, *this.config.ServiceCIDR)
 	}
-	mux := NewMux(this.Controller().GetContext(), this.Controller(), local, tun, this.Links(), this)
+	mux := NewMux(this.Controller().GetContext(), this.Controller(), certInfo, this.config.ClusterCIDR, local, tun, this.Links(), this)
 	go func() {
 		<-this.Controller().GetContext().Done()
 		this.Controller().Infof("closing tun device %q", tun)
@@ -105,15 +137,28 @@ func (this *reconciler) Setup() {
 }
 
 func (this *reconciler) Start() {
-	NewServer("broker", this.mux).Start(nil, "", this.config.Port)
+	NewServer("broker", this.mux).Start(this.certInfo, "", this.config.Port)
 	go func() {
 		defer ctxutil.Cancel(this.Controller().GetContext())
 		this.Controller().Infof("starting tun server")
-		err := this.mux.HandleTun()
-		if err != nil {
-			this.Controller().Errorf("tun handling aborted: %s", err)
-		} else {
-			this.Controller().Errorf("tun server finished")
+		for {
+			err := this.mux.HandleTun()
+			if err != nil {
+				if err == io.EOF {
+					this.Controller().Errorf("tun server finished")
+				} else {
+					this.Controller().Errorf("tun handling aborted: %s", err)
+				}
+				break
+			} else {
+				this.mux.tun.Close()
+				time.Sleep(100 * time.Millisecond)
+				this.Controller().Infof("recreating tun device")
+				this.mux.tun, err = NewTun(this.Controller(), this.config.ClusterAddress, this.config.ClusterCIDR)
+				if err != nil {
+					panic(fmt.Errorf("cannot setup tun device: %s", err))
+				}
+			}
 		}
 	}()
 }

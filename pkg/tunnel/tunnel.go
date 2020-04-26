@@ -25,8 +25,9 @@ import (
 	"net"
 	"sync"
 
-	"github.com/pkg/taptun"
 	"golang.org/x/net/ipv4"
+
+	"github.com/mandelsoft/k8sbridge/pkg/taptun"
 )
 
 const BufferSize = 17000

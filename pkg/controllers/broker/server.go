@@ -25,7 +25,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gardener/controller-manager-library/pkg/certs"
 	"github.com/gardener/controller-manager-library/pkg/ctxutil"
 	"github.com/gardener/controller-manager-library/pkg/logger"
 
@@ -37,25 +36,28 @@ type Server struct {
 
 	name string
 	mux  *Mux
+
+	certInfo *CertInfo
 }
 
 func NewServer(name string, mux *Mux) *Server {
-	return &Server{mux.LogContext, name, mux}
+	return &Server{
+		LogContext: mux.LogContext,
+		name:       name,
+		mux:        mux,
+	}
 }
 
 // Start starts a  server.
-func (this *Server) Start(source certs.CertificateSource, bindAddress string, port int) {
+func (this *Server) Start(certInfo *CertInfo, bindAddress string, port int) {
 	var tlscfg *tls.Config
 
 	listenAddress := fmt.Sprintf("%s:%d", bindAddress, port)
-	if source != nil {
+	if certInfo != nil {
 		this.Infof("starting %s as tls server (serving on %s)", this.name, listenAddress)
-		tlscfg = &tls.Config{
-			NextProtos:     []string{"h2"},
-			GetCertificate: source.GetCertificate,
-		}
+		tlscfg = certInfo.ServerConfig()
 	} else {
-		this.Infof("starting %s as server (serving on %s)", this.name, listenAddress)
+		this.Infof("starting %s as unsecured server (serving on %s)", this.name, listenAddress)
 	}
 	server := &tcp.Server{
 		Addr:      listenAddress,

@@ -48,3 +48,19 @@ func cloneTLSConfig(cfg *tls.Config) *tls.Config {
 	}
 	return cfg.Clone()
 }
+
+func EqualCIDR(a, b *net.IPNet) bool {
+	if a == b {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if !a.IP.Equal(b.IP) {
+		return false
+	}
+	if !net.IP(a.Mask).Equal(net.IP(b.Mask)) {
+		return false
+	}
+	return true
+}

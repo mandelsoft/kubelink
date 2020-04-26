@@ -27,6 +27,7 @@ import (
 	"github.com/mandelsoft/k8sbridge/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/k8sbridge/pkg/controllers"
 	"github.com/mandelsoft/k8sbridge/pkg/kubelink"
+	"github.com/mandelsoft/k8sbridge/pkg/tcp"
 )
 
 type reconciler struct {
@@ -51,12 +52,21 @@ func (this *reconciler) UpdateGateway(link *v1alpha1.KubeLink) *string {
 	return nil
 }
 
-func (this *reconciler) IsManagedRoute(r *netlink.Route) bool {
-	return CheckManaged(r, this.config.PodCIDR)
-}
-
-func (this *reconciler) ActualRoutes() (kubelink.Routes, error) {
-	return kubelink.ListRoutes(this.NodeInterface().Name)
+func (this *reconciler) IsManagedRoute(route *netlink.Route, routes kubelink.Routes) bool {
+	if route.Dst != nil {
+		if this.config.PodCIDR.Contains(route.Dst.IP) {
+			return false
+		}
+		if route.Gw != nil && route.LinkIndex == this.NodeInterface().Index {
+			return true
+		}
+		for _, r := range routes {
+			if tcp.EqualCIDR(route.Dst, r.Dst) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (this *reconciler) RequiredRoutes() kubelink.Routes {

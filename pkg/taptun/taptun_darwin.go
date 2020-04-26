@@ -2,10 +2,10 @@ package taptun
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"syscall"
 	"unsafe"
-	"fmt"
 )
 
 // #cgo CFLAGS: -I./

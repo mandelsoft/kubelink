@@ -37,27 +37,31 @@ type LinkFailHandler interface {
 
 type Mux struct {
 	logger.LogContext
-	lock   sync.RWMutex
-	ctx    context.Context
-	byIP   map[string]*TunnelConnection
-	errors map[string]error
+	lock     sync.RWMutex
+	ctx      context.Context
+	certInfo *CertInfo
+	byIP     map[string]*TunnelConnection
+	errors   map[string]error
 
-	links    *kubelink.Links
-	local    []net.IPNet
-	tun      *Tun
-	handlers []LinkFailHandler
+	clusterCIDR *net.IPNet
+	links       *kubelink.Links
+	local       []net.IPNet
+	tun         *Tun
+	handlers    []LinkFailHandler
 }
 
-func NewMux(ctx context.Context, logger logger.LogContext, localCIDRs []net.IPNet, tun *Tun, links *kubelink.Links, handlers ...LinkFailHandler) *Mux {
+func NewMux(ctx context.Context, logger logger.LogContext, certInfo *CertInfo, clusterCIDR *net.IPNet, localCIDRs []net.IPNet, tun *Tun, links *kubelink.Links, handlers ...LinkFailHandler) *Mux {
 	return &Mux{
-		LogContext: logger,
-		ctx:        ctx,
-		links:      links,
-		byIP:       map[string]*TunnelConnection{},
-		errors:     map[string]error{},
-		tun:        tun,
-		local:      localCIDRs,
-		handlers:   append(handlers[:0:0], handlers...),
+		LogContext:  logger,
+		ctx:         ctx,
+		certInfo:    certInfo,
+		links:       links,
+		byIP:        map[string]*TunnelConnection{},
+		errors:      map[string]error{},
+		tun:         tun,
+		clusterCIDR: clusterCIDR,
+		local:       localCIDRs,
+		handlers:    append(handlers[:0:0], handlers...),
 	}
 }
 
@@ -188,20 +192,26 @@ func (this *Mux) FindConnection(packet []byte) *TunnelConnection {
 func (this *Mux) HandleTun() error {
 	var buffer [BufferSize]byte
 	bytes := buffer[:]
+	working := false
 	for {
 		n, err := this.tun.Read(bytes)
 		if n <= 0 || err != nil {
-			if err.Error()== "read /dev/net/tun: not pollable" {
-				this.Infof("shit")
-				this.tun.tun.ReadWriteCloser.(*os.File).Fd()
-				continue
+			if err.Error() == "read /dev/net/tun: not pollable" {
+				if working {
+					this.Errorf("handle tun: err=%s", err)
+				}
+				this.tun.tun.ReadWriteCloser.(*os.File).Close()
+				return nil
 			}
-			this.Errorf("END: %d bytes, err=%s", n, err)
+			if working {
+				this.Errorf("END: %d bytes, err=%s", n, err)
+			}
 			if n <= 0 {
 				err = io.EOF
 			}
 			return err
 		}
+		working = true
 		packet := bytes[:n]
 		t := this.FindConnection(packet)
 		if t != nil {
