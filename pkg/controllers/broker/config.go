@@ -76,6 +76,10 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.Service, "service", "", "", "Service name for managed certificate")
 }
 
+func Empty(s string) bool {
+	return strings.TrimSpace(s) == ""
+}
+
 func (this *Config) Prepare() error {
 	err := this.Config.Prepare()
 
@@ -97,13 +101,15 @@ func (this *Config) Prepare() error {
 	if this.Responsible.Contains("all") {
 		this.Responsible = utils.NewStringSet("all")
 	}
-	if strings.TrimSpace(this.Secret) == "" {
-		return fmt.Errorf("TLS secret must be set")
-	}
-	if this.Secret != "" && this.CertFile != "" {
+	/*
+		if Empty(this.CertFile) && Empty(this.Secret) {
+			return fmt.Errorf("TLS secret or cert file must be set")
+		}
+	*/
+	if !Empty(this.Secret) && !Empty(this.CertFile) {
 		return fmt.Errorf("only secret or cert file can be specified")
 	}
-	if this.ManageMode != "" {
+	if !Empty(this.ManageMode) {
 		if !valid_modes.Contains(this.ManageMode) {
 			return fmt.Errorf("invalid management mode (possible %s): %s", valid_modes, this.ManageMode)
 		}
@@ -115,11 +121,11 @@ func (this *Config) Prepare() error {
 	} else {
 		this.ManageMode = MANAGE_MODE_NONE
 	}
-	if this.CertFile != "" {
-		if this.KeyFile == "" {
+	if !Empty(this.CertFile) {
+		if Empty(this.KeyFile) {
 			return fmt.Errorf("key file must be specified if cert file is set")
 		}
-		if this.CACertFile == "" {
+		if Empty(this.CACertFile) {
 			return fmt.Errorf("ca cert file must be specified if cert file is set")
 		}
 	}

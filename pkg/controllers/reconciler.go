@@ -191,10 +191,11 @@ func (this *Reconciler) Deleted(logger logger.LogContext, key resources.ClusterO
 type notifier struct {
 	logger.LogContext
 	pending []string
+	active  bool
 }
 
 func (this *notifier) add(print bool, msg string, args ...interface{}) {
-	if print {
+	if print || this.active {
 		if len(this.pending) > 0 {
 			for _, p := range this.pending {
 				this.Info(p)
@@ -202,9 +203,14 @@ func (this *notifier) add(print bool, msg string, args ...interface{}) {
 			this.pending = nil
 		}
 		this.Infof(msg, args...)
+		this.active = true
 	} else {
 		this.pending = append(this.pending, fmt.Sprintf(msg, args...))
 	}
+}
+
+func String(r netlink.Route) string {
+	return fmt.Sprintf("%s proto: %d", r, r.Protocol)
 }
 
 func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.Status {
@@ -223,26 +229,28 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 			mcnt++
 			if required.Lookup(r) < 0 {
 				dcnt++
-				n.add(dcnt > 0, "obsolete    %d: %s", i, r)
+				r.String()
+				n.add(dcnt > 0, "obsolete    %3d: %s", i, String(r))
 				err := netlink.RouteDel(&r)
 				if err != nil {
-					logger.Errorf("cannot delete route %s: %s", r, err)
+					logger.Errorf("cannot delete route %s: %s", String(r), err)
 				}
 			} else {
-				n.add(dcnt > 0, "keep        %3d: %s", i, r)
+				n.add(dcnt > 0, "keep        %3d: %s", i, String(r))
 			}
 		} else {
 			ocnt++
+			//n.add(true, "other       %d: %s", i, String(r))
 		}
 	}
 
 	for i, r := range required {
 		if o := routes.Lookup(r); o < 0 {
 			ccnt++
-			n.add(true, "missing    *%3d: %s", i, r)
+			n.add(true, "missing    *%3d: %s", i, String(r))
 			err := netlink.RouteAdd(&r)
 			if err != nil {
-				logger.Errorf("cannot add route %s: %s", r, err)
+				logger.Errorf("cannot add route %s: %s", String(r), err)
 			}
 		}
 	}

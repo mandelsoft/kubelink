@@ -20,7 +20,6 @@ package broker
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"net/http"
 	"time"
@@ -36,8 +35,6 @@ type Server struct {
 
 	name string
 	mux  *Mux
-
-	certInfo *CertInfo
 }
 
 func NewServer(name string, mux *Mux) *Server {
@@ -50,19 +47,16 @@ func NewServer(name string, mux *Mux) *Server {
 
 // Start starts a  server.
 func (this *Server) Start(certInfo *CertInfo, bindAddress string, port int) {
-	var tlscfg *tls.Config
-
 	listenAddress := fmt.Sprintf("%s:%d", bindAddress, port)
 	if certInfo != nil {
 		this.Infof("starting %s as tls server (serving on %s)", this.name, listenAddress)
-		tlscfg = certInfo.ServerConfig()
 	} else {
 		this.Infof("starting %s as unsecured server (serving on %s)", this.name, listenAddress)
 	}
 	server := &tcp.Server{
 		Addr:      listenAddress,
 		Handler:   this.mux,
-		TLSConfig: tlscfg,
+		TLSConfig: certInfo.ServerConfig(),
 	}
 
 	ctxutil.WaitGroupAdd(this.mux.ctx)
@@ -76,7 +70,7 @@ func (this *Server) Start(certInfo *CertInfo, bindAddress string, port int) {
 	go func() {
 		var err error
 		this.Infof("server %q started", this.name)
-		if tlscfg != nil {
+		if certInfo != nil {
 			err = server.ListenAndServeTLS("", "")
 		} else {
 			err = server.ListenAndServe()

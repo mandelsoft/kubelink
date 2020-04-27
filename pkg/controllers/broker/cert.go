@@ -22,6 +22,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -55,7 +56,22 @@ func NewCertInfo(logger logger.LogContext, source certs.CertificateSource) *Cert
 	return i
 }
 
+func (this *CertInfo) UseTLS() bool {
+	return this != nil && this.CertificateSource != nil
+}
+
+func (this *CertInfo) Dial(endpoint string) (net.Conn, error) {
+	if this.UseTLS() {
+		return tls.Dial("tcp", endpoint, this.ClientConfig())
+	} else {
+		return net.Dial("tcp", endpoint)
+	}
+}
+
 func (this *CertInfo) certificateUpdated() {
+	if !this.UseTLS() {
+		return
+	}
 	this.lock.Lock()
 	defer this.lock.Unlock()
 
@@ -72,6 +88,9 @@ func (this *CertInfo) certificateUpdated() {
 }
 
 func (this *CertInfo) serverClientConfig(_ *tls.ClientHelloInfo) (*tls.Config, error) {
+	if !this.UseTLS() {
+		return nil, nil
+	}
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 	return &tls.Config{
@@ -83,6 +102,9 @@ func (this *CertInfo) serverClientConfig(_ *tls.ClientHelloInfo) (*tls.Config, e
 }
 
 func (this *CertInfo) ServerConfig() *tls.Config {
+	if !this.UseTLS() {
+		return nil
+	}
 	return &tls.Config{
 		NextProtos:         []string{"h2"},
 		GetCertificate:     this.GetCertificate,
@@ -92,6 +114,9 @@ func (this *CertInfo) ServerConfig() *tls.Config {
 }
 
 func (this *CertInfo) ClientConfig() *tls.Config {
+	if !this.UseTLS() {
+		return nil
+	}
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 
@@ -107,10 +132,18 @@ func (this *reconciler) CreateSecretCertificateSource() (certs.CertificateSource
 	cntr := this.Controller()
 	namespace := cntr.GetEnvironment().Namespace()
 	cluster := cntr.GetMainCluster()
-	secret := certsecret.NewSecret(cluster, resources.NewObjectName(namespace, this.config.Secret))
+	secret := certsecret.NewSecret(cluster, resources.NewObjectName(namespace, this.config.Secret), certsecret.TLSKeys())
 
-	var certcfg *certmgmt.Config
+	this.Controller().Infof("TLS secret is %s", secret)
 	hosts := certmgmt.NewCompoundHosts()
+	certcfg := &certmgmt.Config{
+		CommonName:        this.config.DNSName,
+		Organization:      []string{"gardener.cloud"},
+		Validity:          10 * 24 * time.Hour,
+		Rest:              24 * time.Hour,
+		Hosts:             hosts,
+		ExternallyManaged: true,
+	}
 
 	switch this.config.ManageMode {
 	case MANAGE_MODE_SELF:
@@ -122,14 +155,8 @@ func (this *reconciler) CreateSecretCertificateSource() (certs.CertificateSource
 			cntr.Infof("using service for certificate: %s/%s", this.config.Service, namespace)
 			hosts.Add(certmgmt.NewServiceHosts(this.config.Service, namespace))
 		}
+		certcfg.ExternallyManaged = false
 		cntr.Infof("using certificate for ips: %v, dns: %v", hosts.GetIPs(), hosts.GetDNSNames())
-		certcfg = &certmgmt.Config{
-			CommonName:   this.config.DNSName,
-			Organization: []string{"kubernetes"},
-			Validity:     10 * 24 * time.Hour,
-			Rest:         24 * time.Hour,
-			Hosts:        hosts,
-		}
 	case MANAGE_MODE_CERT:
 		template := `
 apiVersion: cert.gardener.cloud/v1alpha1

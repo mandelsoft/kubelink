@@ -110,6 +110,7 @@ func NewTun(logger logger.LogContext, clusterAddress net.IP, clusterCIDR *net.IP
 	addr := &netlink.Addr{
 		IPNet: &cidr,
 	}
+	logger.Infof("adding address %s to %q", cidr.String(), tun)
 	err = netlink.AddrAdd(link, addr)
 	if err != nil {
 		result.Close()

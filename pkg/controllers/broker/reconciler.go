@@ -97,14 +97,8 @@ func (this *reconciler) RequiredRoutes() kubelink.Routes {
 ///////////////////////////////////////////////////////////////////////////////
 
 func (this *reconciler) Setup() {
-	this.Reconciler.Setup()
-	tun, err := NewTun(this.Controller(), this.config.ClusterAddress, this.config.ClusterCIDR)
-	if err != nil {
-		panic(fmt.Errorf("cannot setup tun device: %s", err))
-	}
-
+	var err error
 	var certificate certs.CertificateSource
-	var certInfo *CertInfo
 	if this.config.CertFile != "" {
 		certificate, err = this.CreateFileCertificateSource()
 	} else {
@@ -116,18 +110,24 @@ func (this *reconciler) Setup() {
 		panic(fmt.Errorf("cannot setup tls: %s", err))
 	}
 
+	this.Reconciler.Setup()
+	tun, err := NewTun(this.Controller(), this.config.ClusterAddress, this.config.ClusterCIDR)
+	if err != nil {
+		panic(fmt.Errorf("cannot setup tun device: %s", err))
+	}
+
 	if certificate != nil {
 		if _, err := certificate.GetCertificate(nil); err != nil {
 			panic(fmt.Errorf("no TLS certificate: %s", err))
 		}
-		certInfo = NewCertInfo(this.Controller(), certificate)
+		this.certInfo = NewCertInfo(this.Controller(), certificate)
 	}
 
 	var local []net.IPNet
 	if this.config.ServiceCIDR != nil {
 		local = append(local, *this.config.ServiceCIDR)
 	}
-	mux := NewMux(this.Controller().GetContext(), this.Controller(), certInfo, this.config.ClusterCIDR, local, tun, this.Links(), this)
+	mux := NewMux(this.Controller().GetContext(), this.Controller(), this.certInfo, this.config.ClusterCIDR, local, tun, this.Links(), this)
 	go func() {
 		<-this.Controller().GetContext().Done()
 		this.Controller().Infof("closing tun device %q", tun)

@@ -33,6 +33,7 @@ type Routes []netlink.Route
 func (this Routes) Lookup(route netlink.Route) int {
 	for i, r := range this {
 		if r.LinkIndex == route.LinkIndex &&
+			r.Flags == route.Flags &&
 			r.Gw.Equal(route.Gw) &&
 			tcp.EqualCIDR(r.Dst, route.Dst) {
 			return i
@@ -49,6 +50,10 @@ func (this Routes) LookupAndLogMismatchReason(logger logger.LogContext, route ne
 		}
 		if !r.Gw.Equal(route.Gw) {
 			logger.Infof("gateway mismatch for %s (%s!=%s)", r, r.Gw, route.Gw.String())
+			continue
+		}
+		if r.Flags != route.Flags {
+			logger.Infof("flag mismatch for %s (%x!=%x)", r, r.Flags, route.Flags)
 			continue
 		}
 		if !tcp.EqualCIDR(r.Dst, route.Dst) {

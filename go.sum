@@ -94,6 +94,16 @@ github.com/gardener/controller-manager-library v0.1.1-0.20200426110940-c0ba4c436
 github.com/gardener/controller-manager-library v0.1.1-0.20200426110940-c0ba4c4360c3/go.mod h1:na/VUlfk9pGOkMqyUiOMxUuzW5sLdE8oZalGFUbaW9Y=
 github.com/gardener/controller-manager-library v0.1.1-0.20200426112521-e3c295a0ac4f h1:LeR/KZoI+A8ueDl7Ak8ut3adLQvJEC7DfjrDgw3N0Ek=
 github.com/gardener/controller-manager-library v0.1.1-0.20200426112521-e3c295a0ac4f/go.mod h1:na/VUlfk9pGOkMqyUiOMxUuzW5sLdE8oZalGFUbaW9Y=
+github.com/gardener/controller-manager-library v0.1.1-0.20200427080914-f25449bffc8d h1:WSJRcZhnFKA1KdvM/AKikuko1l3Q6Eg2uXHw4XCPpBs=
+github.com/gardener/controller-manager-library v0.1.1-0.20200427080914-f25449bffc8d/go.mod h1:na/VUlfk9pGOkMqyUiOMxUuzW5sLdE8oZalGFUbaW9Y=
+github.com/gardener/controller-manager-library v0.1.1-0.20200427081239-b239af3c75f7 h1:2XT8/sfqcXp1MwOAGAiomC+6iSlGLYqifM8cVlOEAD4=
+github.com/gardener/controller-manager-library v0.1.1-0.20200427081239-b239af3c75f7/go.mod h1:na/VUlfk9pGOkMqyUiOMxUuzW5sLdE8oZalGFUbaW9Y=
+github.com/gardener/controller-manager-library v0.1.1-0.20200427103306-6cd4ff0ed323 h1:CJPtvn0E57uuzozwWbuNhSlOPMmbKOWa9kfDA3QGThk=
+github.com/gardener/controller-manager-library v0.1.1-0.20200427103306-6cd4ff0ed323/go.mod h1:na/VUlfk9pGOkMqyUiOMxUuzW5sLdE8oZalGFUbaW9Y=
+github.com/gardener/controller-manager-library v0.1.1-0.20200427114550-26c502e184e2 h1:d3kOBkz39jsYgla2qaNzCHVNQ3D7Txgi7nxGK6KG3ws=
+github.com/gardener/controller-manager-library v0.1.1-0.20200427114550-26c502e184e2/go.mod h1:na/VUlfk9pGOkMqyUiOMxUuzW5sLdE8oZalGFUbaW9Y=
+github.com/gardener/controller-manager-library v0.1.1-0.20200427122100-01bde615c213 h1:QMg/iKUrGYFkGEZZj1hGuCucdJlVVCd5N3FiyUmkL4k=
+github.com/gardener/controller-manager-library v0.1.1-0.20200427122100-01bde615c213/go.mod h1:na/VUlfk9pGOkMqyUiOMxUuzW5sLdE8oZalGFUbaW9Y=
 github.com/ghodss/yaml v0.0.0-20150909031657-73d445a93680/go.mod h1:4dBDuWmgqj2HViK6kFavaiC9ZROes6MMH2rRYeMEF04=
 github.com/ghodss/yaml v1.0.0/go.mod h1:4dBDuWmgqj2HViK6kFavaiC9ZROes6MMH2rRYeMEF04=
 github.com/globalsign/mgo v0.0.0-20180905125535-1ca0a4f7cbcb/go.mod h1:xkRDCp4j0OGD1HRkm4kmhM+pmpv3AKq5SU7GMg4oO/Q=

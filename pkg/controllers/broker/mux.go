@@ -20,6 +20,7 @@ package broker
 
 import (
 	"context"
+	"crypto/tls"
 	"io"
 	"net"
 	"os"
@@ -37,11 +38,11 @@ type LinkFailHandler interface {
 
 type Mux struct {
 	logger.LogContext
-	lock     sync.RWMutex
-	ctx      context.Context
-	certInfo *CertInfo
-	byIP     map[string]*TunnelConnection
-	errors   map[string]error
+	lock        sync.RWMutex
+	ctx         context.Context
+	certInfo    *CertInfo
+	byClusterIP map[string][]*TunnelConnection
+	errors      map[string]error
 
 	clusterCIDR *net.IPNet
 	links       *kubelink.Links
@@ -56,7 +57,7 @@ func NewMux(ctx context.Context, logger logger.LogContext, certInfo *CertInfo, c
 		ctx:         ctx,
 		certInfo:    certInfo,
 		links:       links,
-		byIP:        map[string]*TunnelConnection{},
+		byClusterIP: map[string][]*TunnelConnection{},
 		errors:      map[string]error{},
 		tun:         tun,
 		clusterCIDR: clusterCIDR,
@@ -79,47 +80,112 @@ func (this *Mux) RegisterFailHandler(handlers ...LinkFailHandler) {
 	this.handlers = append(this.handlers, handlers...)
 }
 
-func (this *Mux) GetConnection(ip net.IP) *TunnelConnection {
-	this.lock.RLock()
-
+func (this *Mux) queryClusterConnection(ip net.IP) (*TunnelConnection, string) {
 	ips := ip.String()
 
-	t := this.byIP[ips]
+	for _, t := range this.byClusterIP[ips] {
+		return t, ips
+	}
+	return nil, ips
+}
+
+func (this *Mux) QueryConnectionForIP(ip net.IP) (*TunnelConnection, *kubelink.Link) {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+
+	t, _ := this.queryClusterConnection(ip)
 	if t != nil {
-		this.lock.RUnlock()
-		return t
+		return t, nil
 	}
 	l, _ := this.links.GetLinkForIP(ip)
-
 	if l == nil {
-		this.lock.RUnlock()
-		return nil
+		return nil, nil
 	}
-	t = this.byIP[l.ClusterAddress.String()]
-	if t != nil {
-		this.lock.RUnlock()
+	t, _ = this.queryClusterConnection(l.ClusterAddress)
+	return t, l
+}
+
+func (this *Mux) GetConnectionForIP(ip net.IP) *TunnelConnection {
+
+	t, l := this.QueryConnectionForIP(ip)
+	if t != nil || l == nil {
 		return t
 	}
-	this.lock.RUnlock()
 	return this.AssureTunnel(l)
+}
+
+func (this *Mux) AssureTunnel(link *kubelink.Link) *TunnelConnection {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+
+	t, ips := this.queryClusterConnection(link.ClusterAddress)
+	if t != nil {
+		return t
+	}
+	t, err := DialTunnelConnection(this, link, this)
+	if err != nil {
+		this.errors[ips] = err
+		logger.Errorf("cannot initialize connection to %s: %s", link, err)
+		return nil
+	}
+	this.addTunnel(t)
+	return t
+}
+
+func (this *Mux) AddTunnel(t *TunnelConnection) {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	this.addTunnel(t)
+}
+
+func (this *Mux) addTunnel(t *TunnelConnection) {
+	if t.clusterAddress != nil {
+		ips := t.clusterAddress.String()
+		delete(this.errors, ips)
+		list := this.byClusterIP[ips]
+		for _, c := range list {
+			if c == t {
+				return
+			}
+		}
+		this.byClusterIP[ips] = append(list, t)
+	}
 }
 
 func (this *Mux) RemoveTunnel(t *TunnelConnection) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
+	this.removeTunnel(t)
+}
 
+func (this *Mux) removeTunnel(t *TunnelConnection) {
+	ips := t.clusterAddress.String()
 	t.Close()
-	delete(this.byIP, t.clusterAddress.String())
+	list := this.byClusterIP[ips]
+	if len(list) > 0 {
+		for i, c := range list {
+			if c == t {
+				list = append(list[:i], list[i+1:]...)
+				break
+			}
+		}
+	}
+	if len(list) == 0 {
+		delete(this.byClusterIP, ips)
+	} else {
+		this.byClusterIP[ips] = list
+	}
 }
 
 func (this *Mux) NotifyFailed(t *TunnelConnection, err error) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 
-	this.Errorf("connection %s aborted; %s", t, err)
+	if err != nil {
+		this.Errorf("connection %s aborted; %s", t, err)
+	}
 	this.errors[t.clusterAddress.String()] = err
-	t.Close()
-	delete(this.byIP, t.clusterAddress.String())
+	this.removeTunnel(t)
 	l, _ := this.links.GetLinkForIP(t.clusterAddress)
 	if l != nil {
 		this.notify(l, err)
@@ -132,38 +198,21 @@ func (this *Mux) notify(l *kubelink.Link, err error) {
 	}
 }
 
-func (this *Mux) AssureTunnel(link *kubelink.Link) *TunnelConnection {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-
-	ips := link.ClusterAddress.String()
-	t := this.byIP[ips]
-	if t != nil {
-		return t
-	}
-	t, err := DialTunnelConnection(this, link, this)
-	if err != nil {
-		this.errors[ips] = err
-		logger.Errorf("cannot initialize connection to %s: %s", link, err)
-		return nil
-	}
-	delete(this.errors, ips)
-	this.byIP[ips] = t
-	return t
-}
-
 func (this *Mux) Close(ip net.IP) error {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 
+	var err error
 	ips := ip.String()
-	t := this.byIP[ips]
-	if t == nil {
-		return nil
+	for _, t := range this.byClusterIP[ips] {
+		err2 := t.Close()
+		if err2 != nil {
+			err = err2
+		}
 	}
-	delete(this.byIP, ips)
+	delete(this.byClusterIP, ips)
 	delete(this.errors, ips)
-	return t.Close()
+	return err
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -177,7 +226,7 @@ func (this *Mux) FindConnection(packet []byte) *TunnelConnection {
 			return nil
 		}
 
-		t := this.GetConnection(header.Dst)
+		t := this.GetConnectionForIP(header.Dst)
 		if t != nil {
 			this.Infof("to %q: ipv4[%d]: (%d) hdr: %d, total: %d, prot: %d,  %s->%s\n", t.remoteAddress, header.Version, len(packet), header.Len, header.TotalLen, header.Protocol, header.Src, header.Dst)
 			return t
@@ -223,6 +272,36 @@ func (this *Mux) HandleTun() error {
 	}
 }
 
-func (this *Mux) ServeConnection(ctx context.Context, c net.Conn) {
-	ServeTunnelConnection(this, c)
+func (this *Mux) ServeConnection(ctx context.Context, conn net.Conn) {
+	var clusterAddress net.IP
+	remote := conn.RemoteAddr().String()
+
+	defer conn.Close()
+
+	tlsConn, ok := conn.(*tls.Conn)
+	if ok {
+		state := tlsConn.ConnectionState()
+		printConnState(this, state)
+		if len(state.PeerCertificates) > 0 {
+			cn := state.PeerCertificates[0].Subject.CommonName
+			l := this.links.GetLinkForEndpoint(cn)
+			if l == nil {
+				this.Errorf("unknown endpoint %s for connection from %s", cn, remote)
+				return
+			}
+			this.Infof("new tunnel connection for %s[%s] from %s", l.Name, l.ClusterAddress, remote)
+			clusterAddress = l.ClusterAddress
+		}
+	}
+	t := &TunnelConnection{
+		mux:            this,
+		conn:           conn,
+		clusterAddress: clusterAddress,
+		remoteAddress:  remote,
+	}
+	if t.clusterAddress != nil {
+		this.AddTunnel(t)
+		defer this.RemoveTunnel(t)
+	}
+	t.Serve()
 }

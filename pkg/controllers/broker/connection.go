@@ -26,6 +26,7 @@ import (
 	"sync"
 
 	"github.com/gardener/controller-manager-library/pkg/logger"
+	"github.com/vishvananda/netlink"
 	"golang.org/x/net/ipv4"
 
 	"github.com/mandelsoft/k8sbridge/pkg/kubelink"
@@ -52,15 +53,8 @@ func (this *TunnelConnection) String() string {
 }
 
 func DialTunnelConnection(mux *Mux, link *kubelink.Link, handlers ...ConnectionFailHandler) (*TunnelConnection, error) {
-	var conn net.Conn
-	var err error
-
-	mux.Infof("dialing to %s", link.Endpoint)
-	if mux.certInfo != nil {
-		conn, err = tls.Dial("tcp", link.Endpoint, mux.certInfo.ClientConfig())
-	} else {
-		conn, err = net.Dial("tcp", link.Endpoint)
-	}
+	mux.Infof("dialing for %s to %s", link.Name, link.Endpoint)
+	conn, err := mux.certInfo.Dial(link.Endpoint)
 	if err != nil {
 		mux.Errorf("dialing failed: %s", err)
 		return nil, err
@@ -73,6 +67,7 @@ func DialTunnelConnection(mux *Mux, link *kubelink.Link, handlers ...ConnectionF
 		remoteAddress:  conn.RemoteAddr().String(),
 		handlers:       append(handlers[:0:0], handlers...),
 	}
+	netlink.Iptun{}
 	go func() {
 		defer t.mux.RemoveTunnel(t)
 		mux.Infof("serving connection to %s", t.String())
@@ -113,41 +108,6 @@ func printConnState(log logger.LogContext, state tls.ConnectionState) {
 		log.Infof("   i:/C=%v/ST=%v/L=%v/O=%v/OU=%v/CN=%s", issuer.Country, issuer.Province, issuer.Locality, issuer.Organization, issuer.OrganizationalUnit, issuer.CommonName)
 	}
 	log.Info(">>>>>>>>>>>>>>>> State End <<<<<<<<<<<<<<<<")
-}
-
-func ServeTunnelConnection(mux *Mux, conn net.Conn) {
-	var clusterAddress net.IP
-	remote := conn.RemoteAddr().String()
-
-	defer conn.Close()
-
-	tlsConn, ok := conn.(*tls.Conn)
-	if ok {
-		err := tlsConn.Handshake()
-		if err != nil {
-			mux.Error("handshake error on connection from %s: %s", remote, err)
-			return
-		}
-		state := tlsConn.ConnectionState()
-		printConnState(mux, state)
-		if len(state.PeerCertificates) > 0 {
-			cn := state.PeerCertificates[0].Subject.CommonName
-			l := mux.links.GetLinkForEndpoint(cn)
-			if l == nil {
-				mux.Errorf("unknown endpoint %s for connection from %s", cn, remote)
-				return
-			}
-			mux.Infof("new tunnel conection for %s[%s] from %s", l.Name, l.ClusterAddress, remote)
-			clusterAddress = l.ClusterAddress
-		}
-	}
-	t := &TunnelConnection{
-		mux:            mux,
-		conn:           conn,
-		clusterAddress: clusterAddress,
-		remoteAddress:  remote,
-	}
-	t.Serve()
 }
 
 ////////////////////////////////////////////////////////////////////////////////

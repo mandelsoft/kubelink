@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/gardener/controller-manager-library/pkg/ctxutil"
-	"github.com/gardener/controller-manager-library/pkg/logger"
 )
 
 // A Handler serving a connection.
@@ -174,7 +173,6 @@ var ErrAbortHandler = errors.New("net/http: abort Handler")
 // Serve a new connection.
 func (c *conn) serve(ctx context.Context) {
 	c.remoteAddr = c.rwc.RemoteAddr().String()
-	logger.Infof("accept connection from %s", c.remoteAddr)
 	ctx = context.WithValue(ctx, LocalAddrContextKey, c.rwc.LocalAddr())
 	defer func() {
 		if err := recover(); err != nil && err != ErrAbortHandler {
@@ -195,7 +193,8 @@ func (c *conn) serve(ctx context.Context) {
 			c.rwc.SetWriteDeadline(time.Now().Add(d))
 		}
 		if err := tlsConn.Handshake(); err != nil {
-			c.server.logf("tcp: TLS handshake error from %s: %v", c.rwc.RemoteAddr(), err)
+			// TODO
+			//c.server.logf("tcp: TLS handshake error from %s: %v", c.rwc.RemoteAddr(), err)
 			return
 		}
 		c.tlsState = &tls.ConnectionState{}

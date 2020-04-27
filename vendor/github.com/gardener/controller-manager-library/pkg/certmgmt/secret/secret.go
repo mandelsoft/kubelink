@@ -33,30 +33,26 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
-const (
-	// CAKeyName is the name of the CA private key
-	CAKeyName = "ca-key.pem"
-	// CACertName is the name of the CA certificate
-	CACertName = "ca-certmgmt.pem"
-	// KeyName is the name of the server private key
-	KeyName = "key.pem"
-	// CertName is the name of the serving certificate
-	CertName = "certmgmt.pem"
-)
+////////////////////////////////////////////////////////////////////////////////
 
 var dataField = fieldpath.RequiredField(&corev1.Secret{}, ".Data")
 
 type secretCertificateAccess struct {
 	cluster cluster.Interface
 	name    resources.ObjectName
+	keys    []Keys
 }
 
 var _ certmgmt.CertificateAccess = &secretCertificateAccess{}
 
-func NewSecret(cluster cluster.Interface, name resources.ObjectName) certmgmt.CertificateAccess {
+func NewSecret(cluster cluster.Interface, name resources.ObjectName, keys ...Keys) certmgmt.CertificateAccess {
+	if len(keys) == 0 {
+		keys = []Keys{DefaultKeys()}
+	}
 	return &secretCertificateAccess{
 		cluster: cluster,
 		name:    name,
+		keys:    keys,
 	}
 }
 
@@ -73,14 +69,14 @@ func (this *secretCertificateAccess) Get(logger logger.LogContext) (certmgmt.Cer
 		}
 		return nil, nil
 	}
-	return dataToCertInfo(secret.GetData()), nil
+	return dataToCertInfo(secret.GetData(), this.keys), nil
 }
 
 func (this *secretCertificateAccess) Set(logger logger.LogContext, cert certmgmt.CertificateInfo) error {
 
 	r, _ := this.cluster.GetResource(schema.GroupKind{corev1.GroupName, "Secret"})
 	o := r.New(this.name)
-	data := certInfoToData(cert)
+	data := certInfoToData(cert, this.keys[0])
 	mod, err := resources.CreateOrModify(o, func(mod *resources.ModificationState) error {
 		mod.Set(dataField, data)
 		return nil
@@ -91,24 +87,53 @@ func (this *secretCertificateAccess) Set(logger logger.LogContext, cert certmgmt
 	return err
 }
 
-func dataToCertInfo(data map[string][]byte) certmgmt.CertificateInfo {
+func dataToCertInfo(data map[string][]byte, keys []Keys) certmgmt.CertificateInfo {
 	if data == nil {
 		return nil
 	}
-	_cert := data[CertName]
-	_key := data[KeyName]
-	_cacert := data[CACertName]
-	_cakey := data[CAKeyName]
+	var ok bool
+
+	var _cert []byte
+	for _, k := range keys {
+		_cert, ok = data[k.CertName]
+		if ok {
+			break
+		}
+	}
+
+	var _key []byte
+	for _, k := range keys {
+		_key, ok = data[k.KeyName]
+		if ok {
+			break
+		}
+	}
+
+	var _cacert []byte
+	for _, k := range keys {
+		_cacert, ok = data[k.CACertName]
+		if ok {
+			break
+		}
+	}
+
+	var _cakey []byte
+	for _, k := range keys {
+		_cakey, ok = data[k.CAKeyName]
+		if ok {
+			break
+		}
+	}
 
 	return certmgmt.NewCertInfo(_cert, _key, _cacert, _cakey)
 }
 
-func certInfoToData(cert certmgmt.CertificateInfo) map[string][]byte {
+func certInfoToData(cert certmgmt.CertificateInfo, keys Keys) map[string][]byte {
 	m := map[string][]byte{}
-	add(m, CACertName, cert.CACert())
-	add(m, CAKeyName, cert.CAKey())
-	add(m, CertName, cert.Cert())
-	add(m, KeyName, cert.Key())
+	add(m, keys.CACertName, cert.CACert())
+	add(m, keys.CAKeyName, cert.CAKey())
+	add(m, keys.CertName, cert.Cert())
+	add(m, keys.KeyName, cert.Key())
 	return m
 }
 

@@ -47,6 +47,8 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 	controller.Infof("using cluster cidr:  %s", this.config.ClusterCIDR)
 	controller.Infof("using cluster address: %s", this.config.ClusterAddress)
 	controller.Infof("serving links: %s", this.config.Responsible)
-	controller.Infof("using TLS secret %q with management mode %s", this.config.Secret, this.config.ManageMode)
+	if !Empty(this.config.Secret) {
+		controller.Infof("using TLS secret %q with management mode %s", this.config.Secret, this.config.ManageMode)
+	}
 	return this, nil
 }

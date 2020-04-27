@@ -103,7 +103,8 @@ type Links struct {
 
 func NewLinks() *Links {
 	return &Links{
-		links: map[string]*Link{},
+		links:     map[string]*Link{},
+		endpoints: map[string]*Link{},
 	}
 }
 
@@ -188,21 +189,34 @@ func (this *Links) GetRoutes(ifce *NodeInterface) Routes {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 
+	var flags netlink.NextHopFlag
+	index := ifce.Index
+	protocol := 0
+	i, err := netlink.LinkByName("tunl0")
+	if i != nil && err == nil {
+		index = i.Attrs().Index
+		fmt.Printf("*** found tun10[%d]\n", index)
+		flags = netlink.FLAG_ONLINK
+	}
 	routes := Routes{}
 	for _, l := range this.links {
 		if !l.Gateway.Equal(ifce.IP) {
 			r := netlink.Route{
 				Dst:       l.CIDR,
 				Gw:        l.Gateway,
-				LinkIndex: ifce.Index,
+				LinkIndex: index,
+				Protocol:  protocol,
 			}
+			r.SetFlag(flags)
 			routes.Add(r)
 
 			r = netlink.Route{
 				Dst:       l.ClusterCIDR,
 				Gw:        l.Gateway,
-				LinkIndex: ifce.Index,
+				LinkIndex: index,
+				Protocol:  protocol,
 			}
+			r.SetFlag(flags)
 			routes.Add(r)
 		}
 	}
