@@ -1,4 +1,4 @@
-module github.com/mandelsoft/k8sbridge
+module github.com/mandelsoft/kubelink
 
 go 1.13
 

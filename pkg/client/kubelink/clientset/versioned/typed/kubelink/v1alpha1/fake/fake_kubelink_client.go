@@ -19,7 +19,7 @@ limitations under the License.
 package fake
 
 import (
-	v1alpha1 "github.com/mandelsoft/k8sbridge/pkg/client/kubelink/clientset/versioned/typed/kubelink/v1alpha1"
+	v1alpha1 "github.com/mandelsoft/kubelink/pkg/client/kubelink/clientset/versioned/typed/kubelink/v1alpha1"
 	rest "k8s.io/client-go/rest"
 	testing "k8s.io/client-go/testing"
 )

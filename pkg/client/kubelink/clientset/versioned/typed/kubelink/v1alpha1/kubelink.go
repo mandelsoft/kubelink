@@ -21,8 +21,8 @@ package v1alpha1
 import (
 	"time"
 
-	v1alpha1 "github.com/mandelsoft/k8sbridge/pkg/apis/kubelink/v1alpha1"
-	scheme "github.com/mandelsoft/k8sbridge/pkg/client/kubelink/clientset/versioned/scheme"
+	v1alpha1 "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	scheme "github.com/mandelsoft/kubelink/pkg/client/kubelink/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"

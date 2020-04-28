@@ -15,7 +15,7 @@
 # limitations under the License.
 
 GITPROVIDER=github.com
-PROJECT=mandelsoft/k8sbridge
+PROJECT=mandelsoft/kubelink
 EXE=kubelink
 CMD=kubelink
 APINAME=kubelink

@@ -21,10 +21,10 @@ package v1alpha1
 import (
 	time "time"
 
-	kubelinkv1alpha1 "github.com/mandelsoft/k8sbridge/pkg/apis/kubelink/v1alpha1"
-	versioned "github.com/mandelsoft/k8sbridge/pkg/client/kubelink/clientset/versioned"
-	internalinterfaces "github.com/mandelsoft/k8sbridge/pkg/client/kubelink/informers/externalversions/internalinterfaces"
-	v1alpha1 "github.com/mandelsoft/k8sbridge/pkg/client/kubelink/listers/kubelink/v1alpha1"
+	kubelinkv1alpha1 "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	versioned "github.com/mandelsoft/kubelink/pkg/client/kubelink/clientset/versioned"
+	internalinterfaces "github.com/mandelsoft/kubelink/pkg/client/kubelink/informers/externalversions/internalinterfaces"
+	v1alpha1 "github.com/mandelsoft/kubelink/pkg/client/kubelink/listers/kubelink/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	watch "k8s.io/apimachinery/pkg/watch"

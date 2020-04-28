@@ -19,9 +19,9 @@ limitations under the License.
 package fake
 
 import (
-	clientset "github.com/mandelsoft/k8sbridge/pkg/client/kubelink/clientset/versioned"
-	kubelinkv1alpha1 "github.com/mandelsoft/k8sbridge/pkg/client/kubelink/clientset/versioned/typed/kubelink/v1alpha1"
-	fakekubelinkv1alpha1 "github.com/mandelsoft/k8sbridge/pkg/client/kubelink/clientset/versioned/typed/kubelink/v1alpha1/fake"
+	clientset "github.com/mandelsoft/kubelink/pkg/client/kubelink/clientset/versioned"
+	kubelinkv1alpha1 "github.com/mandelsoft/kubelink/pkg/client/kubelink/clientset/versioned/typed/kubelink/v1alpha1"
+	fakekubelinkv1alpha1 "github.com/mandelsoft/kubelink/pkg/client/kubelink/clientset/versioned/typed/kubelink/v1alpha1/fake"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"

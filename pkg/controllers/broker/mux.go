@@ -29,11 +29,11 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"golang.org/x/net/ipv4"
 
-	"github.com/mandelsoft/k8sbridge/pkg/kubelink"
+	"github.com/mandelsoft/kubelink/pkg/kubelink"
 )
 
-type LinkFailHandler interface {
-	NotifyFailed(*kubelink.Link, error)
+type LinkStateHandler interface {
+	Notify(*kubelink.Link, error)
 }
 
 type Mux struct {
@@ -44,14 +44,14 @@ type Mux struct {
 	byClusterIP map[string][]*TunnelConnection
 	errors      map[string]error
 
-	clusterCIDR *net.IPNet
-	links       *kubelink.Links
-	local       []net.IPNet
-	tun         *Tun
-	handlers    []LinkFailHandler
+	cluster  *net.IPNet
+	links    *kubelink.Links
+	local    []net.IPNet
+	tun      *Tun
+	handlers []LinkStateHandler
 }
 
-func NewMux(ctx context.Context, logger logger.LogContext, certInfo *CertInfo, clusterCIDR *net.IPNet, localCIDRs []net.IPNet, tun *Tun, links *kubelink.Links, handlers ...LinkFailHandler) *Mux {
+func NewMux(ctx context.Context, logger logger.LogContext, certInfo *CertInfo, cluster *net.IPNet, localCIDRs []net.IPNet, tun *Tun, links *kubelink.Links, handlers ...LinkStateHandler) *Mux {
 	return &Mux{
 		LogContext:  logger,
 		ctx:         ctx,
@@ -60,7 +60,7 @@ func NewMux(ctx context.Context, logger logger.LogContext, certInfo *CertInfo, c
 		byClusterIP: map[string][]*TunnelConnection{},
 		errors:      map[string]error{},
 		tun:         tun,
-		clusterCIDR: clusterCIDR,
+		cluster:     cluster,
 		local:       localCIDRs,
 		handlers:    append(handlers[:0:0], handlers...),
 	}
@@ -73,7 +73,7 @@ func (this *Mux) GetError(ip net.IP) error {
 	return this.errors[ip.String()]
 }
 
-func (this *Mux) RegisterFailHandler(handlers ...LinkFailHandler) {
+func (this *Mux) RegisterFailHandler(handlers ...LinkStateHandler) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 
@@ -148,7 +148,10 @@ func (this *Mux) addTunnel(t *TunnelConnection) {
 				return
 			}
 		}
+		this.errors[ips] = nil
 		this.byClusterIP[ips] = append(list, t)
+		l := this.links.GetLinkForClusterAddress(t.clusterAddress)
+		this.notify(l, nil)
 	}
 }
 
@@ -177,7 +180,7 @@ func (this *Mux) removeTunnel(t *TunnelConnection) {
 	}
 }
 
-func (this *Mux) NotifyFailed(t *TunnelConnection, err error) {
+func (this *Mux) Notify(t *TunnelConnection, err error) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 
@@ -193,8 +196,10 @@ func (this *Mux) NotifyFailed(t *TunnelConnection, err error) {
 }
 
 func (this *Mux) notify(l *kubelink.Link, err error) {
-	for _, h := range this.handlers {
-		h.NotifyFailed(l, err)
+	if l != nil {
+		for _, h := range this.handlers {
+			h.Notify(l, err)
+		}
 	}
 }
 
@@ -217,28 +222,29 @@ func (this *Mux) Close(ip net.IP) error {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (this *Mux) FindConnection(packet []byte) *TunnelConnection {
+func (this *Mux) FindConnection(log logger.LogContext, packet []byte) *TunnelConnection {
 	vers := int(packet[0]) >> 4
 	if vers == ipv4.Version {
 		header, err := ipv4.ParseHeader(packet)
 		if err != nil {
-			this.Errorf("err: %s", err)
+			log.Errorf("err: %s", err)
 			return nil
 		}
 
 		t := this.GetConnectionForIP(header.Dst)
 		if t != nil {
-			this.Infof("to %q: ipv4[%d]: (%d) hdr: %d, total: %d, prot: %d,  %s->%s\n", t.remoteAddress, header.Version, len(packet), header.Len, header.TotalLen, header.Protocol, header.Src, header.Dst)
+			log.Infof("receiving ipv4[%d]: (%d) hdr: %d, total: %d, prot: %d,  %s->%s to %s", header.Version, len(packet), header.Len, header.TotalLen, header.Protocol, header.Src, header.Dst, t.remoteAddress)
 			return t
 		}
-		this.Warnf("drop unknown dest: ipv4[%d]: (%d) hdr: %d, total: %d, prot: %d,  %s->%s\n", header.Version, len(packet), header.Len, header.TotalLen, header.Protocol, header.Src, header.Dst)
+		log.Warnf("drop unknown dest: ipv4[%d]: (%d) hdr: %d, total: %d, prot: %d,  %s->%s", header.Version, len(packet), header.Len, header.TotalLen, header.Protocol, header.Src, header.Dst)
 	} else {
-		this.Warnf("drop unknown packet (type %d)", vers)
+		log.Warnf("drop unknown packet (type %d)", vers)
 	}
 	return nil
 }
 
 func (this *Mux) HandleTun() error {
+	log := this.NewContext("source", "tun")
 	var buffer [BufferSize]byte
 	bytes := buffer[:]
 	working := false
@@ -247,13 +253,13 @@ func (this *Mux) HandleTun() error {
 		if n <= 0 || err != nil {
 			if err.Error() == "read /dev/net/tun: not pollable" {
 				if working {
-					this.Errorf("handle tun: err=%s", err)
+					log.Errorf("handle tun: err=%s", err)
 				}
 				this.tun.tun.ReadWriteCloser.(*os.File).Close()
 				return nil
 			}
 			if working {
-				this.Errorf("END: %d bytes, err=%s", n, err)
+				log.Errorf("END: %d bytes, err=%s", n, err)
 			}
 			if n <= 0 {
 				err = io.EOF
@@ -262,7 +268,7 @@ func (this *Mux) HandleTun() error {
 		}
 		working = true
 		packet := bytes[:n]
-		t := this.FindConnection(packet)
+		t := this.FindConnection(log, packet)
 		if t != nil {
 			err = t.WritePacket(packet)
 			if err != nil {
@@ -273,8 +279,9 @@ func (this *Mux) HandleTun() error {
 }
 
 func (this *Mux) ServeConnection(ctx context.Context, conn net.Conn) {
-	var clusterAddress net.IP
 	remote := conn.RemoteAddr().String()
+	this.Infof("new connection from %s", remote)
+	var clusterAddress net.IP
 
 	defer conn.Close()
 

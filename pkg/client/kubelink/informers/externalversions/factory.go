@@ -23,9 +23,9 @@ import (
 	sync "sync"
 	time "time"
 
-	versioned "github.com/mandelsoft/k8sbridge/pkg/client/kubelink/clientset/versioned"
-	internalinterfaces "github.com/mandelsoft/k8sbridge/pkg/client/kubelink/informers/externalversions/internalinterfaces"
-	kubelink "github.com/mandelsoft/k8sbridge/pkg/client/kubelink/informers/externalversions/kubelink"
+	versioned "github.com/mandelsoft/kubelink/pkg/client/kubelink/clientset/versioned"
+	internalinterfaces "github.com/mandelsoft/kubelink/pkg/client/kubelink/informers/externalversions/internalinterfaces"
+	kubelink "github.com/mandelsoft/kubelink/pkg/client/kubelink/informers/externalversions/kubelink"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"

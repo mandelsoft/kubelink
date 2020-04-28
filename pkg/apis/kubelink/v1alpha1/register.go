@@ -22,7 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/mandelsoft/k8sbridge/pkg/apis/kubelink"
+	"github.com/mandelsoft/kubelink/pkg/apis/kubelink"
 )
 
 const (

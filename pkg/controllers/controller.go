@@ -26,9 +26,9 @@ import (
 
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller"
 
-	"github.com/mandelsoft/k8sbridge/pkg/apis/kubelink/crds"
-	"github.com/mandelsoft/k8sbridge/pkg/apis/kubelink/v1alpha1"
-	"github.com/mandelsoft/k8sbridge/pkg/kubelink"
+	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/crds"
+	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	"github.com/mandelsoft/kubelink/pkg/kubelink"
 )
 
 const CMD_UPDATE = "update"

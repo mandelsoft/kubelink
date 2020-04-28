@@ -22,7 +22,7 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
 
-	"github.com/mandelsoft/k8sbridge/pkg/controllers"
+	"github.com/mandelsoft/kubelink/pkg/controllers"
 )
 
 func init() {

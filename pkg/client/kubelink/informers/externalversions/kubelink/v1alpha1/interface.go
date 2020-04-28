@@ -19,7 +19,7 @@ limitations under the License.
 package v1alpha1
 
 import (
-	internalinterfaces "github.com/mandelsoft/k8sbridge/pkg/client/kubelink/informers/externalversions/internalinterfaces"
+	internalinterfaces "github.com/mandelsoft/kubelink/pkg/client/kubelink/informers/externalversions/internalinterfaces"
 )
 
 // Interface provides access to all the informers in this group version.

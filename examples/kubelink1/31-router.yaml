@@ -1,52 +1,33 @@
----
-piVersion: v1
-kind: Service
+
+apiVersion: apps/v1
+kind: DaemonSet
 metadata:
   labels:
     app: kubelink
-  annotations:
-    dns.gardener.cloud/class: garden
-    dns.gardener.cloud/dnsnames: kubelink.kubelink1.ringdev.shoot.dev.k8s-hana.ondemand.com
-    dns.gardener.cloud/ttl: "500"
-  name: kubelink
+    component: kubelink-router
+  name: kubelink-router
   namespace: kube-system
 spec:
-  ports:
-    - name: http
-      port: 80
-      protocol: TCP
-      targetPort: 8088
-  sessionAffinity: None
-  type: LoadBalancer
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  labels:
-    app: kubelink-broker
-    component: kubelink-broker
-  name: kubelink
-  namespace: kube-system
-spec:
-  replicas: 1
+  selector:
+    matchLabels:
+      app: kubelink
+      component: kubelink-router
   template:
     metadata:
       labels:
         app: kubelink
-        component: kubelink-broker
+        component: kubelink-router
     spec:
       hostNetwork: true
       containers:
-        - name: broker
+        - name: router
           image: mandelsoft/kubelink:latest
           imagePullPolicy: "Always"
           args:
-            - --controllers=broker
+            - --controllers=router
             - --server-port-http=8080
-            - --broker-port=8088
             - --pod-cidr=100.96.0.0/11
             - --node-cidr=10.250.0.0/16
-            - --link-address=192.168.0.11/24
           securityContext:
             privileged: true
           livenessProbe:
@@ -59,8 +40,6 @@ spec:
           ports:
             - containerPort: 8080
               protocol: TCP
-          resources:
-            {}
 
       serviceAccountName: kubelink
       terminationGracePeriodSeconds: 120

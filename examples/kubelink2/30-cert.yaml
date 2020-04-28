@@ -1,0 +1,8 @@
+apiVersion: cert.gardener.cloud/v1alpha1
+kind: Certificate
+metadata:
+  name: kubelink
+  namespace: kube-system
+spec:
+  commonName: kubelink.kubelink2.ringdev.shoot.dev.k8s-hana.ondemand.com
+  secretName: kubelink

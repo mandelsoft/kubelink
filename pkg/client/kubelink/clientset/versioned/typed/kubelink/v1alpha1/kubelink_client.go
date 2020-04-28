@@ -19,8 +19,8 @@ limitations under the License.
 package v1alpha1
 
 import (
-	v1alpha1 "github.com/mandelsoft/k8sbridge/pkg/apis/kubelink/v1alpha1"
-	"github.com/mandelsoft/k8sbridge/pkg/client/kubelink/clientset/versioned/scheme"
+	v1alpha1 "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	"github.com/mandelsoft/kubelink/pkg/client/kubelink/clientset/versioned/scheme"
 	rest "k8s.io/client-go/rest"
 )
 

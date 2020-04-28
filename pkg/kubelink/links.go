@@ -31,7 +31,7 @@ import (
 	"github.com/vishvananda/netlink"
 	"k8s.io/apimachinery/pkg/labels"
 
-	"github.com/mandelsoft/k8sbridge/pkg/apis/kubelink/v1alpha1"
+	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 )
 
 const DEFAULT_PORT = 80
@@ -42,11 +42,16 @@ type Link struct {
 	ClusterAddress net.IP
 	ClusterCIDR    *net.IPNet
 	Gateway        net.IP
+	Host           string
 	Endpoint       string
 }
 
 func (this *Link) String() string {
-	return fmt.Sprintf("%s[%s,%s]", this.Name, this.Endpoint)
+	cidr := &net.IPNet{
+		IP:   this.ClusterAddress,
+		Mask: this.ClusterCIDR.Mask,
+	}
+	return fmt.Sprintf("%s[%s,%s,%s]", this.Name, cidr, this.CIDR, this.Endpoint)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -70,16 +75,19 @@ func LinkFor(link *v1alpha1.KubeLink) (*Link, error) {
 	if gateway == nil {
 		return nil, fmt.Errorf("invalid gateway address %q", link.Status.Gateway)
 	}
+	endpoint := link.Spec.Endpoint
+	parts := strings.Split(endpoint, ":")
+	if len(parts) == 1 {
+		endpoint = fmt.Sprintf("%s:%d", endpoint, DEFAULT_PORT)
+	}
 	l := &Link{
 		Name:           link.Name,
 		CIDR:           cidr,
 		ClusterCIDR:    ccidr,
 		ClusterAddress: ip,
 		Gateway:        gateway,
-		Endpoint:       link.Spec.Endpoint,
-	}
-	if strings.Index(l.Endpoint, ":") < 0 {
-		l.Endpoint = fmt.Sprintf("%s:%d", l.Endpoint, DEFAULT_PORT)
+		Host:           parts[0],
+		Endpoint:       endpoint,
 	}
 	return l, err
 }
@@ -123,7 +131,13 @@ func (this *Links) Setup(logger logger.LogContext, cluster cluster.Interface) {
 	list, _ := res.ListCached(labels.Everything())
 
 	for _, l := range list {
-		this.updateLink(l.Data().(*v1alpha1.KubeLink))
+		link, err := this.updateLink(l.Data().(*v1alpha1.KubeLink))
+		if link != nil {
+			logger.Infof("found link %s", link)
+		}
+		if err != nil {
+			logger.Infof("errorneous link %s: %s", l.GetName(), err)
+		}
 	}
 }
 
@@ -145,18 +159,22 @@ func (this *Links) updateLink(link *v1alpha1.KubeLink) (*Link, error) {
 		return nil, err
 	}
 	old := this.links[link.Name]
-	if old != nil && old.Endpoint != l.Endpoint {
-		delete(this.endpoints, old.Endpoint)
+	if old != nil && old.Host != l.Host {
+		delete(this.endpoints, old.Host)
 	}
 	this.links[link.Name] = l
-	this.endpoints[l.Endpoint] = l
+	this.endpoints[l.Host] = l
 	return l, nil
 }
 
 func (this *Links) RemoveLink(name string) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
-	delete(this.links, name)
+	l := this.links[name]
+	if l != nil {
+		delete(this.links, name)
+		delete(this.endpoints, l.Host)
+	}
 }
 
 func (this *Links) DeleteLink(name string) {
@@ -177,6 +195,17 @@ func (this *Links) GetLinkForIP(ip net.IP) (*Link, *net.IPNet) {
 		}
 	}
 	return nil, nil
+}
+
+func (this *Links) GetLinkForClusterAddress(ip net.IP) *Link {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+	for _, l := range this.links {
+		if l.ClusterAddress.Equal(ip) {
+			return l
+		}
+	}
+	return nil
 }
 
 func (this *Links) GetLinkForEndpoint(dnsname string) *Link {

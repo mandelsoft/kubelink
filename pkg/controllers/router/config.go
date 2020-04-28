@@ -23,7 +23,7 @@ import (
 
 	"github.com/gardener/controller-manager-library/pkg/config"
 
-	"github.com/mandelsoft/k8sbridge/pkg/controllers"
+	"github.com/mandelsoft/kubelink/pkg/controllers"
 )
 
 type Config struct {

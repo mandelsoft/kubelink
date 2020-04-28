@@ -25,7 +25,7 @@ import (
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netlink/nl"
 
-	"github.com/mandelsoft/k8sbridge/pkg/tcp"
+	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
 type Routes []netlink.Route

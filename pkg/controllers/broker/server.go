@@ -27,7 +27,7 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/ctxutil"
 	"github.com/gardener/controller-manager-library/pkg/logger"
 
-	"github.com/mandelsoft/k8sbridge/pkg/tcp"
+	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
 type Server struct {

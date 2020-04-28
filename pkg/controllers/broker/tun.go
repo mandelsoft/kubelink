@@ -26,7 +26,7 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/vishvananda/netlink"
 
-	"github.com/mandelsoft/k8sbridge/pkg/taptun"
+	"github.com/mandelsoft/kubelink/pkg/taptun"
 )
 
 const IPTAB = "nat"
@@ -59,9 +59,9 @@ func (this *Tun) Read(buf []byte) (int, error) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func NewTun(logger logger.LogContext, clusterAddress net.IP, clusterCIDR *net.IPNet) (*Tun, error) {
+func NewTun(logger logger.LogContext, name string, clusterAddress net.IP, clusterCIDR *net.IPNet) (*Tun, error) {
 
-	tun, err := taptun.NewTun("")
+	tun, err := taptun.NewTun(name)
 	if err != nil {
 		return nil, fmt.Errorf("cannot create tun %q: %s", tun, err)
 	}

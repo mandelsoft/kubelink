@@ -28,7 +28,6 @@ spec:
             - --server-port-http=8080
             - --pod-cidr=100.96.0.0/11
             - --node-cidr=10.250.0.0/16
-            - --link-address=192.168.3.3/24
           securityContext:
             privileged: true
           livenessProbe:

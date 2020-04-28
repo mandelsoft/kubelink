@@ -24,10 +24,10 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
 	"github.com/vishvananda/netlink"
 
-	"github.com/mandelsoft/k8sbridge/pkg/apis/kubelink/v1alpha1"
-	"github.com/mandelsoft/k8sbridge/pkg/controllers"
-	"github.com/mandelsoft/k8sbridge/pkg/kubelink"
-	"github.com/mandelsoft/k8sbridge/pkg/tcp"
+	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	"github.com/mandelsoft/kubelink/pkg/controllers"
+	"github.com/mandelsoft/kubelink/pkg/kubelink"
+	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
 type reconciler struct {

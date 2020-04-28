@@ -22,7 +22,7 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
 
-	"github.com/mandelsoft/k8sbridge/pkg/controllers"
+	"github.com/mandelsoft/kubelink/pkg/controllers"
 )
 
 func init() {
@@ -50,5 +50,11 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 	if !Empty(this.config.Secret) {
 		controller.Infof("using TLS secret %q with management mode %s", this.config.Secret, this.config.ManageMode)
 	}
+	if this.config.Interface == "" {
+		controller.Infof("unsing dynamic tun interface name")
+	} else {
+		controller.Infof("using tun interface name: %s", this.config.Interface)
+	}
+
 	return this, nil
 }

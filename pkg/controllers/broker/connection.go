@@ -26,17 +26,16 @@ import (
 	"sync"
 
 	"github.com/gardener/controller-manager-library/pkg/logger"
-	"github.com/vishvananda/netlink"
 	"golang.org/x/net/ipv4"
 
-	"github.com/mandelsoft/k8sbridge/pkg/kubelink"
-	"github.com/mandelsoft/k8sbridge/pkg/tcp"
+	"github.com/mandelsoft/kubelink/pkg/kubelink"
+	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
 const BufferSize = 17000
 
 type ConnectionFailHandler interface {
-	NotifyFailed(*TunnelConnection, error)
+	Notify(*TunnelConnection, error)
 }
 
 type TunnelConnection struct {
@@ -67,16 +66,15 @@ func DialTunnelConnection(mux *Mux, link *kubelink.Link, handlers ...ConnectionF
 		remoteAddress:  conn.RemoteAddr().String(),
 		handlers:       append(handlers[:0:0], handlers...),
 	}
-	netlink.Iptun{}
 	go func() {
 		defer t.mux.RemoveTunnel(t)
 		mux.Infof("serving connection to %s", t.String())
-		t.mux.NotifyFailed(t, t.Serve())
+		t.mux.Notify(t, t.Serve())
 	}()
 	return t, nil
 }
 
-func (this *TunnelConnection) RegisterFailHandler(handlers ...ConnectionFailHandler) {
+func (this *TunnelConnection) RegisterStateHandler(handlers ...ConnectionFailHandler) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 
@@ -84,10 +82,13 @@ func (this *TunnelConnection) RegisterFailHandler(handlers ...ConnectionFailHand
 }
 
 func (this *TunnelConnection) notify(err error) {
+	if err == io.EOF {
+		return
+	}
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 	for _, h := range this.handlers {
-		h.NotifyFailed(this, err)
+		h.Notify(this, err)
 	}
 }
 
@@ -119,7 +120,7 @@ func (this *TunnelConnection) Close() error {
 func (this *TunnelConnection) Serve() error {
 	var buffer [BufferSize]byte
 	working := false
-	log := this.mux.NewContext("remote", this.remoteAddress)
+	log := this.mux.NewContext("source", this.remoteAddress)
 	for {
 		n, err := this.ReadPacket(buffer[:])
 		if n <= 0 || err != nil {
@@ -141,37 +142,41 @@ func (this *TunnelConnection) Serve() error {
 			header, err := ipv4.ParseHeader(packet)
 			if err != nil {
 				log.Errorf("err: %s", err)
+				continue
 			} else {
 				log.Infof("receiving ipv4[%d]: (%d) hdr: %d, total: %d, prot: %d,  %s->%s\n",
 					header.Version, len(packet), header.Len, header.TotalLen, header.Protocol, header.Src, header.Dst)
-				if !this.mux.clusterCIDR.Contains(header.Src) {
-					log.Warnf("  dropping packet because of non-matching source address [%s]", this.mux.clusterCIDR, header.Src)
-					continue
-				} else {
+				if this.mux.cluster.Contains(header.Src) {
 					if this.clusterAddress == nil {
 						this.clusterAddress = header.Src
-					} else {
-						log.Warnf("  dropping packet because of non-matching source address [%s]", this.clusterAddress, header.Dst)
+						log.Infof("restricting connection to cluster %s", header.Src)
+					}
+					if len(this.mux.local) > 0 {
+						found := false
+						for _, local := range this.mux.local {
+							if local.Contains(header.Dst) {
+								found = true
+								break
+							}
+						}
+						if !found {
+							log.Warnf("  dropping packet because of non-matching destination address [%s]", this.mux.cluster, header.Src)
+							continue
+						}
+					}
+				} else {
+					if !header.Dst.Equal(this.mux.cluster.IP) {
+						log.Warnf("  dropping packet because of non-matching destination address [%s<>%s]", this.mux.cluster.IP, header.Dst)
 						continue
 					}
-				}
-			}
-			if len(this.mux.local) > 0 {
-				use := false
-				for _, cidr := range this.mux.local {
-					if cidr.Contains(header.Dst) {
-						use = true
-						break
-					}
-				}
-				if !use {
-					log.Warnf("dropping packet to %q", header.Dst)
 				}
 			}
 		}
 		o, err := this.mux.tun.Write(buffer[:n])
 		if err != nil {
-			log.Infof(" connection aborted: %s", err)
+			if err != io.EOF {
+				log.Infof(" connection aborted: cannot write tun: %s", err)
+			}
 			return err
 		}
 		if n != o {

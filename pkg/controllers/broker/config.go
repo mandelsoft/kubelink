@@ -26,8 +26,8 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/config"
 	"github.com/gardener/controller-manager-library/pkg/utils"
 
-	"github.com/mandelsoft/k8sbridge/pkg/apis/kubelink/v1alpha1"
-	"github.com/mandelsoft/k8sbridge/pkg/controllers"
+	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	"github.com/mandelsoft/kubelink/pkg/controllers"
 )
 
 const MANAGE_MODE_NONE = "none"
@@ -59,6 +59,7 @@ type Config struct {
 	ManageMode string
 	DNSName    string
 	Service    string
+	Interface  string
 }
 
 func (this *Config) AddOptionsToSet(set config.OptionSet) {
@@ -74,6 +75,7 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.ManageMode, "secret-manage-mode", "", MANAGE_MODE_NONE, "Manage mode for TLS secret")
 	set.AddStringOption(&this.DNSName, "dns-name", "", "", "DNS Name for managed certificate")
 	set.AddStringOption(&this.Service, "service", "", "", "Service name for managed certificate")
+	set.AddStringOption(&this.Interface, "ifce-name", "", "", "Name of the tun interface")
 }
 
 func Empty(s string) bool {

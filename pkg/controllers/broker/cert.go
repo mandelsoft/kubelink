@@ -117,12 +117,20 @@ func (this *CertInfo) ClientConfig() *tls.Config {
 	if !this.UseTLS() {
 		return nil
 	}
+
+	cert, err := this.GetCertificate(nil)
+	if err != nil {
+		logger.Errorf("cannot get client cert: %s", err)
+		return nil
+	}
+
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 
+	logger.Infof("dialing with client cert [%v]", this.roots)
 	return &tls.Config{
-		GetCertificate: this.GetCertificate,
-		RootCAs:        this.roots,
+		Certificates: []tls.Certificate{*cert},
+		RootCAs:      this.roots,
 	}
 }
 

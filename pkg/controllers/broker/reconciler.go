@@ -27,13 +27,14 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/certs"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
 	"github.com/gardener/controller-manager-library/pkg/ctxutil"
+	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
 	"github.com/vishvananda/netlink"
 
-	"github.com/mandelsoft/k8sbridge/pkg/apis/kubelink/v1alpha1"
-	"github.com/mandelsoft/k8sbridge/pkg/controllers"
-	"github.com/mandelsoft/k8sbridge/pkg/kubelink"
-	"github.com/mandelsoft/k8sbridge/pkg/tcp"
+	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	"github.com/mandelsoft/kubelink/pkg/controllers"
+	"github.com/mandelsoft/kubelink/pkg/kubelink"
+	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
 type reconciler struct {
@@ -111,7 +112,7 @@ func (this *reconciler) Setup() {
 	}
 
 	this.Reconciler.Setup()
-	tun, err := NewTun(this.Controller(), this.config.ClusterAddress, this.config.ClusterCIDR)
+	tun, err := NewTun(this.Controller(), this.config.Interface, this.config.ClusterAddress, this.config.ClusterCIDR)
 	if err != nil {
 		panic(fmt.Errorf("cannot setup tun device: %s", err))
 	}
@@ -127,7 +128,11 @@ func (this *reconciler) Setup() {
 	if this.config.ServiceCIDR != nil {
 		local = append(local, *this.config.ServiceCIDR)
 	}
-	mux := NewMux(this.Controller().GetContext(), this.Controller(), this.certInfo, this.config.ClusterCIDR, local, tun, this.Links(), this)
+	cidr := &net.IPNet{
+		IP:   this.config.ClusterAddress,
+		Mask: this.config.ClusterCIDR.Mask,
+	}
+	mux := NewMux(this.Controller().GetContext(), this.Controller(), this.certInfo, cidr, local, tun, this.Links(), this)
 	go func() {
 		<-this.Controller().GetContext().Done()
 		this.Controller().Infof("closing tun device %q", tun)
@@ -154,7 +159,7 @@ func (this *reconciler) Start() {
 				this.mux.tun.Close()
 				time.Sleep(100 * time.Millisecond)
 				this.Controller().Infof("recreating tun device")
-				this.mux.tun, err = NewTun(this.Controller(), this.config.ClusterAddress, this.config.ClusterCIDR)
+				this.mux.tun, err = NewTun(this.Controller(), this.config.Interface, this.config.ClusterAddress, this.config.ClusterCIDR)
 				if err != nil {
 					panic(fmt.Errorf("cannot setup tun device: %s", err))
 				}
@@ -163,7 +168,45 @@ func (this *reconciler) Start() {
 	}()
 }
 
-func (this *reconciler) NotifyFailed(l *kubelink.Link, err error) {
-	this.Controller().Infof("requeue kubelink %q for failure handling: %s", l.Name, err)
+func (this *reconciler) Command(logger logger.LogContext, cmd string) reconcile.Status {
+	this.reconcileTun(logger)
+	return this.Reconciler.Command(logger, cmd)
+}
+
+func (this *reconciler) reconcileTun(logger logger.LogContext) {
+	tun := this.mux.tun
+	cidr := *this.config.ClusterCIDR
+	cidr.IP = this.config.ClusterAddress
+
+	addrs, err := netlink.AddrList(tun.link, netlink.FAMILY_V4)
+
+	for _, a := range addrs {
+		if a.IP.Equal(this.config.ClusterAddress) {
+			logger.Infof("address still set for %q", tun)
+			return
+		}
+	}
+
+	addr := &netlink.Addr{
+		IPNet: &cidr,
+	}
+	logger.Infof("lost address -> adding address %s to %q", cidr.String(), tun)
+	err = netlink.AddrAdd(tun.link, addr)
+	if err != nil {
+		logger.Errorf("cannot add addr %q to %s: %s", addr, tun, err)
+	}
+
+	err = netlink.LinkSetUp(tun.link)
+	if err != nil {
+		logger.Errorf("cannot bring up %q: %s", tun, err)
+	}
+}
+
+func (this *reconciler) Notify(l *kubelink.Link, err error) {
+	if err != nil {
+		this.Controller().Infof("requeue kubelink %q for failure handling: %s", l.Name, err)
+	} else {
+		this.Controller().Infof("requeue kubelink %q for new connection")
+	}
 	this.Controller().EnqueueKey(resources.NewClusterKey(this.Controller().GetMainCluster().GetId(), v1alpha1.KUBELINK, "", l.Name))
 }

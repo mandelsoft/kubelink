@@ -28,7 +28,7 @@ import (
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 
-	"github.com/mandelsoft/k8sbridge/pkg"
+	"github.com/mandelsoft/kubelink/pkg"
 )
 
 const ROUTE = "192.168.3.0/24"

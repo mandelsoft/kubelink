@@ -19,8 +19,8 @@ limitations under the License.
 package kubelink
 
 import (
-	internalinterfaces "github.com/mandelsoft/k8sbridge/pkg/client/kubelink/informers/externalversions/internalinterfaces"
-	v1alpha1 "github.com/mandelsoft/k8sbridge/pkg/client/kubelink/informers/externalversions/kubelink/v1alpha1"
+	internalinterfaces "github.com/mandelsoft/kubelink/pkg/client/kubelink/informers/externalversions/internalinterfaces"
+	v1alpha1 "github.com/mandelsoft/kubelink/pkg/client/kubelink/informers/externalversions/kubelink/v1alpha1"
 )
 
 // Interface provides access to each of this group's versions.

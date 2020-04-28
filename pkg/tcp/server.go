@@ -22,6 +22,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"io"
 	"log"
 	"net"
 	"runtime"
@@ -168,7 +169,7 @@ func (c *conn) getState() (state ConnState, unixSec int64) {
 // While any panic from ServeHTTP aborts the response to the client,
 // panicking with ErrAbortHandler also suppresses logging of a stack
 // trace to the server's error log.
-var ErrAbortHandler = errors.New("net/http: abort Handler")
+var ErrAbortHandler = errors.New("tcp/tls: abort Handler")
 
 // Serve a new connection.
 func (c *conn) serve(ctx context.Context) {
@@ -193,8 +194,9 @@ func (c *conn) serve(ctx context.Context) {
 			c.rwc.SetWriteDeadline(time.Now().Add(d))
 		}
 		if err := tlsConn.Handshake(); err != nil {
-			// TODO
-			//c.server.logf("tcp: TLS handshake error from %s: %v", c.rwc.RemoteAddr(), err)
+			if err != io.EOF {
+				c.server.logf("tcp: TLS handshake error from %s: %v", c.rwc.RemoteAddr(), err)
+			}
 			return
 		}
 		c.tlsState = &tls.ConnectionState{}
