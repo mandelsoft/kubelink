@@ -128,11 +128,11 @@ func (this *reconciler) Setup() {
 	if this.config.ServiceCIDR != nil {
 		local = append(local, *this.config.ServiceCIDR)
 	}
-	cidr := &net.IPNet{
+	addr := &net.IPNet{
 		IP:   this.config.ClusterAddress,
 		Mask: this.config.ClusterCIDR.Mask,
 	}
-	mux := NewMux(this.Controller().GetContext(), this.Controller(), this.certInfo, cidr, local, tun, this.Links(), this)
+	mux := NewMux(this.Controller().GetContext(), this.Controller(), this.certInfo, uint16(this.config.AdvertizedPort), addr, local, tun, this.Links(), this)
 	go func() {
 		<-this.Controller().GetContext().Done()
 		this.Controller().Infof("closing tun device %q", tun)
@@ -206,7 +206,7 @@ func (this *reconciler) Notify(l *kubelink.Link, err error) {
 	if err != nil {
 		this.Controller().Infof("requeue kubelink %q for failure handling: %s", l.Name, err)
 	} else {
-		this.Controller().Infof("requeue kubelink %q for new connection")
+		this.Controller().Infof("requeue kubelink %q for new connection", l.Name)
 	}
 	this.Controller().EnqueueKey(resources.NewClusterKey(this.Controller().GetMainCluster().GetId(), v1alpha1.KUBELINK, "", l.Name))
 }

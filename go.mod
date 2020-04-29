@@ -16,6 +16,7 @@ require (
 	golang.org/x/lint v0.0.0-20190313153728-d0100b6bd8b3
 	golang.org/x/net v0.0.0-20200301022130-244492dfa37a
 	golang.org/x/sys v0.0.0-20200121082415-34d275377bf9
+	google.golang.org/appengine v1.5.0
 	k8s.io/apimachinery v0.16.4
 	k8s.io/client-go v0.16.4
 	k8s.io/code-generator v0.16.4

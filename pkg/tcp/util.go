@@ -64,3 +64,9 @@ func EqualCIDR(a, b *net.IPNet) bool {
 	}
 	return true
 }
+
+func CIDR(cidr *net.IPNet) *net.IPNet {
+	new := *cidr
+	new.IP = cidr.IP.Mask(cidr.Mask)
+	return &new
+}

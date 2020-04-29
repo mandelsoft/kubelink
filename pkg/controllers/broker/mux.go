@@ -21,9 +21,11 @@ package broker
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/gardener/controller-manager-library/pkg/logger"
@@ -44,14 +46,16 @@ type Mux struct {
 	byClusterIP map[string][]*TunnelConnection
 	errors      map[string]error
 
-	cluster  *net.IPNet
-	links    *kubelink.Links
-	local    []net.IPNet
-	tun      *Tun
-	handlers []LinkStateHandler
+	port        uint16
+	clusterAddr *net.IPNet
+	links       *kubelink.Links
+	local       []net.IPNet
+	tun         *Tun
+	handlers    []LinkStateHandler
+	autoconnect bool
 }
 
-func NewMux(ctx context.Context, logger logger.LogContext, certInfo *CertInfo, cluster *net.IPNet, localCIDRs []net.IPNet, tun *Tun, links *kubelink.Links, handlers ...LinkStateHandler) *Mux {
+func NewMux(ctx context.Context, logger logger.LogContext, certInfo *CertInfo, port uint16, addr *net.IPNet, localCIDRs []net.IPNet, tun *Tun, links *kubelink.Links, handlers ...LinkStateHandler) *Mux {
 	return &Mux{
 		LogContext:  logger,
 		ctx:         ctx,
@@ -60,10 +64,15 @@ func NewMux(ctx context.Context, logger logger.LogContext, certInfo *CertInfo, c
 		byClusterIP: map[string][]*TunnelConnection{},
 		errors:      map[string]error{},
 		tun:         tun,
-		cluster:     cluster,
+		port:        port,
+		clusterAddr: addr,
 		local:       localCIDRs,
 		handlers:    append(handlers[:0:0], handlers...),
 	}
+}
+
+func (this *Mux) SetAutoConnect(b bool) {
+	this.autoconnect = b
 }
 
 func (this *Mux) GetError(ip net.IP) error {
@@ -101,7 +110,7 @@ func (this *Mux) QueryConnectionForIP(ip net.IP) (*TunnelConnection, *kubelink.L
 	if l == nil {
 		return nil, nil
 	}
-	t, _ = this.queryClusterConnection(l.ClusterAddress)
+	t, _ = this.queryClusterConnection(l.ClusterAddress.IP)
 	return t, l
 }
 
@@ -118,18 +127,38 @@ func (this *Mux) AssureTunnel(link *kubelink.Link) *TunnelConnection {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 
-	t, ips := this.queryClusterConnection(link.ClusterAddress)
+	t, ips := this.queryClusterConnection(link.ClusterAddress.IP)
 	if t != nil {
 		return t
 	}
-	t, err := DialTunnelConnection(this, link, this)
+	t, err := this.dialTunnelConnection(link)
 	if err != nil {
 		this.errors[ips] = err
 		logger.Errorf("cannot initialize connection to %s: %s", link, err)
 		return nil
 	}
 	this.addTunnel(t)
+	go func() {
+		defer t.mux.RemoveTunnel(t)
+		this.Infof("serving connection to %s", t.String())
+		t.Serve()
+	}()
 	return t
+}
+
+func (this *Mux) dialTunnelConnection(link *kubelink.Link) (*TunnelConnection, error) {
+	this.Infof("dialing for %s to %s", link.Name, link.Endpoint)
+	conn, err := this.certInfo.Dial(link.Endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("dialing failed: %s", err)
+	}
+	t, hello, err := NewTunnelConnection(this, conn, link)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	_ = hello
+	return t, nil
 }
 
 func (this *Mux) AddTunnel(t *TunnelConnection) {
@@ -139,8 +168,8 @@ func (this *Mux) AddTunnel(t *TunnelConnection) {
 }
 
 func (this *Mux) addTunnel(t *TunnelConnection) {
-	if t.clusterAddress != nil {
-		ips := t.clusterAddress.String()
+	if t.clusterCIDR != nil {
+		ips := t.clusterCIDR.IP.String()
 		delete(this.errors, ips)
 		list := this.byClusterIP[ips]
 		for _, c := range list {
@@ -150,7 +179,7 @@ func (this *Mux) addTunnel(t *TunnelConnection) {
 		}
 		this.errors[ips] = nil
 		this.byClusterIP[ips] = append(list, t)
-		l := this.links.GetLinkForClusterAddress(t.clusterAddress)
+		l := this.links.GetLinkForClusterAddress(t.clusterCIDR.IP)
 		this.notify(l, nil)
 	}
 }
@@ -162,7 +191,7 @@ func (this *Mux) RemoveTunnel(t *TunnelConnection) {
 }
 
 func (this *Mux) removeTunnel(t *TunnelConnection) {
-	ips := t.clusterAddress.String()
+	ips := t.clusterCIDR.IP.String()
 	t.Close()
 	list := this.byClusterIP[ips]
 	if len(list) > 0 {
@@ -184,15 +213,13 @@ func (this *Mux) Notify(t *TunnelConnection, err error) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 
+	this.errors[t.clusterCIDR.IP.String()] = err
 	if err != nil {
-		this.Errorf("connection %s aborted; %s", t, err)
+		this.Errorf("connection %s aborted: %s", t, err)
+		this.removeTunnel(t)
 	}
-	this.errors[t.clusterAddress.String()] = err
-	this.removeTunnel(t)
-	l, _ := this.links.GetLinkForIP(t.clusterAddress)
-	if l != nil {
-		this.notify(l, err)
-	}
+	l, _ := this.links.GetLinkForIP(t.clusterCIDR.IP)
+	this.notify(l, err)
 }
 
 func (this *Mux) notify(l *kubelink.Link, err error) {
@@ -250,7 +277,7 @@ func (this *Mux) HandleTun() error {
 	working := false
 	for {
 		n, err := this.tun.Read(bytes)
-		if n <= 0 || err != nil {
+		if n < 0 || err != nil {
 			if err.Error() == "read /dev/net/tun: not pollable" {
 				if working {
 					log.Errorf("handle tun: err=%s", err)
@@ -266,6 +293,9 @@ func (this *Mux) HandleTun() error {
 			}
 			return err
 		}
+		if n == 0 {
+			continue
+		}
 		working = true
 		packet := bytes[:n]
 		t := this.FindConnection(log, packet)
@@ -279,36 +309,70 @@ func (this *Mux) HandleTun() error {
 }
 
 func (this *Mux) ServeConnection(ctx context.Context, conn net.Conn) {
-	remote := conn.RemoteAddr().String()
-	this.Infof("new connection from %s", remote)
-	var clusterAddress net.IP
-
+	var link *kubelink.Link
 	defer conn.Close()
+	fqdn := ""
+	remote := conn.RemoteAddr().String()
 
 	tlsConn, ok := conn.(*tls.Conn)
 	if ok {
 		state := tlsConn.ConnectionState()
 		printConnState(this, state)
 		if len(state.PeerCertificates) > 0 {
-			cn := state.PeerCertificates[0].Subject.CommonName
-			l := this.links.GetLinkForEndpoint(cn)
-			if l == nil {
-				this.Errorf("unknown endpoint %s for connection from %s", cn, remote)
+			fqdn = state.PeerCertificates[0].Subject.CommonName
+			link = this.links.GetLinkForEndpoint(fqdn)
+			if link == nil {
+				if !this.autoconnect {
+					this.Errorf("unknown endpoint %s for connection from %s", fqdn, remote)
+					return
+				}
+				this.Infof("tunnel connection requested for %s from %s-> using auto-connect", fqdn, remote)
+			} else {
+				this.Infof("tunnel connection for %s (%s[%s]) requested from %s", link.Name, fqdn, link.ClusterAddress.IP, remote)
+			}
+		}
+	} else {
+		this.Infof("tunnel connection requested from %s", remote)
+	}
+	t, hello, err := NewTunnelConnection(this, conn, link)
+	if err != nil {
+		this.Errorf("initiating tunnel from %s failed: %s", remote, err)
+		return
+	}
+	cidr := hello.GetClusterCIDR()
+	if t.clusterCIDR != nil {
+		if !t.clusterCIDR.Contains(cidr.IP) {
+			this.Errorf("remote cluster (%s) not in local range %s", cidr.IP, t.clusterCIDR)
+			return
+		}
+		if !cidr.Contains(t.clusterCIDR.IP) {
+			this.Errorf("local cluster (%s) not in remote range %s", t.clusterCIDR.IP, cidr)
+			return
+		}
+		defer this.RemoveTunnel(t)
+		this.AddTunnel(t)
+	} else {
+		if this.autoconnect {
+			adjusted := *cidr
+			adjusted.Mask = this.clusterAddr.Mask
+			if hello.GetPort() > 0 {
+				fqdn = fmt.Sprintf("%s:%d", fqdn, hello.GetPort())
+			}
+			l, err := this.links.RegisterLink(DefaultLinkName(cidr.IP), &adjusted, fqdn, hello.GetCIDR())
+			if err != nil {
+				this.Errorf("cannot auto-connect cluster %s: %s", cidr.IP, err)
 				return
 			}
-			this.Infof("new tunnel connection for %s[%s] from %s", l.Name, l.ClusterAddress, remote)
-			clusterAddress = l.ClusterAddress
+			this.Infof("auto-connected %s", l)
+			t.clusterCIDR = t.clusterCIDR
 		}
 	}
-	t := &TunnelConnection{
-		mux:            this,
-		conn:           conn,
-		clusterAddress: clusterAddress,
-		remoteAddress:  remote,
-	}
-	if t.clusterAddress != nil {
-		this.AddTunnel(t)
-		defer this.RemoveTunnel(t)
-	}
 	t.Serve()
+}
+
+func DefaultLinkName(ip net.IP) string {
+	s := ip.String()
+	s = strings.ReplaceAll(s, ".", "-")
+	s = strings.ReplaceAll(s, ":", "-")
+	return s
 }

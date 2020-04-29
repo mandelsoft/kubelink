@@ -28,10 +28,12 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller"
 	"github.com/gardener/controller-manager-library/pkg/ctxutil"
 	"github.com/gardener/controller-manager-library/pkg/logger"
+	"github.com/gardener/controller-manager-library/pkg/resources"
 	"github.com/vishvananda/netlink"
 	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
 const DEFAULT_PORT = 80
@@ -39,19 +41,14 @@ const DEFAULT_PORT = 80
 type Link struct {
 	Name           string
 	CIDR           *net.IPNet
-	ClusterAddress net.IP
-	ClusterCIDR    *net.IPNet
+	ClusterAddress *net.IPNet
 	Gateway        net.IP
 	Host           string
 	Endpoint       string
 }
 
 func (this *Link) String() string {
-	cidr := &net.IPNet{
-		IP:   this.ClusterAddress,
-		Mask: this.ClusterCIDR.Mask,
-	}
-	return fmt.Sprintf("%s[%s,%s,%s]", this.Name, cidr, this.CIDR, this.Endpoint)
+	return fmt.Sprintf("%s[%s,%s,%s]", this.Name, this.ClusterAddress, this.CIDR, this.Endpoint)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -65,6 +62,7 @@ func LinkFor(link *v1alpha1.KubeLink) (*Link, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid cluster address %q: %s", link.Spec.ClusterAddress, err)
 	}
+	ccidr.IP = ip
 	if link.Spec.Endpoint == "" {
 		return nil, fmt.Errorf("no endpoint")
 	}
@@ -83,8 +81,7 @@ func LinkFor(link *v1alpha1.KubeLink) (*Link, error) {
 	l := &Link{
 		Name:           link.Name,
 		CIDR:           cidr,
-		ClusterCIDR:    ccidr,
-		ClusterAddress: ip,
+		ClusterAddress: ccidr,
 		Gateway:        gateway,
 		Host:           parts[0],
 		Endpoint:       endpoint,
@@ -98,19 +95,25 @@ var linksKey = ctxutil.SimpleKey("kubelinks")
 
 func GetSharedLinks(controller controller.Interface) *Links {
 	return controller.GetEnvironment().GetOrCreateSharedValue(linksKey, func() interface{} {
-		return NewLinks()
+		resc, err := controller.GetMainCluster().Resources().Get(&v1alpha1.KubeLink{})
+		if err != nil {
+			controller.Errorf("cannot get kubelink resource: %s", err)
+		}
+		return NewLinks(resc)
 	}).(*Links)
 }
 
 type Links struct {
 	lock        sync.RWMutex
+	resource    resources.Interface
 	initialized bool
 	links       map[string]*Link
 	endpoints   map[string]*Link
 }
 
-func NewLinks() *Links {
+func NewLinks(resc resources.Interface) *Links {
 	return &Links{
+		resource:  resc,
 		links:     map[string]*Link{},
 		endpoints: map[string]*Link{},
 	}
@@ -187,7 +190,7 @@ func (this *Links) GetLinkForIP(ip net.IP) (*Link, *net.IPNet) {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 	for _, l := range this.links {
-		if l.ClusterAddress.Equal(ip) {
+		if l.ClusterAddress.IP.Equal(ip) {
 			return l, nil
 		}
 		if l.CIDR.Contains(ip) {
@@ -201,7 +204,7 @@ func (this *Links) GetLinkForClusterAddress(ip net.IP) *Link {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 	for _, l := range this.links {
-		if l.ClusterAddress.Equal(ip) {
+		if l.ClusterAddress.IP.Equal(ip) {
 			return l
 		}
 	}
@@ -226,6 +229,7 @@ func (this *Links) GetRoutes(ifce *NodeInterface) Routes {
 		index = i.Attrs().Index
 		fmt.Printf("*** found tun10[%d]\n", index)
 		flags = netlink.FLAG_ONLINK
+		protocol = 3
 	}
 	routes := Routes{}
 	for _, l := range this.links {
@@ -240,7 +244,7 @@ func (this *Links) GetRoutes(ifce *NodeInterface) Routes {
 			routes.Add(r)
 
 			r = netlink.Route{
-				Dst:       l.ClusterCIDR,
+				Dst:       tcp.CIDR(l.ClusterAddress),
 				Gw:        l.Gateway,
 				LinkIndex: index,
 				Protocol:  protocol,
@@ -267,4 +271,17 @@ func (this *Links) GetRoutesToLink(ifce *NodeInterface, link netlink.Link) Route
 		}
 	}
 	return routes
+}
+
+func (this *Links) RegisterLink(name string, clusterCIDR *net.IPNet, fqdn string, cidr *net.IPNet) (*Link, error) {
+	kl := &v1alpha1.KubeLink{}
+	kl.Name = name
+	kl.Spec.ClusterAddress = clusterCIDR.IP.String()
+	kl.Spec.Endpoint = fqdn
+	kl.Spec.CIDR = cidr.String()
+	_, err := this.resource.Create(kl)
+	if err != nil {
+		return nil, err
+	}
+	return this.UpdateLink(kl)
 }

@@ -56,6 +56,8 @@ spec:
             - --node-cidr=10.250.0.0/16
             - --link-address=192.168.0.12/24
             - --ifce-name=kubelink
+            - --service-cidr=100.64.16.0/20
+            - --ipip
           securityContext:
             privileged: true
           livenessProbe:

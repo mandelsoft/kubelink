@@ -28,5 +28,5 @@ import (
 )
 
 func main() {
-	controllermanager.Start("kubelink", "Launch KubeLink Controller Manager", "Kubelink manage network links among kubernetes clusters")
+	controllermanager.Start("kubelink", "Launch KubeLink Controller Manager", "Kubelink manages network links among kubernetes clusters")
 }

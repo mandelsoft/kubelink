@@ -28,6 +28,7 @@ import (
 
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
+	"github.com/mandelsoft/kubelink/pkg/kubelink"
 )
 
 const MANAGE_MODE_NONE = "none"
@@ -48,8 +49,9 @@ type Config struct {
 
 	ServiceCIDR *net.IPNet
 
-	Responsible utils.StringSet
-	Port        int
+	Responsible    utils.StringSet
+	Port           int
+	AdvertizedPort int
 
 	CertFile   string
 	KeyFile    string
@@ -60,6 +62,8 @@ type Config struct {
 	DNSName    string
 	Service    string
 	Interface  string
+
+	AutoConnect bool
 }
 
 func (this *Config) AddOptionsToSet(set config.OptionSet) {
@@ -68,6 +72,7 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.address, "link-address", "", "", "CIDR of cluster in cluster network")
 	set.AddStringOption(&this.responsible, "served-links", "", "all", "Comma separated list of links to serve")
 	set.AddIntOption(&this.Port, "broker-port", "", 8088, "Port for broker")
+	set.AddIntOption(&this.AdvertizedPort, "advertized-port", "", kubelink.DEFAULT_PORT, "Advertized broker port for auto-connect")
 	set.AddStringOption(&this.CertFile, "certfile", "", "", "TLS certificate file")
 	set.AddStringOption(&this.KeyFile, "keyfile", "", "", "TLS certificate key file")
 	set.AddStringOption(&this.CACertFile, "cacertfile", "", "", "TLS ca certificate file")
@@ -76,6 +81,7 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.DNSName, "dns-name", "", "", "DNS Name for managed certificate")
 	set.AddStringOption(&this.Service, "service", "", "", "Service name for managed certificate")
 	set.AddStringOption(&this.Interface, "ifce-name", "", "", "Name of the tun interface")
+	set.AddBoolOption(&this.AutoConnect, "auto-connect", "", false, "Automatically register cluster for authenticated incoming requests")
 }
 
 func Empty(s string) bool {
@@ -93,6 +99,15 @@ func (this *Config) Prepare() error {
 	_, this.ServiceCIDR, err = this.OptionalCIDR(this.service, "service-cidr")
 	if err != nil {
 		return err
+	}
+
+	if this.AutoConnect {
+		if this.ServiceCIDR == nil {
+			return fmt.Errorf("auto-connect requires local service cidr")
+		}
+		if Empty(this.Secret) && Empty(this.CertFile) {
+			return fmt.Errorf("auto-connect requires authenticated mode -> secret or cert file requied")
+		}
 	}
 
 	this.Responsible = utils.StringSet{}

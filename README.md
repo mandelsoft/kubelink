@@ -152,3 +152,81 @@ $ wget -O - 100.64.22.1
 ```
 
 which reaches the provate echo service in the remote cluster.
+
+## Command Line Reference
+
+```
+Kubelink manages network links among kubernetes clusters
+
+Usage:
+  kubelink [flags]
+
+Flags:
+      --advertized-port int                         Advertized broker port for auto-connect
+      --auto-connect                                Automatically register cluster for authenticated incoming requests
+      --bind-address-http string                    HTTP server bind address
+      --broker-port int                             Port for broker
+      --broker.advertized-port int                  Advertized broker port for auto-connect of controller broker (default 80)
+      --broker.auto-connect                         Automatically register cluster for authenticated incoming requests of controller broker
+      --broker.broker-port int                      Port for broker of controller broker (default 8088)
+      --broker.cacertfile string                    TLS ca certificate file of controller broker
+      --broker.certfile string                      TLS certificate file of controller broker
+      --broker.default.pool.size int                Worker pool size for pool update of controller broker (default 1)
+      --broker.dns-name string                      DNS Name for managed certificate of controller broker
+      --broker.ifce-name string                     Name of the tun interface of controller broker
+      --broker.keyfile string                       TLS certificate key file of controller broker
+      --broker.link-address string                  CIDR of cluster in cluster network of controller broker
+      --broker.node-cidr string                     CIDR of node network of cluster of controller broker
+      --broker.pool.resync-period duration          Period for resynchronization of controller broker
+      --broker.pool.size int                        Worker pool size of controller broker
+      --broker.secret string                        TLS secret of controller broker
+      --broker.secret-manage-mode string            Manage mode for TLS secret of controller broker (default "none")
+      --broker.served-links string                  Comma separated list of links to serve of controller broker (default "all")
+      --broker.service string                       Service name for managed certificate of controller broker
+      --broker.service-cidr string                  CIDR of of local service network of controller broker
+      --broker.update.pool.resync-period duration   Period for resynchronization for pool update of controller broker (default 20s)
+      --broker.update.pool.size int                 Worker pool size for pool update of controller broker (default 1)
+      --cacertfile string                           TLS ca certificate file
+      --certfile string                             TLS certificate file
+  -c, --controllers string                          comma separated list of controllers to start (<name>,<group>,all) (default "all")
+      --cpuprofile string                           set file for cpu profiling
+      --default.pool.size int                       Worker pool size for pool update
+      --disable-namespace-restriction               disable access restriction for namespace local access only
+      --dns-name string                             DNS Name for managed certificate
+      --grace-period duration                       inactivity grace period for detecting end of cleanup for shutdown
+  -h, --help                                        help for kubelink
+      --ifce-name string                            Name of the tun interface
+      --keyfile string                              TLS certificate key file
+      --kubeconfig string                           default cluster access
+      --kubeconfig.disable-deploy-crds              disable deployment of required crds for cluster default
+      --kubeconfig.id string                        id for cluster default
+      --lease-name string                           name for lease object
+      --link-address string                         CIDR of cluster in cluster network
+  -D, --log-level string                            logrus log level
+      --maintainer string                           maintainer key for crds (defaulted by manager name)
+      --name string                                 name used for controller manager
+      --namespace string                            namespace for lease (default "kube-system")
+  -n, --namespace-local-access-only                 enable access restriction for namespace local access only (deprecated)
+      --node-cidr string                            CIDR of node network of cluster
+      --omit-lease                                  omit lease for development
+      --plugin-file string                          directory containing go plugins
+      --pod-cidr string                             CIDR of pod network of cluster
+      --pool.resync-period duration                 Period for resynchronization
+      --pool.size int                               Worker pool size
+      --router.default.pool.size int                Worker pool size for pool update of controller router (default 1)
+      --router.node-cidr string                     CIDR of node network of cluster of controller router
+      --router.pod-cidr string                      CIDR of pod network of cluster of controller router
+      --router.pool.resync-period duration          Period for resynchronization of controller router
+      --router.pool.size int                        Worker pool size of controller router
+      --router.update.pool.resync-period duration   Period for resynchronization for pool update of controller router (default 20s)
+      --router.update.pool.size int                 Worker pool size for pool update of controller router (default 1)
+      --secret string                               TLS secret
+      --secret-manage-mode string                   Manage mode for TLS secret
+      --served-links string                         Comma separated list of links to serve
+      --server-port-http int                        HTTP server port (serving /healthz, /metrics, ...)
+      --service string                              Service name for managed certificate
+      --service-cidr string                         CIDR of of local service network
+      --update.pool.resync-period duration          Period for resynchronization for pool update
+      --update.pool.size int                        Worker pool size for pool update
+      --version                                     version for kubelink
+```

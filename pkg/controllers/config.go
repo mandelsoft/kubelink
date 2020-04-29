@@ -30,12 +30,14 @@ type Config struct {
 	nodecidr string
 
 	NodeCIDR *net.IPNet
+	IPIP     bool
 }
 
 var _ config.OptionSource = &Config{}
 
 func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.nodecidr, "node-cidr", "", "", "CIDR of node network of cluster")
+	set.AddBoolOption(&this.IPIP, "ipip", "", false, "enforce local routing over ip-ip tunnel")
 }
 
 func (this *Config) Prepare() error {

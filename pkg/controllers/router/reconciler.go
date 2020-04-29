@@ -20,6 +20,7 @@ package router
 
 import (
 	"net"
+	"syscall"
 
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
 	"github.com/vishvananda/netlink"
@@ -71,4 +72,33 @@ func (this *reconciler) IsManagedRoute(route *netlink.Route, routes kubelink.Rou
 
 func (this *reconciler) RequiredRoutes() kubelink.Routes {
 	return this.Links().GetRoutes(this.NodeInterface())
+}
+
+func (this *reconciler) Setup() {
+	if this.config.IPIP {
+		link := &netlink.Iptun{LinkAttrs: netlink.LinkAttrs{Name: "tunl0"}}
+		err := netlink.LinkAdd(link)
+		if err != nil {
+			var ok bool
+			if err != syscall.EEXIST {
+				this.Controller().Errorf("error creating tunl0 interface: %s", err)
+			}
+			l, err := netlink.LinkByName("tunl0")
+			if err != nil {
+				this.Controller().Errorf("error getting tunl0 interface: %s", err)
+			}
+			link, ok = l.(*netlink.Iptun)
+			if !ok {
+				this.Controller().Errorf("tunl0 isn't an iptun device (%#v), please remove device and try again", l)
+			}
+			this.Controller().Infof("found interface tunl0[%d] for ip-over-ip routing option", link.Attrs().Index)
+		} else {
+			this.Controller().Infof("created interface tunl0[%d] for ip-over-ip routing option", link.Attrs().Index)
+		}
+		err = netlink.LinkSetUp(link)
+		if err != nil {
+			this.Controller().Errorf("cannot bring up tunl0: %s", err)
+		}
+	}
+	this.Reconciler.Setup()
 }
