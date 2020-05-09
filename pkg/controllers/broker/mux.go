@@ -375,7 +375,6 @@ func (this *Mux) ServeConnection(ctx context.Context, conn net.Conn) {
 				return
 			}
 			this.Infof("auto-connected %s", l)
-			l.Release()
 			t.clusterCIDR = t.clusterCIDR
 		}
 	}

@@ -35,6 +35,7 @@ import (
 
 	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
+	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
 type Manifest map[string]interface{}
@@ -148,7 +149,6 @@ func (this *reconciler) getSecret(logger logger.LogContext, name resources.Objec
 	sobj, err := this.secretResource.GetCached(name)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			err := fmt.Errorf("secret %s not found", name)
 			return nil, nil, nil, err
 		}
 		return nil, nil, err, nil
@@ -179,23 +179,25 @@ func (this *reconciler) updateLinkFromSecret(logger logger.LogContext, klink *ap
 		return terr, err
 	}
 
+	access := kubelink.LinkAccessInfo{}
 	v := secret.Data["token"]
 	if v != nil {
-		entry.Token = string(v)
+		access.Token = string(v)
 	} else {
 		err = fmt.Errorf("token missing in secret")
 	}
 	v = secret.Data["certificate-authority-data"]
 	if v != nil {
-		entry.CACert = string(v)
+		access.CACert = string(v)
 	} else {
 		err = fmt.Errorf("certificate-authority-data missing in secret")
 	}
+	this.Links().UpdateLinkAccess(logger, klink.Name, access, false)
 	return nil, err
 }
 
 func (this *reconciler) updateSecretFromLink(logger logger.LogContext, klink *api.KubeLink, entry *kubelink.Link) (error, error) {
-	if !this.config.DnsPropagation {
+	if !this.config.DNSPropagation {
 		return nil, nil
 	}
 	var secret *_core.Secret
@@ -206,9 +208,12 @@ func (this *reconciler) updateSecretFromLink(logger logger.LogContext, klink *ap
 		return nil, nil
 	}
 
-	name := this.getSecretName(klink)
+	logger.Infof("persist pending link access info")
+	create := false
 
+	name := this.getSecretName(klink)
 	if name == nil {
+		create = true
 		secret = &_core.Secret{
 			TypeMeta: v1.TypeMeta{},
 			ObjectMeta: v1.ObjectMeta{
@@ -218,9 +223,22 @@ func (this *reconciler) updateSecretFromLink(logger logger.LogContext, klink *ap
 			Type: _core.SecretTypeOpaque,
 		}
 	} else {
+		logger.Infof("found secret name %s for link %s", name, klink.Name)
 		sobj, secret, terr, err = this.getSecret(logger, name)
-		if terr != nil || err != nil {
+		if terr != nil {
 			return terr, err
+		}
+		if err != nil { // not found -> create it
+			logger.Infof("requested secret not -> create it")
+			secret = &_core.Secret{
+				TypeMeta: v1.TypeMeta{},
+				ObjectMeta: v1.ObjectMeta{
+					Name:      name.Name(),
+					Namespace: name.Namespace(),
+				},
+				Type: _core.SecretTypeOpaque,
+			}
+			create = true
 		}
 	}
 
@@ -230,38 +248,41 @@ func (this *reconciler) updateSecretFromLink(logger logger.LogContext, klink *ap
 		secretData["certificate-authority-data"] = []byte(entry.CACert)
 	}
 	secret.Data = secretData
-	if name == nil {
+	if create {
 		sobj, err = this.secretResource.Create(secret)
 		if err != nil {
 			return fmt.Errorf("cannot create secret for link %q: err", entry.Name, err), nil
 		}
 		access := _core.SecretReference{
 			Name:      sobj.GetName(),
-			Namespace: sobj.GetName(),
+			Namespace: sobj.GetNamespace(),
 		}
 		logger.Infof("created secret %s for link %s", access.Name, klink.Name)
-		_, mod, err := this.linkResource.Modify(klink, func(data resources.ObjectData) (bool, error) {
-			klink := data.(*api.KubeLink)
-			if klink.Spec.APIAccess == nil {
-				klink.Spec.APIAccess = &access
-				logger.Infof("setting secret %s for link %s", access.Name, klink.Name)
-				return true, nil
+		if name == nil {
+			_, mod, err := this.linkResource.Modify(klink, func(data resources.ObjectData) (bool, error) {
+				klink := data.(*api.KubeLink)
+				if klink.Spec.APIAccess == nil {
+					klink.Spec.APIAccess = &access
+					logger.Infof("setting secret %s for link %s", access.Name, klink.Name)
+					return true, nil
+				}
+				name = this.getSecretName(klink)
+				return false, nil
+			})
+			if err != nil {
+				sobj.Delete()
+				return err, nil
 			}
-			name = this.getSecretName(klink)
-			return false, nil
-		})
-		if err != nil {
-			return err, nil
-		}
-		if mod {
-			entry.UpdatePending = false
-			return nil, nil
-		}
-		if !resources.EqualsObjectName(name, sobj.ObjectName()) {
-			sobj.Delete()
-			sobj, secret, terr, err = this.getSecret(logger, name)
-			if terr != nil || err != nil {
-				return terr, err
+			if mod {
+				this.Links().LinkAccessUpdated(logger, entry.Name, entry.LinkAccessInfo)
+				return nil, nil
+			}
+			if !resources.EqualsObjectName(name, sobj.ObjectName()) {
+				sobj.Delete()
+				sobj, secret, terr, err = this.getSecret(logger, name)
+				if terr != nil || err != nil {
+					return terr, err
+				}
 			}
 		}
 	}
@@ -275,22 +296,23 @@ func (this *reconciler) updateSecretFromLink(logger logger.LogContext, klink *ap
 		}
 		return mod, nil
 	})
-	entry.UpdatePending = false
+
+	this.Links().LinkAccessUpdated(logger, entry.Name, entry.LinkAccessInfo)
 	return nil, nil
 }
 
 func (this *reconciler) updateCorefile(logger logger.LogContext) {
-	if !this.config.DnsPropagation {
+	if !this.config.DNSPropagation {
 		return
 	}
-
+	logger.Infof("update corefile")
 	first := true
 	keys := []string{}
 	kubeconfig := NewKubeconfig()
 
 	this.Links().Visit(func(l *kubelink.Link) bool {
 		if l.Token != "" {
-			ip := l.ServiceCIDR.IP
+			ip := tcp.CloneIP(l.ServiceCIDR.IP)
 			ip[len(ip)-1] |= 1
 			kubeconfig.AddCluster(l.Name, fmt.Sprintf("https://%s", ip), l.CACert, l.Token)
 			keys = append(keys, l.Name)
@@ -352,14 +374,15 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 	}
 }
 
-func (this *reconciler) UpdateLink(logger logger.LogContext, link *kubelink.Link) {
-
-	obj, err := this.linkResource.GetCached(resources.NewObjectName(link.Name))
+func (this *reconciler) updateLink(logger logger.LogContext, name string, access kubelink.LinkAccessInfo) {
+	_, err := this.linkResource.GetCached(resources.NewObjectName(name))
 	if err != nil {
-		link.UpdatePending = true
-		logger.Infof("cannot get link %s: %s", link.Name, err)
+		logger.Infof("cannot get link %s: %s", name, err)
 		return
 	}
-	klink := obj.Data().(*api.KubeLink)
-	this.updateSecretFromLink(logger, klink, link)
+	_, mod := this.Links().UpdateLinkAccess(logger, name, access, true)
+	if mod {
+		this.TriggerUpdate()
+		this.TriggerLink(name)
+	}
 }

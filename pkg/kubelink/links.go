@@ -41,7 +41,6 @@ const DEFAULT_PORT = 80
 ////////////////////////////////////////////////////////////////////////////////
 
 type Link struct {
-	lock           sync.Mutex
 	Name           string
 	ServiceCIDR    *net.IPNet
 	Egress         tcp.CIDRList
@@ -61,12 +60,6 @@ type LinkAccessInfo struct {
 type LinkForeignData struct {
 	UpdatePending bool
 	LinkAccessInfo
-}
-
-func (this *Link) Release() {
-	if this != nil {
-		this.lock.Unlock()
-	}
 }
 
 func (this *Link) String() string {
@@ -195,7 +188,6 @@ func (this *Links) Setup(logger logger.LogContext, cluster cluster.Interface) {
 		link, err := this.updateLink(l.Data().(*v1alpha1.KubeLink))
 		if link != nil {
 			logger.Infof("found link %s", link)
-			link.Release()
 		}
 		if err != nil {
 			logger.Infof("errorneous link %s: %s", l.GetName(), err)
@@ -203,30 +195,69 @@ func (this *Links) Setup(logger logger.LogContext, cluster cluster.Interface) {
 	}
 }
 
-func (this *Links) UpdateLink(link *v1alpha1.KubeLink) (*Link, error) {
+func (this *Links) LinkAccessUpdated(logger logger.LogContext, name string, access LinkAccessInfo) *Link {
 	this.lock.Lock()
 	defer this.lock.Unlock()
-	return this.updateLink(link)
+	old := this.links[name]
+	if old != nil {
+		if old.LinkAccessInfo == access {
+			new := *old
+			new.UpdatePending = false
+			logger.Infof("access updated for link %s", name)
+			return this.replaceLink(&new)
+		}
+	}
+	return old
+}
+
+func (this *Links) UpdateLinkAccess(logger logger.LogContext, name string, access LinkAccessInfo, pending bool) (*Link, bool) {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	old := this.links[name]
+	if old != nil {
+		if old.LinkAccessInfo != access {
+			if !old.UpdatePending || pending {
+				new := *old
+				new.LinkAccessInfo = access
+				new.UpdatePending = pending
+				if pending {
+					logger.Infof("new access info pending for link %s", name)
+				} else {
+					logger.Infof("updated access info for link %s", name)
+				}
+				return this.replaceLink(&new), true
+			}
+		}
+	}
+	return old, false
+}
+
+func (this *Links) replaceLink(link *Link) *Link {
+	this.links[link.Name] = link
+	this.endpoints[link.Host] = link
+	this.clusteraddr[link.ClusterAddress.IP.String()] = link
+	return link
+}
+
+func (this *Links) UpdateLink(klink *v1alpha1.KubeLink) (*Link, error) {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	return this.updateLink(klink)
 }
 
 func (this *Links) GetLink(name string) *Link {
 	this.lock.Lock()
 	defer this.lock.Unlock()
-	l := this.links[name]
-	if l != nil {
-		l.lock.Lock()
-	}
-	return l
+	return this.links[name]
 }
 
-func (this *Links) updateLink(link *v1alpha1.KubeLink) (*Link, error) {
-	l, err := this.LinkFor(link)
+func (this *Links) updateLink(klink *v1alpha1.KubeLink) (*Link, error) {
+	l, err := this.LinkFor(klink)
 	if err != nil {
 		return nil, err
 	}
-	old := this.links[link.Name]
+	old := this.links[klink.Name]
 	if old != nil {
-		old.lock.Lock()
 		if old.Host != l.Host {
 			delete(this.endpoints, old.Host)
 		}
@@ -234,13 +265,8 @@ func (this *Links) updateLink(link *v1alpha1.KubeLink) (*Link, error) {
 			delete(this.clusteraddr, old.ClusterAddress.IP.String())
 		}
 		l.LinkForeignData = old.LinkForeignData
-		old.Release()
 	}
-	this.links[link.Name] = l
-	this.endpoints[l.Host] = l
-	this.clusteraddr[l.ClusterAddress.IP.String()] = l
-	l.lock.Lock()
-	return l, nil
+	return this.replaceLink(l), nil
 }
 
 func (this *Links) RemoveLink(name string) {
@@ -255,6 +281,8 @@ func (this *Links) RemoveLink(name string) {
 }
 
 func (this *Links) Visit(visitor func(l *Link) bool) {
+	//this.lock.Lock()
+	//defer this.lock.Unlock()
 	for _, l := range this.links {
 		if !visitor(l) {
 			break

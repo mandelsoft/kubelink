@@ -59,9 +59,9 @@ type KubeLinkSpec struct {
 	// +optional
 	CIDR string `json:"cidr"`
 	// +optional
-	Ingress []string `json:"ingress"`
+	Ingress []string `json:"ingress,omitempty"`
 	// +optional
-	Egress         []string `json:"egress"`
+	Egress         []string `json:"egress,omitempty"`
 	ClusterAddress string   `json:"clusterAddress"`
 	Endpoint       string   `json:"endpoint"`
 

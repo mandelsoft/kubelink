@@ -39,6 +39,7 @@ func init() {
 	_ = _apps.Deployment{}
 
 	controllers.BaseController("broker", &Config{}).
+		RequireLease().
 		Reconciler(Create).
 		Reconciler(CreateSecrets, "secrets").
 		ReconcilerWatchByGK("secrets", secretGK).
@@ -69,9 +70,9 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 	}
 	this.config = this.Reconciler.Config().(*Config)
 
-	if this.config.DnsPropagation {
-		if this.config.ServiceAccount != nil {
-			controller.Infof("using dns propagation with service account %q", this.config.ServiceAccount)
+	if this.config.DNSPropagation {
+		if this.config.CoreServiceAccount != nil {
+			controller.Infof("using dns propagation with service account %q", this.config.CoreServiceAccount)
 
 			r, err := controller.GetMainCluster().Resources().GetByExample(&api.KubeLink{})
 			if err != nil {

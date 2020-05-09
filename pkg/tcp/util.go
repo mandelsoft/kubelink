@@ -50,6 +50,20 @@ func cloneTLSConfig(cfg *tls.Config) *tls.Config {
 	return cfg.Clone()
 }
 
+func EqualIP(a, b net.IP) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Equal(b)
+}
+
+func CloneIP(ip net.IP) net.IP {
+	return append(ip[:0:0], ip...)
+}
+
 func EqualCIDR(a, b *net.IPNet) bool {
 	if a == b {
 		return true

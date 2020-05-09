@@ -60,14 +60,14 @@ func (this *Common) Controller() controller.Interface {
 }
 
 func (this *Common) TriggerUpdate() {
+	this.controller.Infof("trigger update")
 	this.Controller().EnqueueCommand(CMD_UPDATE)
 }
 
-func (this *Common) TriggerLink(name resources.ObjectName) {
+func (this *Common) TriggerLink(name string) {
 	this.Controller().EnqueueKey(resources.NewClusterKey(
 		this.controller.GetMainCluster().GetId(),
-		v1alpha1.KUBELINK, name.Namespace(),
-		name.Name()),
+		v1alpha1.KUBELINK, "", name),
 	)
 }
 
@@ -109,7 +109,7 @@ func (this *Reconciler) Setup() {
 }
 
 func (this *Reconciler) Start() {
-	this.controller.EnqueueCommand(CMD_UPDATE)
+	this.TriggerUpdate()
 }
 
 func (this *Reconciler) Reconcile(logger logger.LogContext, obj resources.Object) reconcile.Status {
@@ -118,8 +118,7 @@ func (this *Reconciler) Reconcile(logger logger.LogContext, obj resources.Object
 
 func (this *Reconciler) ReconcileLink(logger logger.LogContext, obj resources.Object,
 	updater func(logger logger.LogContext, link *v1alpha1.KubeLink, entry *kubelink.Link) (error, error)) reconcile.Status {
-	link, status := this.ReconcileAngGetLink(logger, obj, updater)
-	link.Release()
+	_, status := this.ReconcileAngGetLink(logger, obj, updater)
 	return status
 }
 
@@ -159,7 +158,7 @@ func (this *Reconciler) ReconcileAngGetLink(logger logger.LogContext, obj resour
 	if err != nil {
 		return ldata, reconcile.Failed(logger, err)
 	}
-	this.controller.EnqueueCommand(CMD_UPDATE)
+	this.TriggerUpdate()
 	if uerr != nil {
 		return ldata, reconcile.Delay(logger, uerr)
 	}
@@ -259,6 +258,7 @@ func String(r netlink.Route) string {
 }
 
 func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.Status {
+	logger.Info("update routes")
 	routes, err := kubelink.ListRoutes()
 	if err != nil {
 		return reconcile.Delay(logger, err)

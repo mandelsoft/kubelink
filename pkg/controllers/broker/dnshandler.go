@@ -38,15 +38,12 @@ func (this *DNSHandler) UpdateAccess(hello *ConnectionHello) {
 	}
 	ext := hello.Extensions[EXT_DNS]
 	if ext == nil {
-		this.reconciler.Controller().Infof("dns propagation not supported ")
+		this.reconciler.Controller().Infof("dns propagation not supported")
 		return
 	}
 	dns := ext.(*DNSExtension)
 	if link.Token != dns.Token || link.CACert != dns.CACert {
-		link.Token = dns.Token
-		link.CACert = dns.CACert
-		link.UpdatePending = true
-		this.reconciler.UpdateLink(this.reconciler.mux, link)
-		this.reconciler.TriggerUpdate()
+		this.reconciler.mux.Infof("got access info for link %s", link.Name)
+		this.reconciler.updateLink(this.reconciler.mux, link.Name, *(*kubelink.LinkAccessInfo)(dns))
 	}
 }

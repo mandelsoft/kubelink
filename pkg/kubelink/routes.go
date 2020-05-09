@@ -35,7 +35,8 @@ func (this Routes) Lookup(route netlink.Route) int {
 		if r.LinkIndex == route.LinkIndex &&
 			r.Flags == route.Flags &&
 			r.Gw.Equal(route.Gw) &&
-			tcp.EqualCIDR(r.Dst, route.Dst) {
+			tcp.EqualCIDR(r.Dst, route.Dst) &&
+			tcp.EqualIP(r.Src, route.Src) {
 			return i
 		}
 	}

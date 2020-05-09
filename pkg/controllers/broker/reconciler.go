@@ -151,7 +151,7 @@ func (this *reconciler) Setup() {
 	}
 	mux := NewMux(this.Controller().GetContext(), this.Controller(), this.certInfo, uint16(this.config.AdvertizedPort), addr, local, tun, this.Links(), this)
 
-	if this.config.DnsPropagation {
+	if this.config.DNSPropagation {
 		mux.connectionHandler = &DNSHandler{this}
 	}
 
@@ -190,13 +190,16 @@ func (this *reconciler) Start() {
 			}
 		}()
 	}
+	this.Reconciler.Start()
 }
 
 func (this *reconciler) Command(logger logger.LogContext, cmd string) reconcile.Status {
 	if !this.config.DisableBridge {
+		logger.Infof("update tun")
 		this.reconcileTun(logger)
 	}
-	if this.config.ServiceAccount != nil {
+	if this.config.CoreServiceAccount != nil {
+		logger.Infof("update service account")
 		access, err := this.getServiceAccountToken()
 		if err != nil {
 			logger.Errorf("cannot get service account token: %s", err)
@@ -212,7 +215,6 @@ func (this *reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 }
 
 func (this *reconciler) Reconcile(logger logger.LogContext, obj resources.Object) reconcile.Status {
-
 	return this.ReconcileLink(logger, obj, this.handleLinkAccess)
 }
 
@@ -260,11 +262,11 @@ func (this *reconciler) Notify(l *kubelink.Link, err error) {
 }
 
 func (this *reconciler) getServiceAccountToken() (*kubelink.LinkAccessInfo, error) {
-	if this.config.ServiceAccount == nil {
+	if this.config.CoreServiceAccount == nil {
 		return nil, fmt.Errorf("no service accound specified")
 	}
 	sa := core.ServiceAccount{}
-	_, err := this.saResource.GetInto(this.config.ServiceAccount, &sa)
+	_, err := this.saResource.GetInto(this.config.CoreServiceAccount, &sa)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +283,7 @@ func (this *reconciler) getServiceAccountToken() (*kubelink.LinkAccessInfo, erro
 		secret := obj.Data().(*core.Secret)
 		cacert := getStringValue("ca.crt", secret)
 		token := getStringValue("token", secret)
-		return &kubelink.LinkAccessInfo{token, cacert}, nil
+		return &kubelink.LinkAccessInfo{Token: token, CACert: cacert}, nil
 	}
 	return nil, nil
 }

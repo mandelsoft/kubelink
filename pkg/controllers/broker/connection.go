@@ -84,7 +84,7 @@ func NewTunnelConnection(mux *Mux, conn net.Conn, link *kubelink.Link, handlers 
 			}
 		}
 		if mux.connectionHandler != nil {
-			mux.connectionHandler.UpdateAccess(hello)
+			go mux.connectionHandler.UpdateAccess(hello)
 		}
 	}
 	return t, hello, nil

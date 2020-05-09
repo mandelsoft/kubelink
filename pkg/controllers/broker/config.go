@@ -65,14 +65,15 @@ type Config struct {
 	Service    string
 	Interface  string
 
-	serviceAccount string
-	ServiceAccount resources.ObjectName
-	MeshDomain     string
-	CoreDNS        string
-	CoreDNSSecret  string
-	DnsPropagation bool
-	AutoConnect    bool
-	DisableBridge  bool
+	coreServiceAccount string
+	CoreServiceAccount resources.ObjectName
+	MeshDomain         string
+	CoreDNS            string
+	CoreDNSSecret      string
+	DNSPropagation     bool
+
+	AutoConnect   bool
+	DisableBridge bool
 }
 
 func (this *Config) AddOptionsToSet(set config.OptionSet) {
@@ -92,11 +93,11 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.DNSName, "dns-name", "", "", "DNS Name for managed certificate")
 	set.AddStringOption(&this.Service, "service", "", "", "Service name for managed certificate")
 	set.AddStringOption(&this.Interface, "ifce-name", "", "", "Name of the tun interface")
-	set.AddStringOption(&this.serviceAccount, "service-account", "", "", "Service Account to use for CoreDNS API Server Access")
+	set.AddStringOption(&this.coreServiceAccount, "coredns-service-account", "", "", "Service Account to use for CoreDNS API Server Access")
 	set.AddStringOption(&this.MeshDomain, "mesh-domain", "", "kubelink", "Base domain for cluster mesh services")
 	set.AddStringOption(&this.CoreDNS, "coredns-deployment", "", "kubelink-coredns", "Name of coredns deployment used by kubelink")
 	set.AddStringOption(&this.CoreDNSSecret, "coredns-secret", "", "kubelink-coredns", "Name of dns secret used by kubelink")
-	set.AddBoolOption(&this.DnsPropagation, "dns-propagation", "", false, "Enable DNS Record propagation for Services")
+	set.AddBoolOption(&this.DNSPropagation, "dns-propagation", "", false, "Enable DNS Record propagation for Services")
 	set.AddBoolOption(&this.AutoConnect, "auto-connect", "", false, "Automatically register cluster for authenticated incoming requests")
 }
 
@@ -162,15 +163,15 @@ func (this *Config) Prepare() error {
 		}
 	}
 
-	if this.serviceAccount != "" {
-		names := strings.Split(this.serviceAccount, "/")
+	if this.coreServiceAccount != "" {
+		names := strings.Split(this.coreServiceAccount, "/")
 		if len(names) > 2 {
 			return fmt.Errorf("invalid service account name")
 		}
 		if len(names) == 2 {
-			this.ServiceAccount = resources.NewObjectName(names...)
+			this.CoreServiceAccount = resources.NewObjectName(names...)
 		} else {
-			this.ServiceAccount = resources.NewObjectName("kube-system", names[0])
+			this.CoreServiceAccount = resources.NewObjectName("kube-system", names[0])
 		}
 	}
 	return nil

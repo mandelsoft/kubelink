@@ -44,7 +44,7 @@ func (this *secretReconciler) Reconcile(logger logger.LogContext, obj resources.
 	secret := obj.Data().(*v1.Secret)
 	users := this.cache.GetSecretUsers(resources.NewObjectName(secret.Namespace, secret.Name))
 	for n := range users {
-		this.TriggerLink(n)
+		this.TriggerLink(n.Name())
 	}
 	return reconcile.Succeeded(logger)
 }
@@ -52,7 +52,7 @@ func (this *secretReconciler) Reconcile(logger logger.LogContext, obj resources.
 func (this *secretReconciler) Deleted(logger logger.LogContext, key resources.ClusterObjectKey) reconcile.Status {
 	users := this.cache.GetSecretUsers(key.ObjectName())
 	for n := range users {
-		this.TriggerLink(n)
+		this.TriggerLink(n.Name())
 	}
 	return reconcile.Succeeded(logger)
 }
