@@ -38,26 +38,79 @@ import (
 
 const DEFAULT_PORT = 80
 
+////////////////////////////////////////////////////////////////////////////////
+
 type Link struct {
+	lock           sync.Mutex
 	Name           string
-	CIDR           *net.IPNet
+	ServiceCIDR    *net.IPNet
+	Egress         tcp.CIDRList
+	Ingress        tcp.CIDRList
 	ClusterAddress *net.IPNet
 	Gateway        net.IP
 	Host           string
 	Endpoint       string
+	LinkForeignData
+}
+
+type LinkAccessInfo struct {
+	CACert string
+	Token  string
+}
+
+type LinkForeignData struct {
+	UpdatePending bool
+	LinkAccessInfo
+}
+
+func (this *Link) Release() {
+	if this != nil {
+		this.lock.Unlock()
+	}
 }
 
 func (this *Link) String() string {
-	return fmt.Sprintf("%s[%s,%s,%s]", this.Name, this.ClusterAddress, this.CIDR, this.Endpoint)
+	return fmt.Sprintf("%s[%s,%s,%s]", this.Name, this.ClusterAddress, this.Egress, this.Endpoint)
+}
+
+func (this *Link) AllowIngress(ip net.IP) (granted bool, set bool) {
+	if !this.Ingress.IsSet() {
+		return true, false
+	}
+	return this.Ingress.Contains(ip), true
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func LinkFor(link *v1alpha1.KubeLink) (*Link, error) {
-	_, cidr, err := net.ParseCIDR(link.Spec.CIDR)
-	if err != nil {
-		return nil, fmt.Errorf("invalid routing cidr %q: %s", link.Spec.CIDR, err)
+func (this *Links) LinkFor(link *v1alpha1.KubeLink) (*Link, error) {
+	var egress tcp.CIDRList
+	var serviceCIDR *net.IPNet
+
+	if !Empty(link.Spec.CIDR) {
+		_, cidr, err := net.ParseCIDR(link.Spec.CIDR)
+		if err != nil {
+			return nil, fmt.Errorf("invalid routing cidr %q: %s", link.Spec.CIDR, err)
+		}
+		serviceCIDR = cidr
+		egress.Add(cidr)
 	}
+	for _, c := range link.Spec.Egress {
+		_, cidr, err := net.ParseCIDR(c)
+		if err != nil {
+			return nil, fmt.Errorf("invalid routing cidr %q: %s", link.Spec.CIDR, err)
+		}
+		egress.Add(cidr)
+	}
+	var ingress tcp.CIDRList
+
+	for _, c := range link.Spec.Ingress {
+		_, cidr, err := net.ParseCIDR(c)
+		if err != nil {
+			return nil, fmt.Errorf("invalid routing cidr %q: %s", link.Spec.CIDR, err)
+		}
+		ingress.Add(cidr)
+	}
+
 	ip, ccidr, err := net.ParseCIDR(link.Spec.ClusterAddress)
 	if err != nil {
 		return nil, fmt.Errorf("invalid cluster address %q: %s", link.Spec.ClusterAddress, err)
@@ -78,9 +131,12 @@ func LinkFor(link *v1alpha1.KubeLink) (*Link, error) {
 	if len(parts) == 1 {
 		endpoint = fmt.Sprintf("%s:%d", endpoint, DEFAULT_PORT)
 	}
+
 	l := &Link{
 		Name:           link.Name,
-		CIDR:           cidr,
+		ServiceCIDR:    serviceCIDR,
+		Egress:         egress,
+		Ingress:        ingress,
 		ClusterAddress: ccidr,
 		Gateway:        gateway,
 		Host:           parts[0],
@@ -109,13 +165,15 @@ type Links struct {
 	initialized bool
 	links       map[string]*Link
 	endpoints   map[string]*Link
+	clusteraddr map[string]*Link
 }
 
 func NewLinks(resc resources.Interface) *Links {
 	return &Links{
-		resource:  resc,
-		links:     map[string]*Link{},
-		endpoints: map[string]*Link{},
+		resource:    resc,
+		links:       map[string]*Link{},
+		endpoints:   map[string]*Link{},
+		clusteraddr: map[string]*Link{},
 	}
 }
 
@@ -137,6 +195,7 @@ func (this *Links) Setup(logger logger.LogContext, cluster cluster.Interface) {
 		link, err := this.updateLink(l.Data().(*v1alpha1.KubeLink))
 		if link != nil {
 			logger.Infof("found link %s", link)
+			link.Release()
 		}
 		if err != nil {
 			logger.Infof("errorneous link %s: %s", l.GetName(), err)
@@ -153,20 +212,34 @@ func (this *Links) UpdateLink(link *v1alpha1.KubeLink) (*Link, error) {
 func (this *Links) GetLink(name string) *Link {
 	this.lock.Lock()
 	defer this.lock.Unlock()
-	return this.links[name]
+	l := this.links[name]
+	if l != nil {
+		l.lock.Lock()
+	}
+	return l
 }
 
 func (this *Links) updateLink(link *v1alpha1.KubeLink) (*Link, error) {
-	l, err := LinkFor(link)
+	l, err := this.LinkFor(link)
 	if err != nil {
 		return nil, err
 	}
 	old := this.links[link.Name]
-	if old != nil && old.Host != l.Host {
-		delete(this.endpoints, old.Host)
+	if old != nil {
+		old.lock.Lock()
+		if old.Host != l.Host {
+			delete(this.endpoints, old.Host)
+		}
+		if !old.ClusterAddress.IP.Equal(l.ClusterAddress.IP) {
+			delete(this.clusteraddr, old.ClusterAddress.IP.String())
+		}
+		l.LinkForeignData = old.LinkForeignData
+		old.Release()
 	}
 	this.links[link.Name] = l
 	this.endpoints[l.Host] = l
+	this.clusteraddr[l.ClusterAddress.IP.String()] = l
+	l.lock.Lock()
 	return l, nil
 }
 
@@ -177,38 +250,39 @@ func (this *Links) RemoveLink(name string) {
 	if l != nil {
 		delete(this.links, name)
 		delete(this.endpoints, l.Host)
+		delete(this.clusteraddr, l.ClusterAddress.IP.String())
 	}
 }
 
-func (this *Links) DeleteLink(name string) {
-	delete(this.links, name)
+func (this *Links) Visit(visitor func(l *Link) bool) {
+	for _, l := range this.links {
+		if !visitor(l) {
+			break
+		}
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (this *Links) GetLinkForIP(ip net.IP) (*Link, *net.IPNet) {
+func (this *Links) GetLinkForIP(ip net.IP) *Link {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
+
+	if l := this.clusteraddr[ip.String()]; l != nil {
+		return l
+	}
 	for _, l := range this.links {
-		if l.ClusterAddress.IP.Equal(ip) {
-			return l, nil
-		}
-		if l.CIDR.Contains(ip) {
-			return l, l.CIDR
+		if l.Egress.Contains(ip) {
+			return l
 		}
 	}
-	return nil, nil
+	return nil
 }
 
 func (this *Links) GetLinkForClusterAddress(ip net.IP) *Link {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
-	for _, l := range this.links {
-		if l.ClusterAddress.IP.Equal(ip) {
-			return l
-		}
-	}
-	return nil
+	return this.clusteraddr[ip.String()]
 }
 
 func (this *Links) GetLinkForEndpoint(dnsname string) *Link {
@@ -229,22 +303,22 @@ func (this *Links) GetRoutes(ifce *NodeInterface) Routes {
 		index = i.Attrs().Index
 		fmt.Printf("*** found tun10[%d]\n", index)
 		flags = netlink.FLAG_ONLINK
-		protocol = 3
 	}
 	routes := Routes{}
 	for _, l := range this.links {
 		if !l.Gateway.Equal(ifce.IP) {
-			r := netlink.Route{
-				Dst:       l.CIDR,
-				Gw:        l.Gateway,
-				LinkIndex: index,
-				Protocol:  protocol,
+			for _, c := range l.Egress {
+				r := netlink.Route{
+					Dst:       c,
+					Gw:        l.Gateway,
+					LinkIndex: index,
+					Protocol:  protocol,
+				}
+				r.SetFlag(flags)
+				routes.Add(r)
 			}
-			r.SetFlag(flags)
-			routes.Add(r)
-
-			r = netlink.Route{
-				Dst:       tcp.CIDR(l.ClusterAddress),
+			r := netlink.Route{
+				Dst:       tcp.CIDRNet(l.ClusterAddress),
 				Gw:        l.Gateway,
 				LinkIndex: index,
 				Protocol:  protocol,
@@ -263,11 +337,13 @@ func (this *Links) GetRoutesToLink(ifce *NodeInterface, link netlink.Link) Route
 	routes := Routes{}
 	for _, l := range this.links {
 		if l.Gateway.Equal(ifce.IP) {
-			r := netlink.Route{
-				Dst:       l.CIDR,
-				LinkIndex: link.Attrs().Index,
+			for _, c := range l.Egress {
+				r := netlink.Route{
+					Dst:       c,
+					LinkIndex: link.Attrs().Index,
+				}
+				routes.Add(r)
 			}
-			routes.Add(r)
 		}
 	}
 	return routes

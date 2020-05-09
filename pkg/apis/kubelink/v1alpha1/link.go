@@ -17,6 +17,7 @@
 package v1alpha1
 
 import (
+	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -55,9 +56,17 @@ type KubeLink struct {
 }
 
 type KubeLinkSpec struct {
-	CIDR           string `json:"cidr"`
-	ClusterAddress string `json:"clusterAddress"`
-	Endpoint       string `json:"endpoint"`
+	// +optional
+	CIDR string `json:"cidr"`
+	// +optional
+	Ingress []string `json:"ingress"`
+	// +optional
+	Egress         []string `json:"egress"`
+	ClusterAddress string   `json:"clusterAddress"`
+	Endpoint       string   `json:"endpoint"`
+
+	// +optional
+	APIAccess *core.SecretReference `json:"apiAccess,omitempty"`
 }
 
 type KubeLinkStatus struct {

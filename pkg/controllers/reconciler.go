@@ -44,9 +44,38 @@ type ReconcilerImplementation interface {
 	UpdateGateway(link *v1alpha1.KubeLink) *string
 }
 
-type Reconciler struct {
+type Common struct {
 	reconcile.DefaultReconciler
 	controller controller.Interface
+}
+
+func NewCommon(controller controller.Interface) Common {
+	return Common{
+		controller: controller,
+	}
+}
+
+func (this *Common) Controller() controller.Interface {
+	return this.controller
+}
+
+func (this *Common) TriggerUpdate() {
+	this.Controller().EnqueueCommand(CMD_UPDATE)
+}
+
+func (this *Common) TriggerLink(name resources.ObjectName) {
+	this.Controller().EnqueueKey(resources.NewClusterKey(
+		this.controller.GetMainCluster().GetId(),
+		v1alpha1.KUBELINK, name.Namespace(),
+		name.Name()),
+	)
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+type Reconciler struct {
+	Common
+
 	config     config.OptionSource
 	baseconfig *Config
 
@@ -62,10 +91,6 @@ var _ reconcile.Interface = &Reconciler{}
 
 func (this *Reconciler) Config() config.OptionSource {
 	return this.config
-}
-
-func (this *Reconciler) Controller() controller.Interface {
-	return this.controller
 }
 
 func (this *Reconciler) NodeInterface() *kubelink.NodeInterface {
@@ -88,6 +113,18 @@ func (this *Reconciler) Start() {
 }
 
 func (this *Reconciler) Reconcile(logger logger.LogContext, obj resources.Object) reconcile.Status {
+	return this.ReconcileLink(logger, obj, nil)
+}
+
+func (this *Reconciler) ReconcileLink(logger logger.LogContext, obj resources.Object,
+	updater func(logger logger.LogContext, link *v1alpha1.KubeLink, entry *kubelink.Link) (error, error)) reconcile.Status {
+	link, status := this.ReconcileAngGetLink(logger, obj, updater)
+	link.Release()
+	return status
+}
+
+func (this *Reconciler) ReconcileAngGetLink(logger logger.LogContext, obj resources.Object,
+	updater func(logger logger.LogContext, link *v1alpha1.KubeLink, entry *kubelink.Link) (error, error)) (*kubelink.Link, reconcile.Status) {
 	orig := obj.Data().(*v1alpha1.KubeLink)
 	link := orig
 	logger.Infof("reconcile cidr %s[gateway %s]", link.Spec.CIDR, link.Status.Gateway)
@@ -102,8 +139,13 @@ func (this *Reconciler) Reconcile(logger logger.LogContext, obj resources.Object
 	}
 
 	var invalid error
+	var ldata *kubelink.Link
+	var uerr error
 	if err == nil {
-		_, invalid = this.links.UpdateLink(link)
+		ldata, invalid = this.links.UpdateLink(link)
+		if updater != nil {
+			uerr, err = updater(logger, link, ldata)
+		}
 	}
 	if this.updateLink(logger, orig, err, invalid, false) {
 		_, err2 := obj.ModifyStatus(func(data resources.ObjectData) (bool, error) {
@@ -111,23 +153,26 @@ func (this *Reconciler) Reconcile(logger logger.LogContext, obj resources.Object
 		})
 
 		if err2 != nil {
-			return reconcile.Delay(logger, err2)
+			return ldata, reconcile.Delay(logger, err2)
 		}
 	}
 	if err != nil {
-		return reconcile.Failed(logger, err)
+		return ldata, reconcile.Failed(logger, err)
 	}
 	this.controller.EnqueueCommand(CMD_UPDATE)
-	return reconcile.Succeeded(logger)
+	if uerr != nil {
+		return ldata, reconcile.Delay(logger, uerr)
+	}
+	return ldata, reconcile.Succeeded(logger)
 }
 
-func (this *Reconciler) updateLink(logger logger.LogContext, link *v1alpha1.KubeLink, err, invalid error, update bool) bool {
+func (this *Reconciler) updateLink(logger logger.LogContext, klink *v1alpha1.KubeLink, err, invalid error, update bool) bool {
 
 	mod := false
-	msg := link.Status.Message
-	state := link.Status.State
+	msg := klink.Status.Message
+	state := klink.Status.State
 
-	gw := this.impl.UpdateGateway(link)
+	gw := this.impl.UpdateGateway(klink)
 
 	if err != nil || invalid != nil {
 		if invalid != nil {
@@ -144,31 +189,31 @@ func (this *Reconciler) updateLink(logger logger.LogContext, link *v1alpha1.Kube
 		}
 	}
 
-	if link.Status.State != state {
+	if klink.Status.State != state {
 		mod = true
 		if logger != nil {
-			logger.Infof("update state %q -> %q", link.Status.State, state)
+			logger.Infof("update state %q -> %q", klink.Status.State, state)
 		}
 		if update {
-			link.Status.State = state
+			klink.Status.State = state
 		}
 	}
-	if link.Status.Message != msg {
+	if klink.Status.Message != msg {
 		mod = true
 		if logger != nil {
-			logger.Infof("update message %q -> %q", link.Status.Message, msg)
+			logger.Infof("update message %q -> %q", klink.Status.Message, msg)
 		}
 		if update {
-			link.Status.Message = msg
+			klink.Status.Message = msg
 		}
 	}
-	if gw != nil && link.Status.Gateway != *gw {
+	if gw != nil && klink.Status.Gateway != *gw {
 		mod = true
 		if logger != nil {
-			logger.Infof("update gateway %q -> %q", link.Status.Gateway, *gw)
+			logger.Infof("update gateway %q -> %q", klink.Status.Gateway, *gw)
 		}
 		if update {
-			link.Status.Gateway = *gw
+			klink.Status.Gateway = *gw
 		}
 	}
 	return mod
@@ -177,14 +222,14 @@ func (this *Reconciler) updateLink(logger logger.LogContext, link *v1alpha1.Kube
 func (this *Reconciler) Delete(logger logger.LogContext, obj resources.Object) reconcile.Status {
 	logger.Infof("delete")
 	this.links.RemoveLink(obj.GetName())
-	this.controller.EnqueueCommand(CMD_UPDATE)
+	this.TriggerUpdate()
 	return reconcile.Succeeded(logger)
 }
 
 func (this *Reconciler) Deleted(logger logger.LogContext, key resources.ClusterObjectKey) reconcile.Status {
 	logger.Infof("deleted")
 	this.links.RemoveLink(key.Name())
-	this.controller.EnqueueCommand(CMD_UPDATE)
+	this.TriggerUpdate()
 	return reconcile.Succeeded(logger)
 }
 
@@ -240,7 +285,7 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 			}
 		} else {
 			ocnt++
-			//n.add(true, "other       %d: %s", i, String(r))
+			// n.add(true, "other       %d: %s", i, String(r))
 		}
 	}
 

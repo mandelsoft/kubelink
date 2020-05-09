@@ -56,7 +56,7 @@ func CreateBaseReconciler(controller controller.Interface, impl ReconcilerImplem
 	}
 	config := impl.Config(cfg)
 
-	controller.Infof("using cidr for modes: %s", config.NodeCIDR)
+	controller.Infof("using cidr for nodes: %s", config.NodeCIDR)
 
 	ifce, err := kubelink.LookupNodeIP(controller, config.NodeCIDR)
 	if err != nil {
@@ -64,7 +64,7 @@ func CreateBaseReconciler(controller controller.Interface, impl ReconcilerImplem
 	}
 
 	return &Reconciler{
-		controller: controller,
+		Common:     NewCommon(controller),
 		config:     cfg,
 		baseconfig: config,
 		ifce:       ifce,

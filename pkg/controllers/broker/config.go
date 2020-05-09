@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/gardener/controller-manager-library/pkg/config"
+	"github.com/gardener/controller-manager-library/pkg/resources"
 	"github.com/gardener/controller-manager-library/pkg/utils"
 
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
@@ -46,6 +47,7 @@ type Config struct {
 
 	ClusterAddress net.IP
 	ClusterCIDR    *net.IPNet
+	ClusterName    string
 
 	ServiceCIDR *net.IPNet
 
@@ -63,13 +65,21 @@ type Config struct {
 	Service    string
 	Interface  string
 
-	AutoConnect bool
+	serviceAccount string
+	ServiceAccount resources.ObjectName
+	MeshDomain     string
+	CoreDNS        string
+	CoreDNSSecret  string
+	DnsPropagation bool
+	AutoConnect    bool
+	DisableBridge  bool
 }
 
 func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	this.Config.AddOptionsToSet(set)
 	set.AddStringOption(&this.service, "service-cidr", "", "", "CIDR of of local service network")
 	set.AddStringOption(&this.address, "link-address", "", "", "CIDR of cluster in cluster network")
+	set.AddStringOption(&this.ClusterName, "cluster-name", "", "", "Name of local cluster in cluster mesh")
 	set.AddStringOption(&this.responsible, "served-links", "", "all", "Comma separated list of links to serve")
 	set.AddIntOption(&this.Port, "broker-port", "", 8088, "Port for broker")
 	set.AddIntOption(&this.AdvertizedPort, "advertized-port", "", kubelink.DEFAULT_PORT, "Advertized broker port for auto-connect")
@@ -77,19 +87,24 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.KeyFile, "keyfile", "", "", "TLS certificate key file")
 	set.AddStringOption(&this.CACertFile, "cacertfile", "", "", "TLS ca certificate file")
 	set.AddStringOption(&this.Secret, "secret", "", "", "TLS secret")
+	set.AddBoolOption(&this.DisableBridge, "disable-bridge", "", false, "Disable network bridge")
 	set.AddStringOption(&this.ManageMode, "secret-manage-mode", "", MANAGE_MODE_NONE, "Manage mode for TLS secret")
 	set.AddStringOption(&this.DNSName, "dns-name", "", "", "DNS Name for managed certificate")
 	set.AddStringOption(&this.Service, "service", "", "", "Service name for managed certificate")
 	set.AddStringOption(&this.Interface, "ifce-name", "", "", "Name of the tun interface")
+	set.AddStringOption(&this.serviceAccount, "service-account", "", "", "Service Account to use for CoreDNS API Server Access")
+	set.AddStringOption(&this.MeshDomain, "mesh-domain", "", "kubelink", "Base domain for cluster mesh services")
+	set.AddStringOption(&this.CoreDNS, "coredns-deployment", "", "kubelink-coredns", "Name of coredns deployment used by kubelink")
+	set.AddStringOption(&this.CoreDNSSecret, "coredns-secret", "", "kubelink-coredns", "Name of dns secret used by kubelink")
+	set.AddBoolOption(&this.DnsPropagation, "dns-propagation", "", false, "Enable DNS Record propagation for Services")
 	set.AddBoolOption(&this.AutoConnect, "auto-connect", "", false, "Automatically register cluster for authenticated incoming requests")
-}
-
-func Empty(s string) bool {
-	return strings.TrimSpace(s) == ""
 }
 
 func (this *Config) Prepare() error {
 	err := this.Config.Prepare()
+	if err != nil {
+		return err
+	}
 
 	this.ClusterAddress, this.ClusterCIDR, err = this.RequireCIDR(this.address, "link-address")
 	if err != nil {
@@ -105,7 +120,7 @@ func (this *Config) Prepare() error {
 		if this.ServiceCIDR == nil {
 			return fmt.Errorf("auto-connect requires local service cidr")
 		}
-		if Empty(this.Secret) && Empty(this.CertFile) {
+		if kubelink.Empty(this.Secret) && kubelink.Empty(this.CertFile) {
 			return fmt.Errorf("auto-connect requires authenticated mode -> secret or cert file requied")
 		}
 	}
@@ -123,10 +138,10 @@ func (this *Config) Prepare() error {
 			return fmt.Errorf("TLS secret or cert file must be set")
 		}
 	*/
-	if !Empty(this.Secret) && !Empty(this.CertFile) {
+	if !kubelink.Empty(this.Secret) && !kubelink.Empty(this.CertFile) {
 		return fmt.Errorf("only secret or cert file can be specified")
 	}
-	if !Empty(this.ManageMode) {
+	if !kubelink.Empty(this.ManageMode) {
 		if !valid_modes.Contains(this.ManageMode) {
 			return fmt.Errorf("invalid management mode (possible %s): %s", valid_modes, this.ManageMode)
 		}
@@ -138,12 +153,24 @@ func (this *Config) Prepare() error {
 	} else {
 		this.ManageMode = MANAGE_MODE_NONE
 	}
-	if !Empty(this.CertFile) {
-		if Empty(this.KeyFile) {
+	if !kubelink.Empty(this.CertFile) {
+		if kubelink.Empty(this.KeyFile) {
 			return fmt.Errorf("key file must be specified if cert file is set")
 		}
-		if Empty(this.CACertFile) {
+		if kubelink.Empty(this.CACertFile) {
 			return fmt.Errorf("ca cert file must be specified if cert file is set")
+		}
+	}
+
+	if this.serviceAccount != "" {
+		names := strings.Split(this.serviceAccount, "/")
+		if len(names) > 2 {
+			return fmt.Errorf("invalid service account name")
+		}
+		if len(names) == 2 {
+			this.ServiceAccount = resources.NewObjectName(names...)
+		} else {
+			this.ServiceAccount = resources.NewObjectName("kube-system", names[0])
 		}
 	}
 	return nil

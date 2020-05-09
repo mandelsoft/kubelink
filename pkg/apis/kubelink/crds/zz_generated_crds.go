@@ -80,14 +80,34 @@ spec:
             type: object
           spec:
             properties:
+              apiAccess:
+                description: SecretReference represents a Secret Reference. It has
+                  enough information to retrieve secret in any namespace
+                properties:
+                  name:
+                    description: Name is unique within a namespace to reference a
+                      secret resource.
+                    type: string
+                  namespace:
+                    description: Namespace defines the space within which the secret
+                      name must be unique.
+                    type: string
+                type: object
               cidr:
                 type: string
               clusterAddress:
                 type: string
+              egress:
+                items:
+                  type: string
+                type: array
               endpoint:
                 type: string
+              ingress:
+                items:
+                  type: string
+                type: array
             required:
-            - cidr
             - clusterAddress
             - endpoint
             type: object

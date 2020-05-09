@@ -18,4 +18,4 @@ limitations under the License.
 // +k8s:protobuf-gen=package
 // +k8s:openapi-gen=true
 
-package v1 // import "k8s.io/api/apps/v1"
+package apps // import "k8s.io/api/apps/v1"

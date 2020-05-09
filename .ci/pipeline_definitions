@@ -1,2 +1,2 @@
-external-dns-management:
+kubelink:
   template: 'default'

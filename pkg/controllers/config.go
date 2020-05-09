@@ -55,7 +55,7 @@ func (this *Config) RequireCIDR(s, name string) (net.IP, *net.IPNet, error) {
 	if cidr == nil && err == nil {
 		return nil, nil, fmt.Errorf("%s must be set", name)
 	}
-	return ip, cidr, nil
+	return ip, cidr, err
 }
 
 func (this *Config) OptionalCIDR(s, name string) (net.IP, *net.IPNet, error) {

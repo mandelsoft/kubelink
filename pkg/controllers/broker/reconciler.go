@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/gardener/controller-manager-library/pkg/certs"
@@ -30,6 +31,7 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
 	"github.com/vishvananda/netlink"
+	core "k8s.io/api/core/v1"
 
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
@@ -41,7 +43,18 @@ type reconciler struct {
 	*controllers.Reconciler
 	config   *Config
 	certInfo *CertInfo
-	mux      *Mux
+
+	linkResource       resources.Interface
+	saResource         resources.Interface
+	secretResource     resources.Interface
+	deploymentResource resources.Interface
+	secrets            *SecretCache
+
+	access kubelink.LinkAccessInfo
+	mux    *Mux
+
+	lock            sync.RWMutex
+	requiredSecrets map[resources.ObjectName]resources.ObjectNameSet
 }
 
 var _ reconcile.Interface = &reconciler{}
@@ -112,6 +125,10 @@ func (this *reconciler) Setup() {
 	}
 
 	this.Reconciler.Setup()
+
+	if this.config.DisableBridge {
+		return
+	}
 	tun, err := NewTun(this.Controller(), this.config.Interface, this.config.ClusterAddress, this.config.ClusterCIDR)
 	if err != nil {
 		panic(fmt.Errorf("cannot setup tun device: %s", err))
@@ -124,15 +141,20 @@ func (this *reconciler) Setup() {
 		this.certInfo = NewCertInfo(this.Controller(), certificate)
 	}
 
-	var local []net.IPNet
+	var local tcp.CIDRList
 	if this.config.ServiceCIDR != nil {
-		local = append(local, *this.config.ServiceCIDR)
+		local.Add(this.config.ServiceCIDR)
 	}
 	addr := &net.IPNet{
 		IP:   this.config.ClusterAddress,
 		Mask: this.config.ClusterCIDR.Mask,
 	}
 	mux := NewMux(this.Controller().GetContext(), this.Controller(), this.certInfo, uint16(this.config.AdvertizedPort), addr, local, tun, this.Links(), this)
+
+	if this.config.DnsPropagation {
+		mux.connectionHandler = &DNSHandler{this}
+	}
+
 	go func() {
 		<-this.Controller().GetContext().Done()
 		this.Controller().Infof("closing tun device %q", tun)
@@ -142,35 +164,61 @@ func (this *reconciler) Setup() {
 }
 
 func (this *reconciler) Start() {
-	NewServer("broker", this.mux).Start(this.certInfo, "", this.config.Port)
-	go func() {
-		defer ctxutil.Cancel(this.Controller().GetContext())
-		this.Controller().Infof("starting tun server")
-		for {
-			err := this.mux.HandleTun()
-			if err != nil {
-				if err == io.EOF {
-					this.Controller().Errorf("tun server finished")
-				} else {
-					this.Controller().Errorf("tun handling aborted: %s", err)
-				}
-				break
-			} else {
-				this.mux.tun.Close()
-				time.Sleep(100 * time.Millisecond)
-				this.Controller().Infof("recreating tun device")
-				this.mux.tun, err = NewTun(this.Controller(), this.config.Interface, this.config.ClusterAddress, this.config.ClusterCIDR)
+	if !this.config.DisableBridge {
+		NewServer("broker", this.mux).Start(this.certInfo, "", this.config.Port)
+		go func() {
+			defer ctxutil.Cancel(this.Controller().GetContext())
+			this.Controller().Infof("starting tun server")
+			for {
+				err := this.mux.HandleTun()
 				if err != nil {
-					panic(fmt.Errorf("cannot setup tun device: %s", err))
+					if err == io.EOF {
+						this.Controller().Errorf("tun server finished")
+					} else {
+						this.Controller().Errorf("tun handling aborted: %s", err)
+					}
+					break
+				} else {
+					this.mux.tun.Close()
+					time.Sleep(100 * time.Millisecond)
+					this.Controller().Infof("recreating tun device")
+					this.mux.tun, err = NewTun(this.Controller(), this.config.Interface, this.config.ClusterAddress, this.config.ClusterCIDR)
+					if err != nil {
+						panic(fmt.Errorf("cannot setup tun device: %s", err))
+					}
 				}
 			}
-		}
-	}()
+		}()
+	}
 }
 
 func (this *reconciler) Command(logger logger.LogContext, cmd string) reconcile.Status {
-	this.reconcileTun(logger)
+	if !this.config.DisableBridge {
+		this.reconcileTun(logger)
+	}
+	if this.config.ServiceAccount != nil {
+		access, err := this.getServiceAccountToken()
+		if err != nil {
+			logger.Errorf("cannot get service account token: %s", err)
+		}
+		if access != nil {
+			this.access = *access
+		} else {
+			this.access = kubelink.LinkAccessInfo{}
+		}
+	}
+	this.updateCorefile(logger)
 	return this.Reconciler.Command(logger, cmd)
+}
+
+func (this *reconciler) Reconcile(logger logger.LogContext, obj resources.Object) reconcile.Status {
+
+	return this.ReconcileLink(logger, obj, this.handleLinkAccess)
+}
+
+func (this *reconciler) Deleted(logger logger.LogContext, key resources.ClusterObjectKey) reconcile.Status {
+	this.secrets.ReleaseSecretForLink(key.ObjectName())
+	return this.Reconciler.Deleted(logger, key)
 }
 
 func (this *reconciler) reconcileTun(logger logger.LogContext) {
@@ -209,4 +257,39 @@ func (this *reconciler) Notify(l *kubelink.Link, err error) {
 		this.Controller().Infof("requeue kubelink %q for new connection", l.Name)
 	}
 	this.Controller().EnqueueKey(resources.NewClusterKey(this.Controller().GetMainCluster().GetId(), v1alpha1.KUBELINK, "", l.Name))
+}
+
+func (this *reconciler) getServiceAccountToken() (*kubelink.LinkAccessInfo, error) {
+	if this.config.ServiceAccount == nil {
+		return nil, fmt.Errorf("no service accound specified")
+	}
+	sa := core.ServiceAccount{}
+	_, err := this.saResource.GetInto(this.config.ServiceAccount, &sa)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range sa.Secrets {
+		ns := s.Namespace
+		if ns == "" {
+			ns = sa.Namespace
+		}
+		name := resources.NewObjectName(ns, s.Name)
+		obj, err := this.secretResource.GetCached(name)
+		if err != nil {
+			return nil, err
+		}
+		secret := obj.Data().(*core.Secret)
+		cacert := getStringValue("ca.crt", secret)
+		token := getStringValue("token", secret)
+		return &kubelink.LinkAccessInfo{token, cacert}, nil
+	}
+	return nil, nil
+}
+
+func getStringValue(key string, secret *core.Secret) string {
+	bytes := secret.Data[key]
+	if bytes == nil {
+		return ""
+	}
+	return string(bytes)
 }

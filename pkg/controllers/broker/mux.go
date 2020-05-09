@@ -32,7 +32,13 @@ import (
 	"golang.org/x/net/ipv4"
 
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
+	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
+
+type ConnectionHandler interface {
+	UpdateAccess(hello *ConnectionHello)
+	GetAccess() kubelink.LinkAccessInfo
+}
 
 type LinkStateHandler interface {
 	Notify(*kubelink.Link, error)
@@ -49,13 +55,15 @@ type Mux struct {
 	port        uint16
 	clusterAddr *net.IPNet
 	links       *kubelink.Links
-	local       []net.IPNet
+	local       tcp.CIDRList
 	tun         *Tun
 	handlers    []LinkStateHandler
-	autoconnect bool
+
+	connectionHandler ConnectionHandler
+	autoconnect       bool
 }
 
-func NewMux(ctx context.Context, logger logger.LogContext, certInfo *CertInfo, port uint16, addr *net.IPNet, localCIDRs []net.IPNet, tun *Tun, links *kubelink.Links, handlers ...LinkStateHandler) *Mux {
+func NewMux(ctx context.Context, logger logger.LogContext, certInfo *CertInfo, port uint16, addr *net.IPNet, localCIDRs tcp.CIDRList, tun *Tun, links *kubelink.Links, handlers ...LinkStateHandler) *Mux {
 	return &Mux{
 		LogContext:  logger,
 		ctx:         ctx,
@@ -76,6 +84,9 @@ func (this *Mux) SetAutoConnect(b bool) {
 }
 
 func (this *Mux) GetError(ip net.IP) error {
+	if this == nil {
+		return nil
+	}
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 
@@ -106,7 +117,7 @@ func (this *Mux) QueryConnectionForIP(ip net.IP) (*TunnelConnection, *kubelink.L
 	if t != nil {
 		return t, nil
 	}
-	l, _ := this.links.GetLinkForIP(ip)
+	l := this.links.GetLinkForIP(ip)
 	if l == nil {
 		return nil, nil
 	}
@@ -218,7 +229,7 @@ func (this *Mux) Notify(t *TunnelConnection, err error) {
 		this.Errorf("connection %s aborted: %s", t, err)
 		this.removeTunnel(t)
 	}
-	l, _ := this.links.GetLinkForIP(t.clusterCIDR.IP)
+	l := this.links.GetLinkForIP(t.clusterCIDR.IP)
 	this.notify(l, err)
 }
 
@@ -364,6 +375,7 @@ func (this *Mux) ServeConnection(ctx context.Context, conn net.Conn) {
 				return
 			}
 			this.Infof("auto-connected %s", l)
+			l.Release()
 			t.clusterCIDR = t.clusterCIDR
 		}
 	}

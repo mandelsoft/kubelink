@@ -20,6 +20,7 @@ package tcp
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net"
 	"sync"
 )
@@ -65,8 +66,45 @@ func EqualCIDR(a, b *net.IPNet) bool {
 	return true
 }
 
-func CIDR(cidr *net.IPNet) *net.IPNet {
-	new := *cidr
-	new.IP = cidr.IP.Mask(cidr.Mask)
-	return &new
+func CIDRNet(cidr *net.IPNet) *net.IPNet {
+	net := *cidr
+	net.IP = cidr.IP.Mask(cidr.Mask)
+	return &net
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+type CIDRList []*net.IPNet
+
+func (this *CIDRList) String() string {
+	sep := "["
+	end := ""
+	s := ""
+	for _, c := range *this {
+		s = fmt.Sprintf("%s%s%s", s, sep, c)
+		sep = ","
+		end = "]"
+	}
+	return s + end
+}
+
+func (this *CIDRList) Add(cidrs ...*net.IPNet) {
+	*this = append(*this, cidrs...)
+}
+
+func (this *CIDRList) IsEmpty() bool {
+	return len(*this) == 0
+}
+
+func (this *CIDRList) IsSet() bool {
+	return *this != nil
+}
+
+func (this *CIDRList) Contains(ip net.IP) bool {
+	for _, c := range *this {
+		if c.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }

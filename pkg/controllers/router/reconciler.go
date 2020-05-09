@@ -78,26 +78,28 @@ func (this *reconciler) Setup() {
 	if this.config.IPIP {
 		link := &netlink.Iptun{LinkAttrs: netlink.LinkAttrs{Name: "tunl0"}}
 		err := netlink.LinkAdd(link)
-		if err != nil {
-			var ok bool
-			if err != syscall.EEXIST {
-				this.Controller().Errorf("error creating tunl0 interface: %s", err)
+		if err != nil && err != syscall.EEXIST {
+			this.Controller().Errorf("error creating tunl0 interface: %s", err)
+		} else {
+			if err == nil {
+				this.Controller().Infof("created interface tunl0[%d] for ip-over-ip routing option", link.Attrs().Index)
+			} else {
+				this.Controller().Infof("found interface tunl0[%d] for ip-over-ip routing option", link.Attrs().Index)
 			}
+
 			l, err := netlink.LinkByName("tunl0")
 			if err != nil {
 				this.Controller().Errorf("error getting tunl0 interface: %s", err)
+			} else {
+				if link, ok := l.(*netlink.Iptun); ok {
+					err = netlink.LinkSetUp(link)
+					if err != nil {
+						this.Controller().Errorf("cannot bring up tunl0: %s", err)
+					}
+				} else {
+					this.Controller().Errorf("tunl0 isn't an iptun device (%#v), please remove device and try again", l)
+				}
 			}
-			link, ok = l.(*netlink.Iptun)
-			if !ok {
-				this.Controller().Errorf("tunl0 isn't an iptun device (%#v), please remove device and try again", l)
-			}
-			this.Controller().Infof("found interface tunl0[%d] for ip-over-ip routing option", link.Attrs().Index)
-		} else {
-			this.Controller().Infof("created interface tunl0[%d] for ip-over-ip routing option", link.Attrs().Index)
-		}
-		err = netlink.LinkSetUp(link)
-		if err != nil {
-			this.Controller().Errorf("cannot bring up tunl0: %s", err)
 		}
 	}
 	this.Reconciler.Setup()

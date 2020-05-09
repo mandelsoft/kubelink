@@ -28,6 +28,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/gardener/controller-manager-library/pkg/config"
 	"github.com/gardener/controller-manager-library/pkg/configmain"
 	areacfg "github.com/gardener/controller-manager-library/pkg/controllermanager/config"
 	"github.com/gardener/controller-manager-library/pkg/ctxutil"
@@ -52,7 +53,7 @@ func (this Configuration) Start(use, short string) {
 	def := this.Definition()
 	long := def.GetDescription()
 	var (
-		cctx = ctxutil.CancelContext(ctxutil.WaitGroupContext(context.Background()))
+		cctx = ctxutil.CancelContext(ctxutil.WaitGroupContext(context.Background(), "main"))
 		ctx  = ctxutil.TickContext(cctx, DeletionActivity)
 		c    = make(chan os.Signal, 2)
 		t    = make(chan os.Signal, 2)
@@ -102,29 +103,36 @@ func (this Configuration) Start(use, short string) {
 
 	var gracePeriod = 120 * time.Second
 	logger.Infof("waiting for everything to shutdown (max. %d seconds)", gracePeriod/time.Second)
-	ctxutil.WaitGroupWait(ctx, gracePeriod)
+	ctxutil.WaitGroupWait(ctx, gracePeriod, "main")
 	logger.Infof("%s exits.", use)
 }
 
 func NewCommand(ctx context.Context, use, short, long string, def *Definition) *cobra.Command {
 	ctx, cfg := configmain.WithConfig(ctx, nil)
 	def.ExtendConfig(cfg)
-
+	fileName := ""
 	cmd := &cobra.Command{
 		Use:     use,
 		Short:   short,
 		Long:    long,
 		Version: Version,
-		RunE: func(c *cobra.Command, args []string) error {
-			if err := runCM(ctx, def); err != nil {
-				fmt.Fprintf(os.Stderr, "%s\n", err)
-				os.Exit(1)
-			}
-			return nil
-		},
 	}
-	cfg.AddToCommand(cmd)
+	cmd.RunE = func(c *cobra.Command, args []string) error {
+		if fileName != "" {
+			logger.Infof("reading config from file %q", fileName)
+			if err := config.MergeConfigFile(fileName, cmd.Flags(), false); err != nil {
+				return fmt.Errorf("invalid config file %q; %s", fileName, err)
+			}
+		}
+		if err := runCM(ctx, def); err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			os.Exit(1)
+		}
+		return nil
+	}
 
+	cfg.AddToCommand(cmd)
+	cmd.Flags().StringVarP(&fileName, "config", "", "", "config file")
 	return cmd
 }
 
