@@ -65,6 +65,7 @@ func (this *Common) TriggerUpdate() {
 }
 
 func (this *Common) TriggerLink(name string) {
+	this.controller.Infof("trigger link %s", name)
 	this.Controller().EnqueueKey(resources.NewClusterKey(
 		this.controller.GetMainCluster().GetId(),
 		v1alpha1.KUBELINK, "", name),
@@ -258,7 +259,7 @@ func String(r netlink.Route) string {
 }
 
 func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.Status {
-	logger.Info("update routes")
+	logger.Debug("update routes")
 	routes, err := kubelink.ListRoutes()
 	if err != nil {
 		return reconcile.Delay(logger, err)

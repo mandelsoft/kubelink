@@ -57,6 +57,10 @@ type LinkAccessInfo struct {
 	Token  string
 }
 
+func (this LinkAccessInfo) String() string {
+	return fmt.Sprintf("{ca:%s..., token:%s...}", ShortenString(this.CACert, 35), ShortenString(this.Token, 35))
+}
+
 type LinkForeignData struct {
 	UpdatePending bool
 	LinkAccessInfo
@@ -203,7 +207,7 @@ func (this *Links) LinkAccessUpdated(logger logger.LogContext, name string, acce
 		if old.LinkAccessInfo == access {
 			new := *old
 			new.UpdatePending = false
-			logger.Infof("access updated for link %s", name)
+			logger.Infof("access updated for link %s: %s", name, access)
 			return this.replaceLink(&new)
 		}
 	}

@@ -25,3 +25,13 @@ import (
 func Empty(s string) bool {
 	return strings.TrimSpace(s) == ""
 }
+
+func ShortenString(s string, n int) string {
+	l := len(s)
+	if l > n {
+		l = n
+	} else {
+		l = l / 2
+	}
+	return s[:l]
+}

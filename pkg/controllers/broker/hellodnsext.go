@@ -38,7 +38,12 @@ func (this *DNSExtension) Id() byte {
 }
 
 func (this *DNSExtension) Data() []byte {
-	return append(append([]byte(this.Token), 0), []byte(this.CACert)...)
+	d := append([]byte{}, append(append([]byte(this.Token), 0), []byte(this.CACert)...)...)
+	return d
+}
+
+func (this *DNSExtension) String() string {
+	return ((*kubelink.LinkAccessInfo)(this)).String()
 }
 
 type DNSExtensionHandler struct{}
@@ -51,15 +56,16 @@ func (this *DNSExtensionHandler) Parse(id byte, data []byte) (ConnectionHelloExt
 	}
 	s := strings.Split(string(data), "\000")
 	if len(s) == 1 {
-		return &DNSExtension{s[0], ""}, nil
+		return &DNSExtension{Token: s[0], CACert: ""}, nil
 	}
-	return &DNSExtension{s[0], s[1]}, nil
+	return &DNSExtension{Token: s[0], CACert: s[1]}, nil
 }
 
 func (this *DNSExtensionHandler) Add(hello *ConnectionHello, mux *Mux) {
 	if mux.connectionHandler != nil {
 		access := mux.connectionHandler.GetAccess()
 		if access.Token != "" {
+			mux.Infof("adding access info %s", access)
 			ext := DNSExtension(access)
 			hello.Extensions[EXT_DNS] = &ext
 		}

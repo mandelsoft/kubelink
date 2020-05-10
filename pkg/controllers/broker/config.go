@@ -71,6 +71,7 @@ type Config struct {
 	CoreDNS            string
 	CoreDNSSecret      string
 	DNSPropagation     bool
+	DNSAdvertisement   bool
 
 	AutoConnect   bool
 	DisableBridge bool
@@ -78,7 +79,7 @@ type Config struct {
 
 func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	this.Config.AddOptionsToSet(set)
-	set.AddStringOption(&this.service, "service-cidr", "", "", "CIDR of of local service network")
+	set.AddStringOption(&this.service, "service-cidr", "", "", "CIDR of local service network")
 	set.AddStringOption(&this.address, "link-address", "", "", "CIDR of cluster in cluster network")
 	set.AddStringOption(&this.ClusterName, "cluster-name", "", "", "Name of local cluster in cluster mesh")
 	set.AddStringOption(&this.responsible, "served-links", "", "all", "Comma separated list of links to serve")
@@ -98,6 +99,7 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.CoreDNS, "coredns-deployment", "", "kubelink-coredns", "Name of coredns deployment used by kubelink")
 	set.AddStringOption(&this.CoreDNSSecret, "coredns-secret", "", "kubelink-coredns", "Name of dns secret used by kubelink")
 	set.AddBoolOption(&this.DNSPropagation, "dns-propagation", "", false, "Enable DNS Record propagation for Services")
+	set.AddBoolOption(&this.DNSAdvertisement, "dns-advertisement", "", false, "Enable automatic advertisement of DNS access info")
 	set.AddBoolOption(&this.AutoConnect, "auto-connect", "", false, "Automatically register cluster for authenticated incoming requests")
 }
 

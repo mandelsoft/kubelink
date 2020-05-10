@@ -23,15 +23,23 @@ import (
 	"net"
 
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
+	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
 func main() {
-	var list kubelink.CIDRList
+	var list tcp.CIDRList
 
 	fmt.Printf("set: %t, empty: %t\n", list.IsSet(), list.IsEmpty())
 
-	list = kubelink.CIDRList{}
+	list = tcp.CIDRList{}
 	fmt.Printf("set: %t, empty: %t\n", list.IsSet(), list.IsEmpty())
 	list.Add(&net.IPNet{})
 	fmt.Printf("set: %t, empty: %t\n", list.IsSet(), list.IsEmpty())
+
+	access := kubelink.LinkAccessInfo{
+		CACert: "CERT",
+		Token:  "TOKEN",
+	}
+	fmt.Printf("direct : %s\n", access)
+	fmt.Printf("pointer: %s\n", &access)
 }

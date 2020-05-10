@@ -151,7 +151,7 @@ func (this *reconciler) Setup() {
 	}
 	mux := NewMux(this.Controller().GetContext(), this.Controller(), this.certInfo, uint16(this.config.AdvertizedPort), addr, local, tun, this.Links(), this)
 
-	if this.config.DNSPropagation {
+	if this.config.DNSAdvertisement {
 		mux.connectionHandler = &DNSHandler{this}
 	}
 
@@ -195,11 +195,11 @@ func (this *reconciler) Start() {
 
 func (this *reconciler) Command(logger logger.LogContext, cmd string) reconcile.Status {
 	if !this.config.DisableBridge {
-		logger.Infof("update tun")
+		logger.Debug("update tun")
 		this.reconcileTun(logger)
 	}
 	if this.config.CoreServiceAccount != nil {
-		logger.Infof("update service account")
+		logger.Debug("update service account")
 		access, err := this.getServiceAccountToken()
 		if err != nil {
 			logger.Errorf("cannot get service account token: %s", err)
@@ -232,7 +232,7 @@ func (this *reconciler) reconcileTun(logger logger.LogContext) {
 
 	for _, a := range addrs {
 		if a.IP.Equal(this.config.ClusterAddress) {
-			logger.Infof("address still set for %q", tun)
+			logger.Debugf("address still set for %q", tun)
 			return
 		}
 	}

@@ -41,6 +41,7 @@ func init() {
 	controllers.BaseController("broker", &Config{}).
 		RequireLease().
 		Reconciler(Create).
+		WorkerPool("secrets", 1, 0).
 		Reconciler(CreateSecrets, "secrets").
 		ReconcilerWatchByGK("secrets", secretGK).
 		MustRegister()
@@ -64,39 +65,40 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 	} else {
 		impl = this
 	}
+
 	this.Reconciler, err = controllers.CreateBaseReconciler(controller, impl)
 	if err != nil {
 		return nil, err
 	}
 	this.config = this.Reconciler.Config().(*Config)
 
+	r, err := controller.GetMainCluster().Resources().GetByExample(&api.KubeLink{})
+	if err != nil {
+		return nil, fmt.Errorf("no kubelink resource found: %s", err)
+	}
+	this.linkResource = r
+
+	r, err = controller.GetMainCluster().Resources().GetByExample(&_core.ServiceAccount{})
+	if err != nil {
+		return nil, fmt.Errorf("no service account resource found: %s", err)
+	}
+	this.saResource = r
+
+	r, err = controller.GetMainCluster().Resources().GetByExample(&_core.Secret{})
+	if err != nil {
+		return nil, fmt.Errorf("no secret resource found: %s", err)
+	}
+	this.secretResource = r
+
+	r, err = controller.GetMainCluster().Resources().GetByExample(&_apps.Deployment{})
+	if err != nil {
+		return nil, fmt.Errorf("no deployment resource found: %s", err)
+	}
+	this.deploymentResource = r
+
 	if this.config.DNSPropagation {
 		if this.config.CoreServiceAccount != nil {
 			controller.Infof("using dns propagation with service account %q", this.config.CoreServiceAccount)
-
-			r, err := controller.GetMainCluster().Resources().GetByExample(&api.KubeLink{})
-			if err != nil {
-				return nil, fmt.Errorf("no kubelink resource found: %s", err)
-			}
-			this.linkResource = r
-
-			r, err = controller.GetMainCluster().Resources().GetByExample(&_core.ServiceAccount{})
-			if err != nil {
-				return nil, fmt.Errorf("no service account resource found: %s", err)
-			}
-			this.saResource = r
-
-			r, err = controller.GetMainCluster().Resources().GetByExample(&_core.Secret{})
-			if err != nil {
-				return nil, fmt.Errorf("no secret resource found: %s", err)
-			}
-			this.secretResource = r
-
-			r, err = controller.GetMainCluster().Resources().GetByExample(&_apps.Deployment{})
-			if err != nil {
-				return nil, fmt.Errorf("no deployment resource found: %s", err)
-			}
-			this.deploymentResource = r
 
 			access, err := this.getServiceAccountToken()
 			if err != nil {
@@ -104,8 +106,7 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 			}
 			if access != nil {
 				this.access = *access
-				controller.Infof("  found token: %s...", shorten(this.access.Token))
-				controller.Infof("  found cacert: %s...", shorten(this.access.CACert))
+				controller.Infof("  found access: %s", this.access)
 			}
 		} else {
 			controller.Infof("using dns propagation")
@@ -129,16 +130,6 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 	}
 
 	return this, nil
-}
-
-func shorten(s string) string {
-	l := len(s)
-	if l > 20 {
-		l = 20
-	} else {
-		l = l / 2
-	}
-	return s[:l]
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -19,9 +19,11 @@
 package broker
 
 import (
+	"encoding/base64"
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gardener/controller-manager-library/pkg/logger"
@@ -61,7 +63,7 @@ func (this Kubeconfig) AddCluster(name, url, ca, token string) {
 	this.add("clusters", Manifest{
 		"name": name,
 		"cluster": Manifest{
-			"certificate-authority-data": ca,
+			"certificate-authority-data": Base64Encode([]byte(ca), 64),
 			"server":                     url,
 		},
 	})
@@ -72,9 +74,11 @@ func (this Kubeconfig) AddCluster(name, url, ca, token string) {
 		},
 	})
 	this.add("contexts", Manifest{
-		"name":    name,
-		"user":    name,
-		"cluster": name,
+		"name": name,
+		"context": Manifest{
+			"user":    name,
+			"cluster": name,
+		},
 	})
 }
 
@@ -95,9 +99,7 @@ func coreEntry(first *bool, name, basedomain string, local bool) string {
 		header = fmt.Sprintf(`
 %s.%s:8053 {
     errors
-    log . {
-        class error
-    }
+    log
 `, name, basedomain)
 
 	}
@@ -239,6 +241,8 @@ func (this *reconciler) updateSecretFromLink(logger logger.LogContext, klink *ap
 				Type: _core.SecretTypeOpaque,
 			}
 			create = true
+		} else {
+			secret = secret.DeepCopy()
 		}
 	}
 
@@ -287,7 +291,7 @@ func (this *reconciler) updateSecretFromLink(logger logger.LogContext, klink *ap
 		}
 	}
 
-	sobj.Modify(func(data resources.ObjectData) (bool, error) {
+	_, err = sobj.Modify(func(data resources.ObjectData) (bool, error) {
 		old := data.(*_core.Secret)
 		mod := !reflect.DeepEqual(secretData, old.Data)
 		if mod {
@@ -297,15 +301,19 @@ func (this *reconciler) updateSecretFromLink(logger logger.LogContext, klink *ap
 		return mod, nil
 	})
 
-	this.Links().LinkAccessUpdated(logger, entry.Name, entry.LinkAccessInfo)
-	return nil, nil
+	if err == nil {
+		this.Links().LinkAccessUpdated(logger, entry.Name, entry.LinkAccessInfo)
+	} else {
+		logger.Errorf("cannot update secret: %s", err)
+	}
+	return err, nil
 }
 
 func (this *reconciler) updateCorefile(logger logger.LogContext) {
 	if !this.config.DNSPropagation {
 		return
 	}
-	logger.Infof("update corefile")
+	logger.Debug("update corefile")
 	first := true
 	keys := []string{}
 	kubeconfig := NewKubeconfig()
@@ -382,7 +390,28 @@ func (this *reconciler) updateLink(logger logger.LogContext, name string, access
 	}
 	_, mod := this.Links().UpdateLinkAccess(logger, name, access, true)
 	if mod {
+		logger.Infof("link access for %s modified -> trigger link", name)
 		this.TriggerUpdate()
 		this.TriggerLink(name)
+	}
+}
+
+func Base64Encode(data []byte, max int) string {
+	str := base64.StdEncoding.EncodeToString(data)
+	if max > 0 {
+		result := ""
+		for len(str) > max {
+			result = result + str[:max] + "\n"
+			str = str[max:]
+		}
+		if len(str) > 0 {
+			result = result + str
+		}
+		if strings.HasSuffix(result, "\n") {
+			result = result[:len(result)-1]
+		}
+		return result
+	} else {
+		return str
 	}
 }

@@ -26,7 +26,6 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/ctxutil"
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
-	v1 "k8s.io/api/core/v1"
 
 	"github.com/mandelsoft/kubelink/pkg/controllers"
 )
@@ -41,18 +40,23 @@ type secretReconciler struct {
 var _ reconcile.Interface = &secretReconciler{}
 
 func (this *secretReconciler) Reconcile(logger logger.LogContext, obj resources.Object) reconcile.Status {
-	secret := obj.Data().(*v1.Secret)
-	users := this.cache.GetSecretUsers(resources.NewObjectName(secret.Namespace, secret.Name))
-	for n := range users {
-		this.TriggerLink(n.Name())
+	users := this.cache.GetSecretUsers(obj.ObjectName())
+	if len(users) > 0 {
+		logger.Infof("secret %s updated -> trigger using links", obj.ObjectName())
+		for n := range users {
+			this.TriggerLink(n.Name())
+		}
 	}
 	return reconcile.Succeeded(logger)
 }
 
 func (this *secretReconciler) Deleted(logger logger.LogContext, key resources.ClusterObjectKey) reconcile.Status {
 	users := this.cache.GetSecretUsers(key.ObjectName())
-	for n := range users {
-		this.TriggerLink(n.Name())
+	if len(users) > 0 {
+		logger.Infof("secret %s deleted -> trigger using links", key.ObjectName())
+		for n := range users {
+			this.TriggerLink(n.Name())
+		}
 	}
 	return reconcile.Succeeded(logger)
 }

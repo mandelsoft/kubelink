@@ -43,7 +43,7 @@ func (this *DNSHandler) UpdateAccess(hello *ConnectionHello) {
 	}
 	dns := ext.(*DNSExtension)
 	if link.Token != dns.Token || link.CACert != dns.CACert {
-		this.reconciler.mux.Infof("got access info for link %s", link.Name)
+		this.reconciler.mux.Infof("got access info for link %s: %s", link.Name, dns)
 		this.reconciler.updateLink(this.reconciler.mux, link.Name, *(*kubelink.LinkAccessInfo)(dns))
 	}
 }
