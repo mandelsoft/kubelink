@@ -111,8 +111,14 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 		} else {
 			controller.Infof("using dns propagation")
 		}
-		controller.Infof("  handle coredns deployment %q", this.config.CoreDNS)
+		controller.Infof("  handle coredns deployment %q", this.config.CoreDNSDeployment)
 		controller.Infof("  using coredns secret %q", this.config.CoreDNSSecret)
+		if this.config.CoreDNSConfigure {
+			controller.Infof("  automatic configuration of cluster local coredns setup")
+			if this.config.CoreDNSServiceIP != nil {
+				controller.Infof("  using coredns service IP %q", this.config.CoreDNSServiceIP)
+			}
+		}
 	} else {
 		controller.Infof("dns propagation disabled")
 	}

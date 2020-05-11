@@ -5,7 +5,7 @@ go 1.13
 require (
 	github.com/ahmetb/gen-crd-api-reference-docs v0.1.5
 	github.com/coreos/go-iptables v0.4.5
-	github.com/gardener/controller-manager-library v0.1.1-0.20200508104250-32b2ed437e15
+	github.com/gardener/controller-manager-library v0.1.1-0.20200511092512-62c34b9ffdc8
 	github.com/mdlayher/ethernet v0.0.0-20190606142754-0394541c37b7
 	github.com/onsi/ginkgo v1.11.0
 	github.com/onsi/gomega v1.8.1

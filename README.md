@@ -55,7 +55,7 @@ external address of the broker for this cluster) is used to authenticate
 an incoming connection. It is guaranteed by the certificate authorithy that has
 issued the server certificate.
 
-The certificate, provate key and CA certificate is taken from a standard kubernetes
+The certificate, private key and CA certificate is taken from a standard kubernetes
 TLS secret. Here it is maintained by the certificate service, but it can also
 be maintained manually.
 
@@ -74,12 +74,12 @@ spec:
 ```
 
 That's it, no certificate, no key, nothing else required in best case when
-useing the DNS and server certificate provisioning controllers proposed above.
+using the DNS and server certificate provisioning controllers proposed above.
 
 ## Implementation
 
 The two used controllers are bundled into one controller manager (`kubelink`)
-using the [controllermanager-library](//github.com/gardener/controller-manager-library)
+using the [controllermanager-library](//github.com/gardener/controller-manager-library).
 It is provided in a single image (see [Dockerfile](Dockerfile)). The example
 manifests just choose the appropriate controller(s) by a dedicated command line option.
 
@@ -102,8 +102,8 @@ additional components.
 |---|---|---|
 | node cidr | 10.250.0.0/16 | 10.250.0.0/16 |
 | pod cidr | 100.96.0.0/11 | 100.96.0.0/11 |
-| service cidr (disjoint) | 100.64.0.0/20 | 100.64.16.0/20 |
-| cluster address and netmask | 192.168.0.11/24 | 192.168.0.12/24 |
+| service cidr (disjoint) | *100.64.0.0/20* | *100.64.16.0/20* |
+| cluster address and netmask | 192.168.0.*11*/24 | 192.168.0.*12*/24 |
 | FQDN | kubelink.kubelink1.ringdev.shoot.dev.k8s-hana.ondemand.com | kubelink.kubelink1.ringdev.shoot.dev.k8s-hana.ondemand.com |
 
 You can see, that the node and pod networks used in the involved clusters are identical.
@@ -113,7 +113,7 @@ but any other namespace is possible.
 
 Here the [rbac roles and service account](examples/20-rbac.yaml) must be deployed. The 
 [crd](examples/10-crds.yaml) will automatically be deployed by the controller manager
-but can also be deployed manually (ATTENTION: no autdo update possible if manually deployed).
+but can also be deployed manually (ATTENTION: no auto update possible if manually deployed).
 
 The [certificate request](examples/kubelink1/30-cert.yaml) is optional and is 
 specific to the dedicated cluster. Here two folders are provided
@@ -134,7 +134,7 @@ involved clusters.
 
 Now you can deploy a [service](examples/40-echo.yam) into one of the clusters,
 for example `kubelink2`. The echo service from the examples just deploys a
-tine http server echoing every request. It does neither offer a load balancer
+tiny http server echoing every request. It does neither offer a load balancer
 nor an ingress, so it's a completely cluster-local service. Looking at the
 service object you get a *ClusterIP* for this service, for example
 100.64.22.1.
@@ -151,12 +151,12 @@ and call (replace by actual IP address)
 $ wget -O - 100.64.22.1
 ```
 
-which reaches the provate echo service in the remote cluster.
+which reaches the private echo service in the remote cluster.
 
 ## DNS Progation for Services
 
 The broker supports the propagation of service DNS names. This is done
-by an own `coredns` deployment, which is automatically configured
+by an own `coredns` deployment, which can be automatically configured
 by the broker according to the established links and available API server access
 information. The *coredns* DNS server is hereby configured with a separate
 `kubernetes`plugin for every active foreign cluster and therefore needs access
@@ -175,7 +175,7 @@ This deployment provides an own DNS server serving the `kubelink.` domain
 support the proliferation of service DNS entries is mapped to an own
 sub domain, according to its cluster name (name of the `KubeLink` object).
 Here the typical service structure is exposed
-(&lt;*service*>.&lt;*namespace*>`.svc`).
+(&lt;*service*>.&lt;*namespace*>`.svc.`...).
 
 This DNS server can be embedded into the local cluster DNS service by
 reconfiguring the cluster DNS service.
@@ -201,7 +201,7 @@ There are serveral modes this DNS support can be used:
   now maintained automatically by the broker according to information advertised
   by the foreign clusters.
   
-  - With this option by the *Inbound Advertisement* is active.
+  - With this option the *Inbound Advertisement* is active.
     A precondition is that the foreign servers advertise their access information
     but the own information is not advertised
   - *Outbound Advertisement* is enabled by additionally setting the option 
@@ -211,11 +211,15 @@ There are serveral modes this DNS support can be used:
   
  
 In all cases the option `--dns-propagation` must be set to enable the
-DNS feature.  By default, only the foreign clusters are included in the mesh's
-top-level domain. To provide a uniform DNS hierachy in all clusters of the
-mesh inclusing the local cluster, the optional option `--cluster-name` can be
+DNS feature. By default, only the foreign clusters are included in the mesh's
+top-level domain. To provide a uniform DNS hierarchy in all clusters of the
+mesh including the local cluster, the optional option `--cluster-name` can be
 set, which provides a dedicated sub domain in the `kubelink.`top-level domain for
 the local cluster.
+
+If your cluster uses *coredns* for the local cluster DNS service, which supports
+the `coredns-custom` config map, the option `--coredns-configure` can be used
+to automatically connect the mesh DNS with your cluster DNS.
 
 A typical option set for the broker to enable the full service looks
 like this (for the example cluster `kubelink1`):
@@ -236,19 +240,21 @@ Usage:
   kubelink [flags]
 
 Flags:
-      --advertized-port int                         Advertized broker port for auto-connect
+      --advertised-port int                         Advertised broker port for auto-connect
       --auto-connect                                Automatically register cluster for authenticated incoming requests
       --bind-address-http string                    HTTP server bind address
       --broker-port int                             Port for broker
-      --broker.advertized-port int                  Advertized broker port for auto-connect of controller broker (default 80)
+      --broker.advertised-port int                  Advertised broker port for auto-connect of controller broker (default 80)
       --broker.auto-connect                         Automatically register cluster for authenticated incoming requests of controller broker
       --broker.broker-port int                      Port for broker of controller broker (default 8088)
       --broker.cacertfile string                    TLS ca certificate file of controller broker
       --broker.certfile string                      TLS certificate file of controller broker
       --broker.cluster-name string                  Name of local cluster in cluster mesh of controller broker
+      --broker.coredns-configure                    Enable automatic configuration of cluster DNS (coredns) of controller broker
       --broker.coredns-deployment string            Name of coredns deployment used by kubelink of controller broker (default "kubelink-coredns")
       --broker.coredns-secret string                Name of dns secret used by kubelink of controller broker (default "kubelink-coredns")
       --broker.coredns-service-account string       Service Account to use for CoreDNS API Server Access of controller broker
+      --broker.coredns-service-ip string            Service IP of coredns deployment used by kubelink of controller broker
       --broker.default.pool.size int                Worker pool size for pool default of controller broker (default 1)
       --broker.disable-bridge                       Disable network bridge of controller broker
       --broker.dns-advertisement                    Enable automatic advertisement of DNS access info of controller broker
@@ -267,7 +273,7 @@ Flags:
       --broker.secrets.pool.size int                Worker pool size for pool secrets of controller broker (default 1)
       --broker.served-links string                  Comma separated list of links to serve of controller broker (default "all")
       --broker.service string                       Service name for managed certificate of controller broker
-      --broker.service-cidr string                  CIDR of of local service network of controller broker
+      --broker.service-cidr string                  CIDR of local service network of controller broker
       --broker.update.pool.resync-period duration   Period for resynchronization for pool update of controller broker (default 20s)
       --broker.update.pool.size int                 Worker pool size for pool update of controller broker (default 1)
       --cacertfile string                           TLS ca certificate file
@@ -275,9 +281,11 @@ Flags:
       --cluster-name string                         Name of local cluster in cluster mesh
       --config string                               config file
   -c, --controllers string                          comma separated list of controllers to start (<name>,<group>,all) (default "all")
+      --coredns-configure                           Enable automatic configuration of cluster DNS (coredns)
       --coredns-deployment string                   Name of coredns deployment used by kubelink
       --coredns-secret string                       Name of dns secret used by kubelink
       --coredns-service-account string              Service Account to use for CoreDNS API Server Access
+      --coredns-service-ip string                   Service IP of coredns deployment used by kubelink
       --cpuprofile string                           set file for cpu profiling
       --default.pool.size int                       Worker pool size for pool default
       --disable-bridge                              Disable network bridge

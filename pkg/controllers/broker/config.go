@@ -53,7 +53,7 @@ type Config struct {
 
 	Responsible    utils.StringSet
 	Port           int
-	AdvertizedPort int
+	AdvertisedPort int
 
 	CertFile   string
 	KeyFile    string
@@ -68,10 +68,13 @@ type Config struct {
 	coreServiceAccount string
 	CoreServiceAccount resources.ObjectName
 	MeshDomain         string
-	CoreDNS            string
+	coreDNSServiceIP   string
+	CoreDNSServiceIP   net.IP
+	CoreDNSDeployment  string
 	CoreDNSSecret      string
 	DNSPropagation     bool
 	DNSAdvertisement   bool
+	CoreDNSConfigure   bool
 
 	AutoConnect   bool
 	DisableBridge bool
@@ -84,7 +87,7 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.ClusterName, "cluster-name", "", "", "Name of local cluster in cluster mesh")
 	set.AddStringOption(&this.responsible, "served-links", "", "all", "Comma separated list of links to serve")
 	set.AddIntOption(&this.Port, "broker-port", "", 8088, "Port for broker")
-	set.AddIntOption(&this.AdvertizedPort, "advertized-port", "", kubelink.DEFAULT_PORT, "Advertized broker port for auto-connect")
+	set.AddIntOption(&this.AdvertisedPort, "advertised-port", "", kubelink.DEFAULT_PORT, "Advertised broker port for auto-connect")
 	set.AddStringOption(&this.CertFile, "certfile", "", "", "TLS certificate file")
 	set.AddStringOption(&this.KeyFile, "keyfile", "", "", "TLS certificate key file")
 	set.AddStringOption(&this.CACertFile, "cacertfile", "", "", "TLS ca certificate file")
@@ -96,10 +99,12 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.Interface, "ifce-name", "", "", "Name of the tun interface")
 	set.AddStringOption(&this.coreServiceAccount, "coredns-service-account", "", "", "Service Account to use for CoreDNS API Server Access")
 	set.AddStringOption(&this.MeshDomain, "mesh-domain", "", "kubelink", "Base domain for cluster mesh services")
-	set.AddStringOption(&this.CoreDNS, "coredns-deployment", "", "kubelink-coredns", "Name of coredns deployment used by kubelink")
+	set.AddStringOption(&this.coreDNSServiceIP, "coredns-service-ip", "", "", "Service IP of coredns deployment used by kubelink")
+	set.AddStringOption(&this.CoreDNSDeployment, "coredns-deployment", "", "kubelink-coredns", "Name of coredns deployment used by kubelink")
 	set.AddStringOption(&this.CoreDNSSecret, "coredns-secret", "", "kubelink-coredns", "Name of dns secret used by kubelink")
 	set.AddBoolOption(&this.DNSPropagation, "dns-propagation", "", false, "Enable DNS Record propagation for Services")
 	set.AddBoolOption(&this.DNSAdvertisement, "dns-advertisement", "", false, "Enable automatic advertisement of DNS access info")
+	set.AddBoolOption(&this.CoreDNSConfigure, "coredns-configure", "", false, "Enable automatic configuration of cluster DNS (coredns)")
 	set.AddBoolOption(&this.AutoConnect, "auto-connect", "", false, "Automatically register cluster for authenticated incoming requests")
 }
 
@@ -176,6 +181,13 @@ func (this *Config) Prepare() error {
 			this.CoreServiceAccount = resources.NewObjectName("kube-system", names[0])
 		}
 	}
+	if this.coreDNSServiceIP != "" {
+		this.CoreDNSServiceIP = net.ParseIP(this.coreDNSServiceIP)
+		if this.CoreDNSServiceIP == nil {
+			return fmt.Errorf("invalid ip of coredns service: %s", this.coreDNSServiceIP)
+		}
+	}
+
 	return nil
 }
 

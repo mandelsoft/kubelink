@@ -21,6 +21,7 @@ package broker
 import (
 	"encoding/base64"
 	"fmt"
+	"net"
 	"reflect"
 	"sort"
 	"strings"
@@ -362,7 +363,7 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 
 	if mod {
 		logger.Infof("coredns secret %s updated", name)
-		name := resources.NewObjectName(this.Controller().GetEnvironment().Namespace(), this.config.CoreDNS)
+		name := resources.NewObjectName(this.Controller().GetEnvironment().Namespace(), this.config.CoreDNSDeployment)
 		_, _, err := this.deploymentResource.ModifyByName(name,
 			func(odata resources.ObjectData) (bool, error) {
 				depl := odata.(*_apps.Deployment)
@@ -414,4 +415,50 @@ func Base64Encode(data []byte, max int) string {
 	} else {
 		return str
 	}
+}
+
+func (this *reconciler) ConnectCoredns() {
+	this.Controller().Infof("configuring local cluster coredns setup to connect to mesh DNS")
+	cm := &_core.ConfigMap{}
+	name := resources.NewObjectName("kube-system", "coredns-custom")
+
+	var ip net.IP
+
+	if this.config.CoreDNSServiceIP == nil {
+		if this.config.ServiceCIDR == nil {
+			this.Controller().Infof("local service cidr or coredns ip required for establishing coredns connection")
+			return
+		}
+		ip = tcp.CloneIP(this.config.ServiceCIDR.IP)
+		ip[len(ip)-1] |= 1
+	} else {
+		ip = this.config.CoreDNSServiceIP
+	}
+	_, err := this.Controller().GetMainCluster().Resources().GetObjectInto(name, cm)
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			this.Controller().Infof("cannot get coredns custom config: %s", err)
+			return
+		}
+		this.Controller().Infof("no coredns custom config found")
+		return
+	}
+
+	config := fmt.Sprintf(`
+%s:8053 {
+	errors
+	cache 30
+	forward . %s
+}
+`, this.config.MeshDomain, ip)
+
+	this.Controller().GetMainCluster().Resources().ModifyObject(cm, func(data resources.ObjectData) (bool, error) {
+		cm := data.(*_core.ConfigMap)
+		if cm.Data["kubelink.server"] != config {
+			cm.Data["kubelink.server"] = config
+			this.Controller().Infof("updating coredns custom configuration")
+			return true, nil
+		}
+		return false, nil
+	})
 }

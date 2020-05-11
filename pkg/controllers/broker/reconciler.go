@@ -149,7 +149,7 @@ func (this *reconciler) Setup() {
 		IP:   this.config.ClusterAddress,
 		Mask: this.config.ClusterCIDR.Mask,
 	}
-	mux := NewMux(this.Controller().GetContext(), this.Controller(), this.certInfo, uint16(this.config.AdvertizedPort), addr, local, tun, this.Links(), this)
+	mux := NewMux(this.Controller().GetContext(), this.Controller(), this.certInfo, uint16(this.config.AdvertisedPort), addr, local, tun, this.Links(), this)
 
 	if this.config.DNSAdvertisement {
 		mux.connectionHandler = &DNSHandler{this}
@@ -189,6 +189,9 @@ func (this *reconciler) Start() {
 				}
 			}
 		}()
+	}
+	if this.config.CoreDNSConfigure {
+		this.ConnectCoredns()
 	}
 	this.Reconciler.Start()
 }
