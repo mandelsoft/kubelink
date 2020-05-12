@@ -273,11 +273,23 @@ func (this *_Definition) ActivateExplicitly() bool {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+type ConfigurationModifier func(c Configuration) Configuration
+
 type Configuration struct {
-	settings   _Definition
+	settings _Definition
+	configState
+}
+
+type configState struct {
+	previous   *configState
 	cluster    string
 	pool       string
 	reconciler string
+}
+
+func (this *configState) pushState() {
+	save := *this
+	this.previous = &save
 }
 
 func Configure(name string) Configuration {
@@ -290,10 +302,29 @@ func Configure(name string) Configuration {
 			configs:       extension.OptionDefinitions{},
 			configsources: extension.OptionSourceDefinitions{},
 		},
-		cluster:    CLUSTER_MAIN,
-		pool:       DEFAULT_POOL,
-		reconciler: DEFAULT_RECONCILER,
+		configState: configState{
+			cluster:    CLUSTER_MAIN,
+			pool:       DEFAULT_POOL,
+			reconciler: DEFAULT_RECONCILER,
+		},
 	}
+}
+
+func (this Configuration) With(modifier ...ConfigurationModifier) Configuration {
+	save := this.configState
+	result := this
+	for _, m := range modifier {
+		result = m(result)
+	}
+	result.configState = save
+	return result
+}
+
+func (this Configuration) Restore() Configuration {
+	if &this.configState != nil {
+		this.configState = *this.configState.previous
+	}
+	return this
 }
 
 func (this Configuration) Name(name string) Configuration {
@@ -335,6 +366,7 @@ func (this Configuration) DefaultWorkerPool(size int, period time.Duration) Conf
 }
 
 func (this Configuration) WorkerPool(name string, size int, period time.Duration) Configuration {
+	this.pushState()
 	if this.settings.pools[name] != nil {
 		panic(fmt.Sprintf("pool %q already defined", name))
 	}
@@ -345,6 +377,7 @@ func (this Configuration) WorkerPool(name string, size int, period time.Duration
 }
 
 func (this Configuration) Pool(name string) Configuration {
+	this.pushState()
 	this.pool = name
 	return this
 }
@@ -354,6 +387,7 @@ func (this Configuration) DefaultCluster() Configuration {
 }
 
 func (this Configuration) Cluster(name string) Configuration {
+	this.pushState()
 	this.cluster = name
 	this.pool = DEFAULT_POOL
 	if name != CLUSTER_MAIN {
@@ -563,6 +597,7 @@ func (this Configuration) ReconcilerCommandMatchers(reconciler string, cmd ...ut
 }
 
 func (this Configuration) Reconciler(t ReconcilerType, name ...string) Configuration {
+	this.pushState()
 	if len(name) == 0 {
 		this.settings.reconcilers[DEFAULT_RECONCILER] = t
 		this.reconciler = DEFAULT_RECONCILER

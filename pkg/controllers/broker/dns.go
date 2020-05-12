@@ -27,19 +27,21 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
 	"gopkg.in/yaml.v2"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	_apps "k8s.io/api/apps/v1"
 	_core "k8s.io/api/core/v1"
 
 	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
+
+const KUBELINK_DNS_IP = 11
 
 type Manifest map[string]interface{}
 
@@ -161,6 +163,9 @@ func (this *reconciler) getSecret(logger logger.LogContext, name resources.Objec
 }
 
 func (this *reconciler) handleLinkAccess(logger logger.LogContext, klink *api.KubeLink, entry *kubelink.Link) (error, error) {
+	if this.config.DNSPropagation {
+		this.tasks.ScheduleTask(NewConnectTask(klink.Name, this), false)
+	}
 	if entry.UpdatePending {
 		return this.updateSecretFromLink(logger, klink, entry)
 	} else {
@@ -363,23 +368,8 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 
 	if mod {
 		logger.Infof("coredns secret %s updated", name)
-		name := resources.NewObjectName(this.Controller().GetEnvironment().Namespace(), this.config.CoreDNSDeployment)
-		_, _, err := this.deploymentResource.ModifyByName(name,
-			func(odata resources.ObjectData) (bool, error) {
-				depl := odata.(*_apps.Deployment)
-				annos := depl.Spec.Template.Annotations
-				if annos == nil {
-					annos = map[string]string{}
-					depl.Spec.Template.Annotations = annos
-				}
-				annos["kubelink.mandelsoft.org/restartedAt"] = time.Now().String()
-				return true, nil
-			})
-		if err != nil {
-			logger.Errorf("cannot restart coredns deployment %q: %s", name, err)
-		} else {
-			logger.Infof("coredns deployment %q restarted", name)
-		}
+		this.RestartDeployment(logger,
+			resources.NewObjectName(this.Controller().GetEnvironment().Namespace(), this.config.CoreDNSDeployment))
 	}
 }
 
@@ -418,7 +408,23 @@ func Base64Encode(data []byte, max int) string {
 }
 
 func (this *reconciler) ConnectCoredns() {
-	this.Controller().Infof("configuring local cluster coredns setup to connect to mesh DNS")
+	this.tasks.ScheduleTask(newConfigureCorednsTask(this), true)
+}
+
+type configureCorednsTask struct {
+	BaseTask
+	*reconciler
+}
+
+func newConfigureCorednsTask(reconciler *reconciler) Task {
+	return &configureCorednsTask{
+		BaseTask:   NewBaseTask("coredns", "configure"),
+		reconciler: reconciler,
+	}
+}
+
+func (this *configureCorednsTask) Execute(logger logger.LogContext) reconcile.Status {
+	logger.Infof("configuring local cluster coredns setup to connect to mesh DNS")
 	cm := &_core.ConfigMap{}
 	name := resources.NewObjectName("kube-system", "coredns-custom")
 
@@ -426,22 +432,19 @@ func (this *reconciler) ConnectCoredns() {
 
 	if this.config.CoreDNSServiceIP == nil {
 		if this.config.ServiceCIDR == nil {
-			this.Controller().Infof("local service cidr or coredns ip required for establishing coredns connection")
-			return
+			return reconcile.Failed(logger, fmt.Errorf("local service cidr or coredns ip required for establishing coredns connection"))
 		}
 		ip = tcp.CloneIP(this.config.ServiceCIDR.IP)
-		ip[len(ip)-1] |= 1
+		ip[len(ip)-1] |= KUBELINK_DNS_IP
 	} else {
 		ip = this.config.CoreDNSServiceIP
 	}
 	_, err := this.Controller().GetMainCluster().Resources().GetObjectInto(name, cm)
 	if err != nil {
 		if !errors.IsNotFound(err) {
-			this.Controller().Infof("cannot get coredns custom config: %s", err)
-			return
+			return reconcile.Delay(logger, fmt.Errorf("cannot get coredns custom config: %s", err))
 		}
-		this.Controller().Infof("no coredns custom config found")
-		return
+		return reconcile.Delay(logger, fmt.Errorf("no coredns custom config found")).RescheduleAfter(10 * time.Minute)
 	}
 
 	config := fmt.Sprintf(`
@@ -452,7 +455,7 @@ func (this *reconciler) ConnectCoredns() {
 }
 `, this.config.MeshDomain, ip)
 
-	this.Controller().GetMainCluster().Resources().ModifyObject(cm, func(data resources.ObjectData) (bool, error) {
+	_, mod, err := this.Controller().GetMainCluster().Resources().ModifyObject(cm, func(data resources.ObjectData) (bool, error) {
 		cm := data.(*_core.ConfigMap)
 		if cm.Data["kubelink.server"] != config {
 			cm.Data["kubelink.server"] = config
@@ -461,4 +464,9 @@ func (this *reconciler) ConnectCoredns() {
 		}
 		return false, nil
 	})
+
+	if mod {
+		this.reconciler.RestartDeployment(logger, resources.NewObjectName("kube-system", "coredns"))
+	}
+	return reconcile.Succeeded(logger)
 }

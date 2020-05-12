@@ -31,6 +31,7 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
 	"github.com/vishvananda/netlink"
+	_apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
@@ -43,6 +44,8 @@ type reconciler struct {
 	*controllers.Reconciler
 	config   *Config
 	certInfo *CertInfo
+
+	tasks Tasks
 
 	linkResource       resources.Interface
 	saResource         resources.Interface
@@ -289,6 +292,29 @@ func (this *reconciler) getServiceAccountToken() (*kubelink.LinkAccessInfo, erro
 		return &kubelink.LinkAccessInfo{Token: token, CACert: cacert}, nil
 	}
 	return nil, nil
+}
+
+func (this *reconciler) RestartDeployment(logger logger.LogContext, name resources.ObjectDataName) error {
+	if logger == nil {
+		logger = this.Controller()
+	}
+	_, _, err := this.deploymentResource.ModifyByName(name,
+		func(odata resources.ObjectData) (bool, error) {
+			depl := odata.(*_apps.Deployment)
+			annos := depl.Spec.Template.Annotations
+			if annos == nil {
+				annos = map[string]string{}
+				depl.Spec.Template.Annotations = annos
+			}
+			annos["kubelink.mandelsoft.org/restartedAt"] = time.Now().String()
+			return true, nil
+		})
+	if err != nil {
+		logger.Errorf("cannot restart deployment %q: %s", name, err)
+	} else {
+		logger.Infof("deployment %q restarted", name)
+	}
+	return err
 }
 
 func getStringValue(key string, secret *core.Secret) string {

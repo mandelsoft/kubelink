@@ -24,8 +24,11 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 
+	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
 	"github.com/gardener/controller-manager-library/pkg/logger"
+	"github.com/gardener/controller-manager-library/pkg/utils"
 	"golang.org/x/net/ipv4"
 
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
@@ -320,4 +323,36 @@ func (this *TunnelConnection) WritePacket(data []byte) error {
 		return err
 	}
 	return this.write(this.conn, data)
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+type connectTask struct {
+	BaseTask
+	name        string
+	reconciler  *reconciler
+	ratelimiter utils.RateLimiter
+}
+
+func NewConnectTask(name string, reconciler *reconciler) Task {
+	return &connectTask{
+		BaseTask:    NewBaseTask("connect", name),
+		name:        name,
+		reconciler:  reconciler,
+		ratelimiter: utils.NewDefaultRateLimiter(10*time.Second, 10*time.Minute),
+	}
+}
+
+func (this *connectTask) Execute(logger logger.LogContext) reconcile.Status {
+	link := this.reconciler.Links().GetLink(this.name)
+	if link == nil {
+		logger.Infof("link %s not found", this.name)
+		return reconcile.Succeeded(logger)
+	}
+	_, err := this.reconciler.mux.AssureTunnel(logger, link)
+	if err == nil {
+		this.ratelimiter.Succeeded()
+		return reconcile.Succeeded(logger).RescheduleAfter(10 * time.Minute)
+	}
+	return reconcile.DelayOnError(logger, err, this.ratelimiter)
 }

@@ -127,7 +127,6 @@ func (this *CertInfo) ClientConfig() *tls.Config {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 
-	logger.Infof("dialing with client cert [%v]", this.roots)
 	return &tls.Config{
 		Certificates: []tls.Certificate{*cert},
 		RootCAs:      this.roots,

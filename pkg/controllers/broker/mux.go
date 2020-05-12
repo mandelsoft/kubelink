@@ -125,28 +125,28 @@ func (this *Mux) QueryConnectionForIP(ip net.IP) (*TunnelConnection, *kubelink.L
 	return t, l
 }
 
-func (this *Mux) GetConnectionForIP(ip net.IP) *TunnelConnection {
+func (this *Mux) GetConnectionForIP(ip net.IP) (*TunnelConnection, error) {
 
 	t, l := this.QueryConnectionForIP(ip)
 	if t != nil || l == nil {
-		return t
+		return t, nil
 	}
-	return this.AssureTunnel(l)
+	return this.AssureTunnel(this, l)
 }
 
-func (this *Mux) AssureTunnel(link *kubelink.Link) *TunnelConnection {
+func (this *Mux) AssureTunnel(logger logger.LogContext, link *kubelink.Link) (*TunnelConnection, error) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 
 	t, ips := this.queryClusterConnection(link.ClusterAddress.IP)
 	if t != nil {
-		return t
+		return t, nil
 	}
 	t, err := this.dialTunnelConnection(link)
 	if err != nil {
 		this.errors[ips] = err
 		logger.Errorf("cannot initialize connection to %s: %s", link, err)
-		return nil
+		return nil, err
 	}
 	this.addTunnel(t)
 	go func() {
@@ -154,11 +154,15 @@ func (this *Mux) AssureTunnel(link *kubelink.Link) *TunnelConnection {
 		this.Infof("serving connection to %s", t.String())
 		t.Serve()
 	}()
-	return t
+	return t, nil
 }
 
 func (this *Mux) dialTunnelConnection(link *kubelink.Link) (*TunnelConnection, error) {
-	this.Infof("dialing for %s to %s", link.Name, link.Endpoint)
+	if this.certInfo.UseTLS() {
+		this.Infof("dialing for %s to %s with client certificate", link.Name, link.Endpoint)
+	} else {
+		this.Infof("dialing for %s to %s", link.Name, link.Endpoint)
+	}
 	conn, err := this.certInfo.Dial(link.Endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("dialing failed: %s", err)
@@ -269,7 +273,7 @@ func (this *Mux) FindConnection(log logger.LogContext, packet []byte) *TunnelCon
 			return nil
 		}
 
-		t := this.GetConnectionForIP(header.Dst)
+		t, _ := this.GetConnectionForIP(header.Dst)
 		if t != nil {
 			log.Infof("receiving ipv4[%d]: (%d) hdr: %d, total: %d, prot: %d,  %s->%s to %s", header.Version, len(packet), header.Len, header.TotalLen, header.Protocol, header.Src, header.Dst, t.remoteAddress)
 			return t

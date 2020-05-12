@@ -44,6 +44,7 @@ func init() {
 		WorkerPool("secrets", 1, 0).
 		Reconciler(CreateSecrets, "secrets").
 		ReconcilerWatchByGK("secrets", secretGK).
+		With(TaskReconciler(1)).
 		MustRegister()
 }
 
@@ -65,6 +66,8 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 	} else {
 		impl = this
 	}
+
+	this.tasks = GetTaskClient(controller)
 
 	this.Reconciler, err = controllers.CreateBaseReconciler(controller, impl)
 	if err != nil {

@@ -21,6 +21,9 @@ package main
 import (
 	"fmt"
 	"net"
+	"time"
+
+	"github.com/gardener/controller-manager-library/pkg/utils"
 
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 	"github.com/mandelsoft/kubelink/pkg/tcp"
@@ -42,4 +45,11 @@ func main() {
 	}
 	fmt.Printf("direct : %s\n", access)
 	fmt.Printf("pointer: %s\n", &access)
+
+	r := utils.NewDefaultRateLimiter(10*time.Second, 10*time.Minute)
+
+	for i := 1; i < 20; i++ {
+		r.Failed()
+		fmt.Printf("%d: %s\n", i, r.RateLimit())
+	}
 }
