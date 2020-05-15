@@ -92,10 +92,51 @@ func (this *reconciler) Setup() {
 				this.Controller().Errorf("error getting tunl0 interface: %s", err)
 			} else {
 				if link, ok := l.(*netlink.Iptun); ok {
-					err = netlink.LinkSetUp(link)
-					if err != nil {
-						this.Controller().Errorf("cannot bring up tunl0: %s", err)
+					attrs := link.Attrs()
+					mtu := 1440
+					if attrs.MTU != mtu {
+						err = netlink.LinkSetMTU(link, mtu)
+						if err != nil {
+							this.Controller().Errorf("cannot set MTU for tunl0: %s", err)
+						} else {
+							this.Controller().Errorf("setting MTU for tunl0: %d", mtu)
+						}
 					}
+					if attrs.Flags&net.FlagUp == 0 {
+						err = netlink.LinkSetUp(link)
+						if err != nil {
+							this.Controller().Errorf("cannot bring up tunl0: %s", err)
+						} else {
+							this.Controller().Errorf("bring up tunl0")
+						}
+					}
+					/*
+					ip, cidr, _ := net.ParseCIDR("192.168.0.1/32")
+					cidr.IP = ip
+					addr := &netlink.Addr{
+						IPNet: &cidr,
+					}
+					addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
+					found := false
+					for _, oldAddr := range addrs {
+						if address != nil && oldAddr.IP.Equal(address) {
+							this.Controller.Infof("tunl0 address already present")
+							found = true
+							continue
+						} else {
+							this.Controller.Infof("tunl0 address found: %s", oldAddr)
+							found = true
+						}
+					}
+
+					if !found {
+						logger.Infof("adding address %s to tunl0", cidr.String())
+						err = netlink.AddrAdd(link, addr)
+						if err != nil {
+							this.Controller.Errorf("cannot add addr %q to tunl0: %s", cidr, err)
+						}
+					}
+					*/
 				} else {
 					this.Controller().Errorf("tunl0 isn't an iptun device (%#v), please remove device and try again", l)
 				}

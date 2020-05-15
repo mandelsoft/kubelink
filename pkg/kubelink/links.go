@@ -285,8 +285,8 @@ func (this *Links) RemoveLink(name string) {
 }
 
 func (this *Links) Visit(visitor func(l *Link) bool) {
-	//this.lock.Lock()
-	//defer this.lock.Unlock()
+	// this.lock.Lock()
+	// defer this.lock.Unlock()
 	for _, l := range this.links {
 		if !visitor(l) {
 			break
@@ -345,6 +345,7 @@ func (this *Links) GetRoutes(ifce *NodeInterface) Routes {
 					Gw:        l.Gateway,
 					LinkIndex: index,
 					Protocol:  protocol,
+					Priority:  101,
 				}
 				r.SetFlag(flags)
 				routes.Add(r)
@@ -354,6 +355,7 @@ func (this *Links) GetRoutes(ifce *NodeInterface) Routes {
 				Gw:        l.Gateway,
 				LinkIndex: index,
 				Protocol:  protocol,
+				Priority:  101,
 			}
 			r.SetFlag(flags)
 			routes.Add(r)

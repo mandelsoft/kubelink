@@ -1,10 +1,9 @@
 EXECUTABLE=kubelink
-PROJECT=github.com/mandelsoft/k8sbridge
 VERSION=$(shell cat VERSION)
 
 RELEASE                     := true
 NAME                        := kubelink
-REPOSITORY                  := github.com/mandelsoft/k8sbridge
+REPOSITORY                  := github.com/mandelsoft/kubelink
 #REGISTRY                    := eu.gcr.io/gardener-project
 REGISTRY                    :=
 IMAGEORG                    := mandelsoft

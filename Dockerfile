@@ -3,7 +3,7 @@ FROM golang:1.13.9 AS builder
 
 ARG TARGETS=dev
 
-WORKDIR /go/src/github.com/mandelsoft/k8sbridge
+WORKDIR /go/src/github.com/mandelsoft/kubelink
 COPY . .
 
 RUN make $TARGETS
