@@ -43,6 +43,9 @@ import (
 
 const KUBELINK_DNS_IP = 11
 
+const DNSMODE_KUBERNETES = "kubernetes"
+const DNSMODE_DNS = "dns"
+
 type Manifest map[string]interface{}
 
 type Kubeconfig Manifest
@@ -85,7 +88,7 @@ func (this Kubeconfig) AddCluster(name, url, ca, token string) {
 	})
 }
 
-func coreEntry(first *bool, name, basedomain string, local bool) string {
+func coreEntry(first *bool, name, basedomain string, dnsIP string, local bool) string {
 	header := ""
 	if *first {
 		*first = false
@@ -107,7 +110,6 @@ func coreEntry(first *bool, name, basedomain string, local bool) string {
 
 	}
 	footer := `
-    forward . /etc/resolv.conf
     cache 30
     loop
     reload
@@ -116,23 +118,32 @@ func coreEntry(first *bool, name, basedomain string, local bool) string {
 
 `
 	plugin := ""
-	if local {
+	if dnsIP != "" {
 		plugin = fmt.Sprintf(`
+    rewrite name suffix .%s.%s. .cluster.local.
+    forward . %s
+`, name, basedomain, dnsIP)
+	} else {
+		if local {
+			plugin = fmt.Sprintf(`
     kubernetes %s.%s in-addr.arpa ip6.arpa {
         upstream
         fallthrough in-addr.arpa ip6.arpa
         ttl 30
     }
+    forward . /etc/resolv.conf
 `, name, basedomain)
-	} else {
-		plugin = fmt.Sprintf(`
+		} else {
+			plugin = fmt.Sprintf(`
     kubernetes %s.%s in-addr.arpa ip6.arpa {
         kubeconfig /etc/coredns/kubeconfig %s
         upstream
         fallthrough in-addr.arpa ip6.arpa
         ttl 30
     }
+    forward . /etc/resolv.conf
 `, name, basedomain, name)
+		}
 	}
 	return header + plugin + footer
 }
@@ -326,8 +337,7 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 
 	this.Links().Visit(func(l *kubelink.Link) bool {
 		if l.Token != "" {
-			ip := tcp.CloneIP(l.ServiceCIDR.IP)
-			ip[len(ip)-1] |= 1
+			ip := tcp.SubIP(l.ServiceCIDR, 1)
 			kubeconfig.AddCluster(l.Name, fmt.Sprintf("https://%s", ip), l.CACert, l.Token)
 			keys = append(keys, l.Name)
 		}
@@ -336,12 +346,19 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 	sort.Strings(keys)
 
 	corefile := ""
-
+	ip := ""
 	if this.config.ClusterName != "" {
-		corefile += coreEntry(&first, this.config.ClusterName, this.config.MeshDomain, true)
+		if this.config.CoreDNSMode == DNSMODE_DNS {
+			ip = tcp.SubIP(this.config.ServiceCIDR, 10).String()
+		}
+		corefile += coreEntry(&first, this.config.ClusterName, this.config.MeshDomain, ip, true)
 	}
 	for _, k := range keys {
-		corefile += coreEntry(&first, k, this.config.MeshDomain, false)
+		l := this.Links().GetLink(k)
+		if this.config.CoreDNSMode == DNSMODE_DNS {
+			ip = tcp.SubIP(l.ServiceCIDR, 10).String()
+		}
+		corefile += coreEntry(&first, k, this.config.MeshDomain, ip, false)
 	}
 
 	b, err := yaml.Marshal(kubeconfig)

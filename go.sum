@@ -86,6 +86,7 @@ github.com/gardener/controller-manager-library v0.0.0-20200512145311-87a6812e91b
 github.com/gardener/controller-manager-library v0.0.0-20200512145311-87a6812e91ba/go.mod h1:oCK7fW2VpsMhmUh5c6cOhsN8p9Tth1OM3rRtogDF11k=
 github.com/gardener/controller-manager-library v0.0.0-20200512160403-7d21a47070db h1:KTeRIWIIIz4wRSSI1NYeLxhSQkIaO1/mhdA3Cr5oRUA=
 github.com/gardener/controller-manager-library v0.0.0-20200512160403-7d21a47070db/go.mod h1:oCK7fW2VpsMhmUh5c6cOhsN8p9Tth1OM3rRtogDF11k=
+github.com/gardener/controller-manager-library v0.1.0 h1:jwPhyo8qe6X+5Zui/qOMVLF3xB3sHsT0jyLKqquN+IU=
 github.com/gardener/controller-manager-library v0.1.1-0.20200415134354-a8afb2fa834e h1:0uqZxrcMnsJyemzCx6P29+j/pI4ihBv4WV+DKq1mel0=
 github.com/gardener/controller-manager-library v0.1.1-0.20200415134354-a8afb2fa834e/go.mod h1:na/VUlfk9pGOkMqyUiOMxUuzW5sLdE8oZalGFUbaW9Y=
 github.com/gardener/controller-manager-library v0.1.1-0.20200417081315-3b7da5f7db88 h1:DBAGQOLbZDD9P0amiJxFj0YZkU9WtjA+VD8zsysPTa8=
@@ -118,6 +119,10 @@ github.com/gardener/controller-manager-library v0.1.1-0.20200508104250-32b2ed437
 github.com/gardener/controller-manager-library v0.1.1-0.20200508104250-32b2ed437e15/go.mod h1:oCK7fW2VpsMhmUh5c6cOhsN8p9Tth1OM3rRtogDF11k=
 github.com/gardener/controller-manager-library v0.1.1-0.20200511092512-62c34b9ffdc8 h1:vZsVULg3lADxMLCi++QLzKELQeSiA9Mxy6eFMF08/SI=
 github.com/gardener/controller-manager-library v0.1.1-0.20200511092512-62c34b9ffdc8/go.mod h1:oCK7fW2VpsMhmUh5c6cOhsN8p9Tth1OM3rRtogDF11k=
+github.com/gardener/controller-manager-library v0.1.1-0.20200601205834-31de0b23fdbc h1:9WDIhENJyfGEQObDWBAfv8eU3xSuQWpT99cyHW1/emk=
+github.com/gardener/controller-manager-library v0.1.1-0.20200601205834-31de0b23fdbc/go.mod h1:oCK7fW2VpsMhmUh5c6cOhsN8p9Tth1OM3rRtogDF11k=
+github.com/gardener/controller-manager-library v0.1.1-0.20200604130116-34d406c29049 h1:oBh4ll6jcqjck4OUARiBmfWitZdjB7Efv8l1Ip+5r/A=
+github.com/gardener/controller-manager-library v0.1.1-0.20200604130116-34d406c29049/go.mod h1:oCK7fW2VpsMhmUh5c6cOhsN8p9Tth1OM3rRtogDF11k=
 github.com/ghodss/yaml v0.0.0-20150909031657-73d445a93680/go.mod h1:4dBDuWmgqj2HViK6kFavaiC9ZROes6MMH2rRYeMEF04=
 github.com/ghodss/yaml v1.0.0 h1:wQHKEahhL6wmXdzwWG11gIVCkOv05bNOh+Rxn0yngAk=
 github.com/ghodss/yaml v1.0.0/go.mod h1:4dBDuWmgqj2HViK6kFavaiC9ZROes6MMH2rRYeMEF04=

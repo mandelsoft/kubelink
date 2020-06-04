@@ -17,7 +17,7 @@ github.com/emicklei/go-restful/log
 github.com/evanphx/json-patch
 # github.com/fatih/color v1.7.0
 github.com/fatih/color
-# github.com/gardener/controller-manager-library v0.0.0-20200512160403-7d21a47070db
+# github.com/gardener/controller-manager-library v0.1.1-0.20200604130116-34d406c29049
 github.com/gardener/controller-manager-library/hack
 github.com/gardener/controller-manager-library/pkg/certmgmt
 github.com/gardener/controller-manager-library/pkg/certmgmt/secret
@@ -36,6 +36,7 @@ github.com/gardener/controller-manager-library/pkg/controllermanager/controller/
 github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile
 github.com/gardener/controller-manager-library/pkg/controllermanager/extension
 github.com/gardener/controller-manager-library/pkg/controllermanager/extension/groups
+github.com/gardener/controller-manager-library/pkg/convert
 github.com/gardener/controller-manager-library/pkg/ctxutil
 github.com/gardener/controller-manager-library/pkg/errors
 github.com/gardener/controller-manager-library/pkg/fieldpath

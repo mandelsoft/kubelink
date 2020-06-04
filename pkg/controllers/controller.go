@@ -19,8 +19,10 @@
 package controllers
 
 import (
+	"fmt"
 	"time"
 
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/gardener/controller-manager-library/pkg/config"
 	"github.com/gardener/controller-manager-library/pkg/resources/apiextensions"
 
@@ -63,8 +65,14 @@ func CreateBaseReconciler(controller controller.Interface, impl ReconcilerImplem
 		return nil, err
 	}
 
+	ipt, err := iptables.New()
+	if err != nil {
+		return nil, fmt.Errorf("cannot create iptables access: %s", err)
+	}
+
 	return &Reconciler{
 		Common:     NewCommon(controller),
+		IPT:        ipt,
 		config:     cfg,
 		baseconfig: config,
 		ifce:       ifce,

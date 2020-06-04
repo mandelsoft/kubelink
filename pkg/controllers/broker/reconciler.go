@@ -111,6 +111,10 @@ func (this *reconciler) RequiredRoutes() kubelink.Routes {
 	return append(routes, netlink.Route{LinkIndex: this.mux.tun.link.Attrs().Index, Dst: this.config.ClusterCIDR})
 }
 
+func (this *reconciler) RequiredSNATRules() *kubelink.Chain {
+	return nil
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 func (this *reconciler) Setup() {

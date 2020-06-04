@@ -73,7 +73,7 @@ func (this *AccessSource) ReadCertificate() error {
 			return nil
 		}
 	}
-	if !certmgmt.Equal(this.info, info) {
+	if !certmgmt.Equal(this.info, new) {
 		err = this.access.Set(this.logger, new)
 		if err != nil {
 			return err

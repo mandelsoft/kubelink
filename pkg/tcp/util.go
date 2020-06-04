@@ -64,6 +64,19 @@ func CloneIP(ip net.IP) net.IP {
 	return append(ip[:0:0], ip...)
 }
 
+func SubIP(cidr *net.IPNet, n int) net.IP {
+	ip := CloneIP(cidr.IP)
+
+	i := len(ip) - 1
+	for n > 0 {
+		n += int(ip[i])
+		ip[i] = uint8(n % 256)
+		n = n / 256
+		i--
+	}
+	return ip
+}
+
 func EqualCIDR(a, b *net.IPNet) bool {
 	if a == b {
 		return true

@@ -75,6 +75,7 @@ type Config struct {
 	DNSPropagation     bool
 	DNSAdvertisement   bool
 	CoreDNSConfigure   bool
+	CoreDNSMode        string
 
 	AutoConnect   bool
 	DisableBridge bool
@@ -105,6 +106,7 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddBoolOption(&this.DNSPropagation, "dns-propagation", "", false, "Enable DNS Record propagation for Services")
 	set.AddBoolOption(&this.DNSAdvertisement, "dns-advertisement", "", false, "Enable automatic advertisement of DNS access info")
 	set.AddBoolOption(&this.CoreDNSConfigure, "coredns-configure", "", false, "Enable automatic configuration of cluster DNS (coredns)")
+	set.AddStringOption(&this.CoreDNSMode, "coredns-mode", "", "kubernetes", "Mode for accessing foreign DNS information (dns or kubernetes)")
 	set.AddBoolOption(&this.AutoConnect, "auto-connect", "", false, "Automatically register cluster for authenticated incoming requests")
 }
 
@@ -188,6 +190,12 @@ func (this *Config) Prepare() error {
 		}
 	}
 
+	this.CoreDNSMode = strings.ToLower(this.CoreDNSMode)
+	switch this.CoreDNSMode {
+	case DNSMODE_KUBERNETES, DNSMODE_DNS:
+	default:
+		return fmt.Errorf("invalid dns mode: %s", this.CoreDNSMode)
+	}
 	return nil
 }
 

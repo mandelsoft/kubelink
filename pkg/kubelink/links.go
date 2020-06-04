@@ -323,6 +323,26 @@ func (this *Links) GetLinkForEndpoint(dnsname string) *Link {
 	return this.endpoints[dnsname]
 }
 
+func (this *Links) GetSNATRules(ifce *NodeInterface) *Chain {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+
+	rules := &Chain{
+		Table: "nat",
+		Chain: "kubelink",
+		Rules: StringLists{},
+	}
+	for _, l := range this.links {
+		if !l.Gateway.Equal(ifce.IP) {
+			for _, c := range l.Egress {
+				r := []string{"-o", ifce.Name, "-j", "SNAT", "-d", c.String(), "--to-source", ifce.IP.String()}
+				rules.Add(r)
+			}
+		}
+	}
+	return rules
+}
+
 func (this *Links) GetRoutes(ifce *NodeInterface) Routes {
 	this.lock.RLock()
 	defer this.lock.RUnlock()

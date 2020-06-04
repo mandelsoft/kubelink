@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/gardener/controller-manager-library/pkg/config"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
@@ -38,6 +39,7 @@ type StatusUpdater func(obj *v1alpha1.KubeLink, err error) (bool, error)
 type ReconcilerImplementation interface {
 	IsManagedRoute(*netlink.Route, kubelink.Routes) bool
 	RequiredRoutes() kubelink.Routes
+	RequiredSNATRules() *kubelink.Chain
 	Config(interface{}) *Config
 
 	Gateway(obj *v1alpha1.KubeLink) (net.IP, error)
@@ -76,6 +78,7 @@ func (this *Common) TriggerLink(name string) {
 
 type Reconciler struct {
 	Common
+	IPT *iptables.IPTables
 
 	config     config.OptionSource
 	baseconfig *Config
@@ -258,7 +261,23 @@ func String(r netlink.Route) string {
 	return fmt.Sprintf("%s proto: %d", r, r.Protocol)
 }
 
+const IPTAB = "nat"
+
+func (this *Reconciler) updateSNATRules(logger logger.LogContext) error {
+	rules := this.impl.RequiredSNATRules()
+
+	if rules == nil {
+		return nil
+	}
+	return rules.Update(logger, this.IPT)
+}
+
 func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.Status {
+	logger.Debug("update rules")
+	err := this.updateSNATRules(logger)
+	if err != nil {
+		logger.Errorf("cannot update iptables rules: %s", err)
+	}
 	logger.Debug("update routes")
 	routes, err := kubelink.ListRoutes()
 	if err != nil {

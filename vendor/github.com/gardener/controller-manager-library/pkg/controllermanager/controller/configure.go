@@ -32,11 +32,33 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/utils"
 )
 
+////////////////////////////////////////////////////////////////////////////////
+// Watch Selection Functions
+//
+
 func NamespaceSelection(namespace string) WatchSelectionFunction {
 	return func(c Interface) (string, resources.TweakListOptionsFunc) {
 		return namespace, nil
 	}
 }
+
+func NamespaceByOptionSelection(opt string) WatchSelectionFunction {
+	return func(c Interface) (string, resources.TweakListOptionsFunc) {
+		namespace, err := c.GetStringOption(opt)
+		if err != nil {
+			panic(fmt.Errorf("option %q not found for namespace selection in controller resource for %s: %s",
+				opt, c.GetName(), err))
+		}
+		return namespace, nil
+	}
+}
+
+func LocalNamespaceSelection(c Interface) (string, resources.TweakListOptionsFunc) {
+	return c.GetEnvironment().Namespace(), nil
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Option Source Creators
 
 func OptionSourceCreator(proto config.OptionSource) extension.OptionSourceCreator {
 	return extension.OptionSourceCreatorByExample(proto)

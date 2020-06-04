@@ -16,40 +16,40 @@
  *  limitations under the License.
  */
 
-package broker
+package kubelink
 
-import (
-	"net"
+type StringList []string
 
-	"github.com/vishvananda/netlink"
+type StringLists []StringList
 
-	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
-	"github.com/mandelsoft/kubelink/pkg/controllers"
-	"github.com/mandelsoft/kubelink/pkg/kubelink"
-)
-
-type dummy struct{}
-
-func (this *dummy) IsManagedRoute(*netlink.Route, kubelink.Routes) bool {
-	return false
+func (this StringList) Index(val string) int {
+	for i, item := range this {
+		if item == val {
+			return i
+		}
+	}
+	return -1
 }
 
-func (this *dummy) RequiredRoutes() kubelink.Routes {
-	return nil
+func (this StringList) Equals(r StringList) bool {
+	if len(this) != len(r) {
+		return false
+	}
+	for i, e := range this {
+		if r[i] != e {
+			return false
+		}
+	}
+	return true
 }
 
-func (this *dummy) RequiredSNATRules() *kubelink.Chain {
-	return nil
-}
+////////////////////////////////////////////////////////////////////////////////
 
-func (this *dummy) Config(cfg interface{}) *controllers.Config {
-	return &cfg.(*Config).Config
-}
-
-func (this *dummy) Gateway(obj *v1alpha1.KubeLink) (net.IP, error) {
-	return nil, nil
-}
-
-func (this *dummy) UpdateGateway(link *v1alpha1.KubeLink) *string {
-	return nil
+func (this StringLists) Index(l StringList) int {
+	for i, e := range this {
+		if e.Equals(l) {
+			return i
+		}
+	}
+	return -1
 }
