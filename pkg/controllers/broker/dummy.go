@@ -25,6 +25,7 @@ import (
 
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
+	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 )
 
@@ -38,7 +39,7 @@ func (this *dummy) RequiredRoutes() kubelink.Routes {
 	return nil
 }
 
-func (this *dummy) RequiredSNATRules() *kubelink.Chain {
+func (this *dummy) RequiredSNATRules() iptables.Requests {
 	return nil
 }
 

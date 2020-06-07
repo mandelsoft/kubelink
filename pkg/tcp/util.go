@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"net"
 	"sync"
+
+	"github.com/vishvananda/netlink"
 )
 
 // onceCloseListener wraps a net.Listener, protecting it from
@@ -134,4 +136,13 @@ func (this *CIDRList) Contains(ip net.IP) bool {
 		}
 	}
 	return false
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+func Family(ip net.IP) int {
+	if ip.To4() == nil {
+		return netlink.FAMILY_V6
+	}
+	return netlink.FAMILY_V4
 }

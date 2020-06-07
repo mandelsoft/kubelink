@@ -16,32 +16,36 @@
  *  limitations under the License.
  */
 
-package kubelink
+package iptables
 
 import (
-	"github.com/coreos/go-iptables/iptables"
-	"github.com/gardener/controller-manager-library/pkg/convert"
 	"github.com/gardener/controller-manager-library/pkg/logger"
+
+	"github.com/mandelsoft/kubelink/pkg/utils"
 )
 
 type Chain struct {
 	Table string
 	Chain string
-	Rules StringLists
+	Rules Rules
 }
 
-func (this *Chain) Add(r StringList) *Chain {
-	this.Rules = append(this.Rules, r)
+func (this *Chain) Index(r Rule) int {
+	return this.Rules.Index(r)
+}
+
+func (this *Chain) Add(r Rule) *Chain {
+	this.Rules.Add(r)
 	return this
 }
 
-func (this *Chain) Update(logger logger.LogContext, ipt *iptables.IPTables) error {
+func (this *Chain) update(logger logger.LogContext, ipt *IPTables, cleanup bool) error {
 	if this == nil {
 		return nil
 	}
 	if ipt == nil {
 		var err error
-		ipt, err = iptables.New()
+		ipt, err = New()
 		if err != nil {
 			return err
 		}
@@ -56,32 +60,40 @@ func (this *Chain) Update(logger logger.LogContext, ipt *iptables.IPTables) erro
 			return err
 		}
 	}
-	list, err := ipt.List(this.Table, this.Chain)
+	cur, err := ipt.ListChain(this.Table, this.Chain)
 	if err != nil {
 		return err
 	}
 
-	var cur StringLists
-	if t, _ := convert.ConvertTo(list, StringLists{}); t!=nil {
-		cur = t.(StringLists)
-	}
-	found := 0
-	for _, e := range cur {
+	// logger.Infof("chain %s/%s: found %d rules", this.Table, this.Chain, len(cur))
+	found := Rules{}
+	ccnt := 0
+	dcnt := 0
+	n := &utils.Notifier{LogContext: logger}
+	for _, e := range cur.Rules {
 		if this.Rules.Index(e) < 0 {
-			logger.Infof("chain %s/%s: deleting rule %v", this.Table, this.Chain, e)
-			ipt.Delete(this.Table, this.Chain, e...)
+			if cleanup {
+				dcnt++
+				n.Add(true, "chain %s/%s: deleting rule %v", this.Table, this.Chain, e)
+				ipt.DeleteRule(this.Table, this.Chain, e)
+			}
 		} else {
-			found++
+			if found.Index(e) >= 0 {
+				dcnt++
+				n.Add(true, "chain %s/%s: deleting duplicate rule %v", this.Table, this.Chain, e)
+				ipt.DeleteRule(this.Table, this.Chain, e)
+			} else {
+				n.Add(dcnt > 0, "chain %s/%s: found rule %v", this.Table, this.Chain, e)
+				found = append(found, e)
+			}
 		}
 	}
 	for _, e := range this.Rules {
 		if cur.Index(e) < 0 {
-			logger.Infof("chain %s/%s: appending rule %v", this.Table, this.Chain, e)
-			ipt.Append(this.Table, this.Chain, e...)
+			n.Add(true, "chain %s/%s: appending rule %v", this.Table, this.Chain, e)
+			ipt.AppendRule(this.Table, this.Chain, e)
 		}
 	}
-	if found == len(this.Rules) {
-		logger.Infof("chain %s/%s: %d rules are up to date", this.Table, this.Chain, found)
-	}
+	logger.Infof("chain %s/%s: %d managed (%d deleted) and %d created rules", this.Table, this.Chain, len(this.Rules), dcnt, ccnt)
 	return nil
 }

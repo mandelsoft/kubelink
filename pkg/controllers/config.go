@@ -26,18 +26,22 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/config"
 )
 
+const IPIP_NONE = "none"
+const IPIP_SHARED = "shared"
+const IPIP_CONFIGURE = "configure"
+
 type Config struct {
 	nodecidr string
 
 	NodeCIDR *net.IPNet
-	IPIP     bool
+	IPIP     string
 }
 
 var _ config.OptionSource = &Config{}
 
 func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.nodecidr, "node-cidr", "", "", "CIDR of node network of cluster")
-	set.AddBoolOption(&this.IPIP, "ipip", "", false, "enforce local routing over ip-ip tunnel")
+	set.AddStringOption(&this.IPIP, "ipip", "", "IPIP_NONE", "ip-ip tunnel mode (none, shared, configure")
 }
 
 func (this *Config) Prepare() error {
@@ -46,6 +50,14 @@ func (this *Config) Prepare() error {
 	_, this.NodeCIDR, err = this.RequireCIDR(this.nodecidr, "node-cidr")
 	if err != nil {
 		return err
+	}
+
+	ipip := strings.TrimSpace(strings.ToLower(this.IPIP))
+	switch ipip {
+	case IPIP_NONE, IPIP_SHARED, IPIP_CONFIGURE:
+		this.IPIP = ipip
+	default:
+		return fmt.Errorf("invalid ipip mode: %s", this.IPIP)
 	}
 	return nil
 }

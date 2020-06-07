@@ -31,6 +31,14 @@ rules:
   - watch
 
 - apiGroups:
+    - ""
+  resources:
+    - nodes
+  verbs:
+    - list
+    - get
+
+- apiGroups:
     - apps
   resources:
     - deployments

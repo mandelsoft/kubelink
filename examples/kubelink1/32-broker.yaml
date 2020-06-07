@@ -57,7 +57,7 @@ spec:
             - --link-address=192.168.0.11/24
             - --ifce-name=kubelink
             - --service-cidr=100.64.0.0/20
-            - --ipip
+            - --ipip=shared
           securityContext:
             privileged: true
           livenessProbe:

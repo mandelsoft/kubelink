@@ -33,7 +33,9 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/tcp"
+	"github.com/mandelsoft/kubelink/pkg/utils"
 )
 
 const DEFAULT_PORT = 80
@@ -58,7 +60,7 @@ type LinkAccessInfo struct {
 }
 
 func (this LinkAccessInfo) String() string {
-	return fmt.Sprintf("{ca:%s..., token:%s...}", ShortenString(this.CACert, 35), ShortenString(this.Token, 35))
+	return fmt.Sprintf("{ca:%s..., token:%s...}", utils.ShortenString(this.CACert, 35), utils.ShortenString(this.Token, 35))
 }
 
 type LinkForeignData struct {
@@ -83,7 +85,7 @@ func (this *Links) LinkFor(link *v1alpha1.KubeLink) (*Link, error) {
 	var egress tcp.CIDRList
 	var serviceCIDR *net.IPNet
 
-	if !Empty(link.Spec.CIDR) {
+	if !utils.Empty(link.Spec.CIDR) {
 		_, cidr, err := net.ParseCIDR(link.Spec.CIDR)
 		if err != nil {
 			return nil, fmt.Errorf("invalid routing cidr %q: %s", link.Spec.CIDR, err)
@@ -323,24 +325,25 @@ func (this *Links) GetLinkForEndpoint(dnsname string) *Link {
 	return this.endpoints[dnsname]
 }
 
-func (this *Links) GetSNATRules(ifce *NodeInterface) *Chain {
+func (this *Links) GetSNATRules(ifce *NodeInterface) iptables.Requests {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 
-	rules := &Chain{
-		Table: "nat",
-		Chain: "kubelink",
-		Rules: StringLists{},
-	}
+	rules := iptables.Rules{}
 	for _, l := range this.links {
 		if !l.Gateway.Equal(ifce.IP) {
 			for _, c := range l.Egress {
-				r := []string{"-o", ifce.Name, "-j", "SNAT", "-d", c.String(), "--to-source", ifce.IP.String()}
+				r := iptables.Rule{
+					iptables.Opt("-d", c.String()),
+					iptables.Opt("-o", ifce.Name),
+					iptables.Opt("-j", "SNAT"),
+					iptables.Opt("--to-source", ifce.IP.String()),
+				}
 				rules.Add(r)
 			}
 		}
 	}
-	return rules
+	return iptables.Requests{iptables.NewChainRequest("nat", "kubelink", rules, true)}
 }
 
 func (this *Links) GetRoutes(ifce *NodeInterface) Routes {
@@ -352,9 +355,12 @@ func (this *Links) GetRoutes(ifce *NodeInterface) Routes {
 	protocol := 0
 	i, err := netlink.LinkByName("tunl0")
 	if i != nil && err == nil {
-		index = i.Attrs().Index
-		fmt.Printf("*** found tun10[%d]\n", index)
-		flags = netlink.FLAG_ONLINK
+		attrs := i.Attrs()
+		if attrs.Flags&net.FlagUp != 0 {
+			index = attrs.Index
+			logger.Infof("*** found active tun10[%d]\n", index)
+			flags = netlink.FLAG_ONLINK
+		}
 	}
 	routes := Routes{}
 	for _, l := range this.links {

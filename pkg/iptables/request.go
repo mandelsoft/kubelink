@@ -16,22 +16,22 @@
  *  limitations under the License.
  */
 
-package kubelink
+package iptables
 
-import (
-	"strings"
-)
-
-func Empty(s string) bool {
-	return strings.TrimSpace(s) == ""
+type ChainRequest struct {
+	*Chain
+	Cleanup bool
 }
 
-func ShortenString(s string, n int) string {
-	l := len(s)
-	if l > n {
-		l = n
-	} else {
-		l = l / 2
+func NewChainRequest(table, chain string, rules Rules, cleanup bool) *ChainRequest {
+	return &ChainRequest{
+		Chain: &Chain{
+			Table: table,
+			Chain: chain,
+			Rules: rules,
+		},
+		Cleanup: cleanup,
 	}
-	return s[:l]
 }
+
+type Requests []*ChainRequest

@@ -36,6 +36,7 @@ import (
 
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
+	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
@@ -111,7 +112,7 @@ func (this *reconciler) RequiredRoutes() kubelink.Routes {
 	return append(routes, netlink.Route{LinkIndex: this.mux.tun.link.Attrs().Index, Dst: this.config.ClusterCIDR})
 }
 
-func (this *reconciler) RequiredSNATRules() *kubelink.Chain {
+func (this *reconciler) RequiredSNATRules() iptables.Requests {
 	return nil
 }
 
@@ -135,6 +136,10 @@ func (this *reconciler) Setup() {
 
 	if this.config.DisableBridge {
 		return
+	}
+
+	if this.config.IPIP != controllers.IPIP_NONE {
+		this.WaitIPIP()
 	}
 	tun, err := NewTun(this.Controller(), this.config.Interface, this.config.ClusterAddress, this.config.ClusterCIDR)
 	if err != nil {

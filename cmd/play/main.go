@@ -25,6 +25,7 @@ import (
 
 	"github.com/gardener/controller-manager-library/pkg/utils"
 
+	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
@@ -52,4 +53,14 @@ func main() {
 		r.Failed()
 		fmt.Printf("%d: %s\n", i, r.RateLimit())
 	}
+
+	args := []string{
+		"-A", "chain", "-o", "eth0", "-d", "127.2.2.2", "-j", "SNAT", "--to-source", "x",
+	}
+
+	rule := iptables.ParseRule(args)
+	fmt.Printf("rule: %+v\n", rule)
+	fmt.Printf("list: %+v\n", rule.AsList())
+	rule.Remove(iptables.Opt("-j", "SNAT"))
+	fmt.Printf("rem: %+v\n", rule.RemoveOption("-A"))
 }

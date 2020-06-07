@@ -30,7 +30,7 @@ import (
 
 	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
-	"github.com/mandelsoft/kubelink/pkg/kubelink"
+	kutils "github.com/mandelsoft/kubelink/pkg/utils"
 )
 
 var secretGK = resources.NewGroupKind("", "Secret")
@@ -129,7 +129,7 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 	controller.Infof("using cluster cidr:  %s", this.config.ClusterCIDR)
 	controller.Infof("using cluster address: %s", this.config.ClusterAddress)
 	controller.Infof("serving links: %s", this.config.Responsible)
-	if !kubelink.Empty(this.config.Secret) {
+	if !kutils.Empty(this.config.Secret) {
 		controller.Infof("using TLS secret %q with management mode %s", this.config.Secret, this.config.ManageMode)
 	}
 	if this.config.Interface == "" {

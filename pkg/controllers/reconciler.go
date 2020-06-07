@@ -21,17 +21,23 @@ package controllers
 import (
 	"fmt"
 	"net"
+	"syscall"
+	"time"
 
-	"github.com/coreos/go-iptables/iptables"
 	"github.com/gardener/controller-manager-library/pkg/config"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
 	"github.com/vishvananda/netlink"
+	core "k8s.io/api/core/v1"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
+	"github.com/mandelsoft/kubelink/pkg/tcp"
+	"github.com/mandelsoft/kubelink/pkg/utils"
 )
 
 type StatusUpdater func(obj *v1alpha1.KubeLink, err error) (bool, error)
@@ -39,7 +45,7 @@ type StatusUpdater func(obj *v1alpha1.KubeLink, err error) (bool, error)
 type ReconcilerImplementation interface {
 	IsManagedRoute(*netlink.Route, kubelink.Routes) bool
 	RequiredRoutes() kubelink.Routes
-	RequiredSNATRules() *kubelink.Chain
+	RequiredSNATRules() iptables.Requests
 	Config(interface{}) *Config
 
 	Gateway(obj *v1alpha1.KubeLink) (net.IP, error)
@@ -236,27 +242,6 @@ func (this *Reconciler) Deleted(logger logger.LogContext, key resources.ClusterO
 	return reconcile.Succeeded(logger)
 }
 
-type notifier struct {
-	logger.LogContext
-	pending []string
-	active  bool
-}
-
-func (this *notifier) add(print bool, msg string, args ...interface{}) {
-	if print || this.active {
-		if len(this.pending) > 0 {
-			for _, p := range this.pending {
-				this.Info(p)
-			}
-			this.pending = nil
-		}
-		this.Infof(msg, args...)
-		this.active = true
-	} else {
-		this.pending = append(this.pending, fmt.Sprintf(msg, args...))
-	}
-}
-
 func String(r netlink.Route) string {
 	return fmt.Sprintf("%s proto: %d", r, r.Protocol)
 }
@@ -264,12 +249,15 @@ func String(r netlink.Route) string {
 const IPTAB = "nat"
 
 func (this *Reconciler) updateSNATRules(logger logger.LogContext) error {
-	rules := this.impl.RequiredSNATRules()
+	reqs := this.impl.RequiredSNATRules()
 
-	if rules == nil {
-		return nil
+	for _, r := range reqs {
+		err := this.IPT.Execute(logger, r)
+		if err != nil {
+			return err
+		}
 	}
-	return rules.Update(logger, this.IPT)
+	return nil
 }
 
 func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.Status {
@@ -288,20 +276,20 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 	dcnt := 0
 	ocnt := 0
 	ccnt := 0
-	n := &notifier{LogContext: logger}
+	n := &utils.Notifier{LogContext: logger}
 	for i, r := range routes {
 		if this.impl.IsManagedRoute(&r, required) {
 			mcnt++
 			if required.Lookup(r) < 0 {
 				dcnt++
 				r.String()
-				n.add(dcnt > 0, "obsolete    %3d: %s", i, String(r))
+				n.Add(dcnt > 0, "obsolete    %3d: %s", i, String(r))
 				err := netlink.RouteDel(&r)
 				if err != nil {
 					logger.Errorf("cannot delete route %s: %s", String(r), err)
 				}
 			} else {
-				n.add(dcnt > 0, "keep        %3d: %s", i, String(r))
+				n.Add(dcnt > 0, "keep        %3d: %s", i, String(r))
 			}
 		} else {
 			ocnt++
@@ -312,7 +300,7 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 	for i, r := range required {
 		if o := routes.Lookup(r); o < 0 {
 			ccnt++
-			n.add(true, "missing    *%3d: %s", i, String(r))
+			n.Add(true, "missing    *%3d: %s", i, String(r))
 			err := netlink.RouteAdd(&r)
 			if err != nil {
 				logger.Errorf("cannot add route %s: %s", String(r), err)
@@ -323,4 +311,176 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 	logger.Infof("found %d managed (%d deleted) and %d created routes (%d other)", mcnt, dcnt, ccnt, ocnt)
 
 	return reconcile.Succeeded(logger)
+}
+
+func (this *Reconciler) WaitIPIP() {
+	msg := ""
+	d := 10 * time.Second
+	for {
+		l, err := netlink.LinkByName("tunl0")
+		if err != nil {
+			this.Controller().Errorf("error getting tunl0 interface: %s", err)
+			return
+		}
+		if link, ok := l.(*netlink.Iptun); ok {
+			attrs := link.Attrs()
+			msg = "waiting for tunl0 to be up"
+			if attrs.Flags&net.FlagUp != 0 {
+				this.Controller().Infof("tunl0 is up")
+				addrs, _ := netlink.AddrList(link, netlink.FAMILY_V4)
+				if err != nil {
+					this.Controller().Errorf("error getting tunl0 addresses: %s", err)
+					return
+				}
+				for _, addr := range addrs {
+					this.Controller().Infof("  found address %s", addr.IP)
+				}
+				if len(addrs) > 0 {
+					return
+				}
+				msg = "waiting for tunl0 to get IPv4 address"
+
+			}
+		}
+		this.Controller().Infof("%s", msg)
+		time.Sleep(d)
+		d = time.Duration(1.1 * float64(d))
+	}
+}
+
+func (this *Reconciler) SetupIPIP() error {
+	link := &netlink.Iptun{LinkAttrs: netlink.LinkAttrs{Name: "tunl0"}}
+	err := netlink.LinkAdd(link)
+	if err != nil && err != syscall.EEXIST {
+		return fmt.Errorf("error creating tunl0 interface: %s", err)
+	} else {
+		if err == nil {
+			this.Controller().Infof("created interface tunl0[%d] for ip-over-ip routing option", link.Attrs().Index)
+		} else {
+			this.Controller().Infof("found interface tunl0[%d] for ip-over-ip routing option", link.Attrs().Index)
+		}
+
+		l, err := netlink.LinkByName("tunl0")
+		if err != nil {
+			return fmt.Errorf("error getting tunl0 interface: %s", err)
+		} else {
+			if link, ok := l.(*netlink.Iptun); ok {
+				attrs := link.Attrs()
+				mtu := 1440
+				if attrs.MTU != mtu {
+					err = netlink.LinkSetMTU(link, mtu)
+					if err != nil {
+						this.Controller().Errorf("cannot set MTU for tunl0: %s", err)
+					} else {
+						this.Controller().Errorf("setting MTU for tunl0: %d", mtu)
+					}
+				}
+				if attrs.Flags&net.FlagUp == 0 {
+					err = netlink.LinkSetUp(link)
+					if err != nil {
+						return fmt.Errorf("cannot bring up tunl0: %s", err)
+					} else {
+						this.Controller().Infof("bring up tunl0")
+					}
+				}
+				ip := this.ifce.IP
+				addr := &netlink.Addr{
+					IPNet: &net.IPNet{
+						IP:   ip,
+						Mask: net.CIDRMask(len(ip)*8, len(ip)*8),
+					},
+				}
+				addrs, err := netlink.AddrList(link, tcp.Family(ip))
+				found := false
+				for _, oldAddr := range addrs {
+					found = true
+					if oldAddr.IP.Equal(addr.IP) {
+						this.Controller().Infof("tunl0 address %s already present", oldAddr)
+						continue
+					} else {
+						this.Controller().Infof("tunl0 address found: %s", oldAddr)
+					}
+				}
+
+				if !found {
+					logger.Infof("adding address %s to tunl0", addr.String())
+					err = netlink.AddrAdd(link, addr)
+					if err != nil {
+						return fmt.Errorf("cannot add addr %q to tunl0: %s", addr, err)
+					}
+				}
+			} else {
+				return fmt.Errorf("tunl0 isn't an iptun device (%#v), please remove device and try again", l)
+			}
+		}
+	}
+	return nil
+}
+
+func (this *Reconciler) WaitNetworkReady() {
+	resc, err := this.Controller().GetMainCluster().GetResource(resources.NewGroupKind(core.GroupName, "Node"))
+	if err != nil {
+		panic(err)
+	}
+	nodeIP := this.NodeInterface().IP.String()
+	this.Controller().Infof("lookup node for ip %s...", nodeIP)
+	var node *core.Node
+	for node == nil {
+		nodes, err := resc.List(meta.ListOptions{})
+		if err != nil {
+			this.Controller().Infof("cannot list nodes: %s", err)
+		} else {
+			for _, n := range nodes {
+				tmp := n.Data().(*core.Node)
+				for _, a := range tmp.Status.Addresses {
+					if a.Type == "InternalIP" {
+						if a.Address == nodeIP {
+							node = tmp
+							break
+						}
+					}
+				}
+			}
+		}
+		if node == nil {
+			this.Controller().Infof("no node found for node IP %s", nodeIP)
+			time.Sleep(10 * time.Second)
+		}
+	}
+
+	this.Controller().Infof("found node %s", node.Name)
+outer:
+	for {
+		if err == nil {
+			for _, c := range node.Status.Conditions {
+				if c.Type == core.NodeNetworkUnavailable {
+					if c.Status == core.ConditionFalse {
+						this.Controller().Infof("node network is ready: %s/%s", c.Reason, c.Message)
+						break outer
+					}
+				}
+			}
+		}
+		this.Controller().Infof("waiting for node network to become ready...")
+		time.Sleep(10 * time.Second)
+		_, err = resc.Get(node)
+		if err != nil {
+			this.Controller().Infof("cannot get node: %s", err)
+		}
+	}
+
+	/*
+		for {
+			if ip:=node.Annotations["projectcalico.org/IPv4Address"]; ip!="" {
+				this.Controller().Infof("calico uses node IP %s", ip)
+				break
+			}
+			this.Controller().Infof("waiting for calico to become ready...")
+			time.Sleep(10 * time.Second)
+			_, err = resc.Get(node)
+			if err != nil {
+				this.Controller().Infof("cannot get node: %s", err)
+			}
+		}
+	*/
 }

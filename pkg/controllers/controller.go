@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/coreos/go-iptables/iptables"
 	"github.com/gardener/controller-manager-library/pkg/config"
 	"github.com/gardener/controller-manager-library/pkg/resources/apiextensions"
 
@@ -30,6 +29,7 @@ import (
 
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/crds"
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 )
 

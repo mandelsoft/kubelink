@@ -30,6 +30,7 @@ import (
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
+	kutils "github.com/mandelsoft/kubelink/pkg/utils"
 )
 
 const MANAGE_MODE_NONE = "none"
@@ -130,7 +131,7 @@ func (this *Config) Prepare() error {
 		if this.ServiceCIDR == nil {
 			return fmt.Errorf("auto-connect requires local service cidr")
 		}
-		if kubelink.Empty(this.Secret) && kubelink.Empty(this.CertFile) {
+		if kutils.Empty(this.Secret) && kutils.Empty(this.CertFile) {
 			return fmt.Errorf("auto-connect requires authenticated mode -> secret or cert file requied")
 		}
 	}
@@ -148,10 +149,10 @@ func (this *Config) Prepare() error {
 			return fmt.Errorf("TLS secret or cert file must be set")
 		}
 	*/
-	if !kubelink.Empty(this.Secret) && !kubelink.Empty(this.CertFile) {
+	if !kutils.Empty(this.Secret) && !kutils.Empty(this.CertFile) {
 		return fmt.Errorf("only secret or cert file can be specified")
 	}
-	if !kubelink.Empty(this.ManageMode) {
+	if !kutils.Empty(this.ManageMode) {
 		if !valid_modes.Contains(this.ManageMode) {
 			return fmt.Errorf("invalid management mode (possible %s): %s", valid_modes, this.ManageMode)
 		}
@@ -163,11 +164,11 @@ func (this *Config) Prepare() error {
 	} else {
 		this.ManageMode = MANAGE_MODE_NONE
 	}
-	if !kubelink.Empty(this.CertFile) {
-		if kubelink.Empty(this.KeyFile) {
+	if !kutils.Empty(this.CertFile) {
+		if kutils.Empty(this.KeyFile) {
 			return fmt.Errorf("key file must be specified if cert file is set")
 		}
-		if kubelink.Empty(this.CACertFile) {
+		if kutils.Empty(this.CACertFile) {
 			return fmt.Errorf("ca cert file must be specified if cert file is set")
 		}
 	}
