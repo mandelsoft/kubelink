@@ -37,18 +37,12 @@ revendor:
 check:
 	@.ci/check
 
-.PHONY: build
-build:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -o $(EXECUTABLE) \
-        -mod=vendor \
-	    -ldflags "-X $(VERSION_VAR)=$(VERSION)-$(COMMIT)" \
-	    ./cmd/$(NAME)
-
 .PHONY: dev
 dev:
+	@echo target: release
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go install \
         -mod=vendor \
-	    -ldflags "-X $(VERSION_VAR)=$(VERSION)-$(COMMIT)" \
+	    -ldflags "-X $(VERSION_VAR)=$(VERSION)-dev-$(COMMIT)" \
 	    ./cmd/$(NAME)
 
 .PHONY: build-local
@@ -63,6 +57,7 @@ release-all: generate release
 
 .PHONY: release
 release:
+	@echo target: release
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go install \
 	    -a \
 	    -mod=vendor \
@@ -86,13 +81,17 @@ docker-login:
 
 .PHONY: images-dev
 images-dev:
-	@docker build -t $(IMAGE_PREFIX)/$(NAME):$(VERSION)-$(COMMIT) -t $(IMAGE_PREFIX)/$(NAME):latest -f Dockerfile -m 6g --build-arg TARGETS=dev --target $(NAME) .
+	@docker build -t $(IMAGE_PREFIX)/$(NAME):$(VERSION)-dev-$(COMMIT) -t $(IMAGE_PREFIX)/$(NAME):latest -f Dockerfile -m 6g --build-arg TARGETS=dev --target $(NAME) .
 	@docker push $(IMAGE_PREFIX)/$(NAME):latest
 
 .PHONY: images-release
 images-release:
 	@docker build -t $(IMAGE_PREFIX)/$(NAME):$(VERSION) -t $(IMAGE_PREFIX)/$(NAME):latest -f Dockerfile -m 6g --build-arg TARGETS=release --target $(NAME) .
+	@docker push $(IMAGE_PREFIX)/$(NAME):latest
+	@docker push $(IMAGE_PREFIX)/$(NAME):$(VERSION)
 
 .PHONY: images-release-all
 images-release-all:
 	@docker build -t $(IMAGE_PREFIX)/$(NAME):$(VERSION) -t $(IMAGE_PREFIX)/$(NAME):latest -f Dockerfile -m 6g --build-arg TARGETS=release-all --target $(NAME) .
+	@docker push $(IMAGE_PREFIX)/$(NAME):latest
+	@docker push $(IMAGE_PREFIX)/$(NAME):$(VERSION)
