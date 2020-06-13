@@ -101,6 +101,12 @@ func CIDRNet(cidr *net.IPNet) *net.IPNet {
 	return &net
 }
 
+func CIDRIP(cidr *net.IPNet, ip net.IP) *net.IPNet {
+	net := *cidr
+	net.IP = ip
+	return &net
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 type CIDRList []*net.IPNet

@@ -69,6 +69,18 @@ type KubeLinkSpec struct {
 
 	// +optional
 	APIAccess *core.SecretReference `json:"apiAccess,omitempty"`
+
+	// +optional
+	DNS *KubeLinkDNS `json:"dns,omitempty"`
+}
+
+type KubeLinkDNS struct {
+	// +optional
+	OmitDNSPropagation *bool `json:"omitDNSPropagation,omitempty"`
+	// +optional
+	DNSIP string `json:"dnsIP,omitempty"`
+	// +optional
+	BaseDomain string `json:"baseDomain,omitempty"`
 }
 
 type KubeLinkStatus struct {

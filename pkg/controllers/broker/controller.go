@@ -99,34 +99,43 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 	}
 	this.deploymentResource = r
 
-	if this.config.DNSPropagation {
-		if this.config.CoreServiceAccount != nil {
-			controller.Infof("using dns propagation with service account %q", this.config.CoreServiceAccount)
+	if this.config.ServiceAccount != nil {
+		controller.Infof("advertise api access with service account %q", this.config.ServiceAccount)
 
-			access, err := this.getServiceAccountToken()
-			if err != nil {
-				return nil, fmt.Errorf("cannot get service account token: %s", err)
-			}
-			if access != nil {
-				this.access = *access
-				controller.Infof("  found access: %s", this.access)
-			}
-		} else {
-			controller.Infof("using dns propagation")
+		access, err := this.getServiceAccountToken()
+		if err != nil {
+			return nil, fmt.Errorf("cannot get service account token: %s", err)
 		}
+		if access != nil {
+			this.access = *access
+			controller.Infof("  found access: %s", this.access)
+		}
+	} else {
+		controller.Infof("api access advertisement disabled")
+	}
+
+	if this.config.DNSAdvertisement {
+		this.dnsInfo.ClusterDomain = this.config.ClusterDomain
+		this.dnsInfo.DnsIP = this.config.DNSServiceIP
+		controller.Infof("advertise dns access with with dns IP %s and cluster domain %s", this.dnsInfo.DnsIP, this.dnsInfo.ClusterDomain)
+	} else {
+		controller.Infof("dns access advertisement disabled")
+	}
+
+	if this.config.DNSPropagation != DNSMODE_NONE {
+		controller.Infof("enable dns propagation (%s)", this.config.DNSPropagation)
 		controller.Infof("  handle coredns deployment %q", this.config.CoreDNSDeployment)
 		controller.Infof("  using coredns secret %q", this.config.CoreDNSSecret)
 		if this.config.CoreDNSConfigure {
 			controller.Infof("  automatic configuration of cluster local coredns setup")
 			if this.config.CoreDNSServiceIP != nil {
-				controller.Infof("  using coredns service IP %q", this.config.CoreDNSServiceIP)
+				controller.Infof("    using coredns service IP %q", this.config.CoreDNSServiceIP)
 			}
 		}
 	} else {
 		controller.Infof("dns propagation disabled")
 	}
 
-	controller.Infof("using cluster cidr:  %s", this.config.ClusterCIDR)
 	controller.Infof("using cluster address: %s", this.config.ClusterAddress)
 	controller.Infof("serving links: %s", this.config.Responsible)
 	if !kutils.Empty(this.config.Secret) {

@@ -76,6 +76,24 @@ spec:
 That's it, no certificate, no key, nothing else required in best case when
 using the DNS and server certificate provisioning controllers proposed above.
 
+## Constraints
+
+For example on AWS routing of foreign traffic on the node network is not
+possible by default (source/desctination check). In such cases an IPIP tunnel
+has to be used on the node network. This can be handled by the *router* 
+daemon set.
+
+If *calico* is used there is typically already a configured `tunl0` device
+which is just reused. But the the setup phase of calico is not able to
+handle foreign *tun* devices (used by the broker) correctly and will discover
+the wrong node IP, network and interface. So far the only way to circumvent
+this problem is to use the `interface` detection method. Hereby the
+primary interface of the nodes has to be configured
+(for example `interface=eth0`). Unfortunately this interface name is 
+dependent on the used operation system/image. For heterogeneous clusters
+with nodes using different operating systems, this will not work (only if the
+set of interfaces is known in advance for configuring the calico daemon set).
+
 ## Implementation
 
 The two used controllers are bundled into one controller manager (`kubelink`)
@@ -153,16 +171,26 @@ $ wget -O - 100.64.22.1
 
 which reaches the private echo service in the remote cluster.
 
-## DNS Progation for Services
+## DNS Propagation for Services
 
 The broker supports the propagation of service DNS names. This is done
 by an own `coredns` deployment, which can be automatically configured
-by the broker according to the established links and available API server access
-information. The *coredns* DNS server is hereby configured with a separate
-`kubernetes`plugin for every active foreign cluster and therefore needs access
-to the foreign API servers. This connectivity is again done by the cluster mesh
-access by using the service ip of the foreign cluster' API server
-(service `kubernetes`)
+by the broker. There are two different modes, witch are selected by the
+option `--dns-propagation` (default is `none`):
+- `kubernetes`: According to the established links and available API server access
+  information the *coredns* DNS server is hereby configured with a separate
+  `kubernetes` plugin for every active foreign cluster and therefore needs access
+  to the foreign API servers. This connectivity is again done by the cluster mesh
+  access by using the service ip of the foreign cluster's API server
+  (service `kubernetes`) This mode requires explicit cross-cluster traffic for
+  the kubernetes plugin of coredns to access the foreign API servers.
+  
+- `dns`: This new mode directly uses the dns service of the foreign clusters.
+  The *coredns* DNS server is hereby configured with a separate
+  `rewrite` and `forward` plugin for every active foreign cluster. It does 
+  not need any API server access or credentials, but the address of the foreign
+  dns service (typically IP 10 in the service address range) and its cluster
+  domain (typically `cluster.local`)
 
 The [coredns deployment](examples/kubelink1/50-coredns.yaml) is specific for
 a dedicated cluster, because it contains
@@ -170,9 +198,9 @@ a dedicated service IP of the cluster (the cluster DNS service uses IP 10, and
 the kubelink IP service is intended to use the IP 11 of the cluster's service
 IP range)
 
-This deployment provides an own DNS server serving the `kubelink.` domain
-(default for option `--mesh-domain`). Every cluster of the mesh that
-support the proliferation of service DNS entries is mapped to an own
+This deployment provides an own (coredns) DNS server serving the `kubelink.`
+domain (default for option `--mesh-domain`). Every cluster of the mesh that
+supports the proliferation of service DNS entries is mapped to an own
 sub domain, according to its cluster name (name of the `KubeLink` object).
 Here the typical service structure is exposed
 (&lt;*service*>.&lt;*namespace*>`.svc.`...).
@@ -185,37 +213,51 @@ to the kubelink coredns service (therefore the fixed cluster IP from above
 is used). This can be done for example by deploying a 
 [`coredns-custom`](examples/kubelink1/51-forward.yaml) configmap.
 
-There are serveral modes this DNS support can be used:
+There are several ways this DNS support can be used:
 
 - *Explicit Configuration* of the DNS access information of the foreign clusters
   at the `KubeLink` objects.
-  Here the spec field `apiAccess` has to be set to a valid secret
-  reference. The secret must have the data fields:
-  - `token` and 
-  - `certificate-authority-data`
-  taken from a service account of the foreign cluster with the appropriate
-  permissions (see *kubeconfig plugin*)
+  - For the `kubernetes` mode the spec field `apiAccess` has to be set to a valid
+    secret reference. The secret must have the data fields:
+    - `token` and 
+    - `certificate-authority-data`
+    taken from a service account of the foreign cluster with the appropriate
+    permissions (see *kubeconfig plugin*)
+  - For the `dns` mode the DNS access information has to be maintained in the
+    spec field `dns`:
+    - `dnsIP`: the (service) IP address of the foreign DNS service
+    - `baseDomain`; the cluster domain used in the foreign cluster.
 
 - *Automatic Advertisement* of the DNS access info. Here the broker requires
-  the option `--dns-advertisement`. The settings of the `KubeLink` objects are
+  the option `--dns-advertisement` or `--service-account=<name>`. The settings
+  of the foreign `KubeLink` objects are
   now maintained automatically by the broker according to information advertised
   by the foreign clusters.
   
-  - With this option the *Inbound Advertisement* is active.
-    A precondition is that the foreign servers advertise their access information
-    but the own information is not advertised
-  - *Outbound Advertisement* is enabled by additionally setting the option 
-    `--coredns-service-account`,  which must
-    denote a service account whose credentials are used to advertise the DNS
-    access info to foreign clusters. 
+  With this option the *Outbound Advertisement* is enabled. The local
+  information is advertised to all foreign members of the mesh, which update
+  their `KubeLink` objects accordingly.
+   
+  The *Inbound Update* is always active. Whenever a foreign broker advertises
+  its info, it is updated in its local `KubeLink`object.
   
+If the foreign API server is used by the kubernetes plugin of coredns,
+its advertised service account (or the manually maintained credentials)
+are used to access the service objects of the foreign cluster and must have
+the appropriate permissions.
  
-In all cases the option `--dns-propagation` must be set to enable the
+In all cases the option `--dns-propgation` must be set to enable the
 DNS feature. By default, only the foreign clusters are included in the mesh's
 top-level domain. To provide a uniform DNS hierarchy in all clusters of the
 mesh including the local cluster, the optional option `--cluster-name` can be
 set, which provides a dedicated sub domain in the `kubelink.`top-level domain for
 the local cluster.
+
+For accessing the cluster DNS service defaults are used:
+- `cluster.local` for the cluster domain
+- IP 10 in the clusters service IP range for the address of the cluster DNS
+  service.
+For the advertisement it can be overridden by command line options.
 
 If your cluster uses *coredns* for the local cluster DNS service, which supports
 the `coredns-custom` config map, the option `--coredns-configure` can be used
@@ -226,10 +268,15 @@ like this (for the example cluster `kubelink1`):
 
 ```shell script
             - --dns-advertisement
-            - --coredns-service-account=coredns
-            - --dns-propagation
+            - --service-account=coredns
+            - --dns-propagation=kubernetes
             - --cluster-name=kubelink1 # change-me
+            - --coredns-configure
 ```
+
+With the option `--coredns-deployment` (default `kubelink-coredns`) it is
+possible to override the name of the coredns deployment used to handle the mesh
+DNS domain.
 
 ## Command Line Reference
 
@@ -249,19 +296,20 @@ Flags:
       --broker.broker-port int                      Port for broker of controller broker (default 8088)
       --broker.cacertfile string                    TLS ca certificate file of controller broker
       --broker.certfile string                      TLS certificate file of controller broker
+      --broker.cluster-domain string                Cluster Domain of Cluster DNS Service (for DNS Info Propagation) of controller broker (default "cluster.local")
       --broker.cluster-name string                  Name of local cluster in cluster mesh of controller broker
       --broker.coredns-configure                    Enable automatic configuration of cluster DNS (coredns) of controller broker
       --broker.coredns-deployment string            Name of coredns deployment used by kubelink of controller broker (default "kubelink-coredns")
       --broker.coredns-secret string                Name of dns secret used by kubelink of controller broker (default "kubelink-coredns")
-      --broker.coredns-service-account string       Service Account to use for CoreDNS API Server Access of controller broker
       --broker.coredns-service-ip string            Service IP of coredns deployment used by kubelink of controller broker
       --broker.default.pool.size int                Worker pool size for pool default of controller broker (default 1)
       --broker.disable-bridge                       Disable network bridge of controller broker
       --broker.dns-advertisement                    Enable automatic advertisement of DNS access info of controller broker
       --broker.dns-name string                      DNS Name for managed certificate of controller broker
-      --broker.dns-propagation                      Enable DNS Record propagation for Services of controller broker
+      --broker.dns-propagation string               Mode for accessing foreign DNS information (none, dns or kubernetes) of controller broker (default "none")
+      --broker.dns-service-ip string                IP of Cluster DNS Service (for DNS Info Propagation) of controller broker
       --broker.ifce-name string                     Name of the tun interface of controller broker
-      --broker.ipip                                 enforce local routing over ip-ip tunnel of controller broker
+      --broker.ipip string                          ip-ip tunnel mode (none, shared, configure of controller broker (default "IPIP_NONE")
       --broker.keyfile string                       TLS certificate key file of controller broker
       --broker.link-address string                  CIDR of cluster in cluster network of controller broker
       --broker.mesh-domain string                   Base domain for cluster mesh services of controller broker (default "kubelink")
@@ -273,18 +321,20 @@ Flags:
       --broker.secrets.pool.size int                Worker pool size for pool secrets of controller broker (default 1)
       --broker.served-links string                  Comma separated list of links to serve of controller broker (default "all")
       --broker.service string                       Service name for managed certificate of controller broker
+      --broker.service-account string               Service Account for API Access propagation of controller broker
       --broker.service-cidr string                  CIDR of local service network of controller broker
+      --broker.tasks.pool.size int                  Worker pool size for pool tasks of controller broker (default 1)
       --broker.update.pool.resync-period duration   Period for resynchronization for pool update of controller broker (default 20s)
       --broker.update.pool.size int                 Worker pool size for pool update of controller broker (default 1)
       --cacertfile string                           TLS ca certificate file
       --certfile string                             TLS certificate file
+      --cluster-domain string                       Cluster Domain of Cluster DNS Service (for DNS Info Propagation)
       --cluster-name string                         Name of local cluster in cluster mesh
       --config string                               config file
   -c, --controllers string                          comma separated list of controllers to start (<name>,<group>,all) (default "all")
       --coredns-configure                           Enable automatic configuration of cluster DNS (coredns)
       --coredns-deployment string                   Name of coredns deployment used by kubelink
       --coredns-secret string                       Name of dns secret used by kubelink
-      --coredns-service-account string              Service Account to use for CoreDNS API Server Access
       --coredns-service-ip string                   Service IP of coredns deployment used by kubelink
       --cpuprofile string                           set file for cpu profiling
       --default.pool.size int                       Worker pool size for pool default
@@ -292,11 +342,12 @@ Flags:
       --disable-namespace-restriction               disable access restriction for namespace local access only
       --dns-advertisement                           Enable automatic advertisement of DNS access info
       --dns-name string                             DNS Name for managed certificate
-      --dns-propagation                             Enable DNS Record propagation for Services
+      --dns-propagation string                      Mode for accessing foreign DNS information (none, dns or kubernetes)
+      --dns-service-ip string                       IP of Cluster DNS Service (for DNS Info Propagation)
       --grace-period duration                       inactivity grace period for detecting end of cleanup for shutdown
   -h, --help                                        help for kubelink
       --ifce-name string                            Name of the tun interface
-      --ipip                                        enforce local routing over ip-ip tunnel
+      --ipip string                                 ip-ip tunnel mode (none, shared, configure
       --keyfile string                              TLS certificate key file
       --kubeconfig string                           default cluster access
       --kubeconfig.disable-deploy-crds              disable deployment of required crds for cluster default
@@ -316,7 +367,7 @@ Flags:
       --pool.resync-period duration                 Period for resynchronization
       --pool.size int                               Worker pool size
       --router.default.pool.size int                Worker pool size for pool default of controller router (default 1)
-      --router.ipip                                 enforce local routing over ip-ip tunnel of controller router
+      --router.ipip string                          ip-ip tunnel mode (none, shared, configure of controller router (default "IPIP_NONE")
       --router.node-cidr string                     CIDR of node network of cluster of controller router
       --router.pod-cidr string                      CIDR of pod network of cluster of controller router
       --router.pool.resync-period duration          Period for resynchronization of controller router
@@ -329,8 +380,11 @@ Flags:
       --served-links string                         Comma separated list of links to serve
       --server-port-http int                        HTTP server port (serving /healthz, /metrics, ...)
       --service string                              Service name for managed certificate
+      --service-account string                      Service Account for API Access propagation
       --service-cidr string                         CIDR of local service network
+      --tasks.pool.size int                         Worker pool size for pool tasks
       --update.pool.resync-period duration          Period for resynchronization for pool update
       --update.pool.size int                        Worker pool size for pool update
       --version                                     version for kubelink
+
 ```

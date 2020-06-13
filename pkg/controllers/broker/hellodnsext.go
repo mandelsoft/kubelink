@@ -19,8 +19,9 @@
 package broker
 
 import (
+	"bytes"
 	"fmt"
-	"strings"
+	"net"
 
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 )
@@ -29,7 +30,7 @@ func init() {
 	RegisterExtension(EXT_DNS, &DNSExtensionHandler{})
 }
 
-type DNSExtension kubelink.LinkAccessInfo
+type DNSExtension kubelink.LinkDNSInfo
 
 var _ ConnectionHelloExtension = &DNSExtension{}
 
@@ -38,12 +39,12 @@ func (this *DNSExtension) Id() byte {
 }
 
 func (this *DNSExtension) Data() []byte {
-	d := append([]byte{}, append(append([]byte(this.Token), 0), []byte(this.CACert)...)...)
+	d := append(append(append([]byte{}, []byte(this.ClusterDomain)...), 0), this.DnsIP...)
 	return d
 }
 
 func (this *DNSExtension) String() string {
-	return ((*kubelink.LinkAccessInfo)(this)).String()
+	return fmt.Sprintf("%s/%s", this.DnsIP, this.ClusterDomain)
 }
 
 type DNSExtensionHandler struct{}
@@ -54,19 +55,16 @@ func (this *DNSExtensionHandler) Parse(id byte, data []byte) (ConnectionHelloExt
 	if id != EXT_DNS {
 		return nil, fmt.Errorf("invalid extension %d for DNS", id)
 	}
-	s := strings.Split(string(data), "\000")
-	if len(s) == 1 {
-		return &DNSExtension{Token: s[0], CACert: ""}, nil
-	}
-	return &DNSExtension{Token: s[0], CACert: s[1]}, nil
+	s := bytes.IndexByte(data, 0)
+	return &DNSExtension{DnsIP: net.IP(data[s+1:]), ClusterDomain: string(data[:s])}, nil
 }
 
 func (this *DNSExtensionHandler) Add(hello *ConnectionHello, mux *Mux) {
 	if mux.connectionHandler != nil {
-		access := mux.connectionHandler.GetAccess()
-		if access.Token != "" {
-			mux.Infof("adding access info %s", access)
-			ext := DNSExtension(access)
+		access := mux.connectionHandler.GetDNSInfo()
+		if access.DnsIP != nil {
+			mux.Infof("adding dns info %s", access)
+			ext := DNSExtension{DnsIP: access.DnsIP, ClusterDomain: access.ClusterDomain}
 			hello.Extensions[EXT_DNS] = &ext
 		}
 	}

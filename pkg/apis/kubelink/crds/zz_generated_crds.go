@@ -97,6 +97,15 @@ spec:
                 type: string
               clusterAddress:
                 type: string
+              dns:
+                properties:
+                  baseDomain:
+                    type: string
+                  dnsIP:
+                    type: string
+                  omitDNSPropagation:
+                    type: boolean
+                type: object
               egress:
                 items:
                   type: string

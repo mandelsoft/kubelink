@@ -63,9 +63,27 @@ func (this LinkAccessInfo) String() string {
 	return fmt.Sprintf("{ca:%s..., token:%s...}", utils.ShortenString(this.CACert, 35), utils.ShortenString(this.Token, 35))
 }
 
+func (this LinkAccessInfo) Equal(other LinkAccessInfo) bool {
+	return this.CACert == other.CACert && this.Token == other.Token
+}
+
+type LinkDNSInfo struct {
+	ClusterDomain string
+	DnsIP         net.IP
+}
+
+func (this LinkDNSInfo) String() string {
+	return fmt.Sprintf("{cluster-domain:%s, dns-ip:%s}", this.ClusterDomain, this.DnsIP)
+}
+
+func (this LinkDNSInfo) Equal(other LinkDNSInfo) bool {
+	return this.DnsIP.Equal(other.DnsIP) && this.ClusterDomain == other.ClusterDomain
+}
+
 type LinkForeignData struct {
 	UpdatePending bool
 	LinkAccessInfo
+	LinkDNSInfo
 }
 
 func (this *Link) String() string {
@@ -201,38 +219,69 @@ func (this *Links) Setup(logger logger.LogContext, cluster cluster.Interface) {
 	}
 }
 
-func (this *Links) LinkAccessUpdated(logger logger.LogContext, name string, access LinkAccessInfo) *Link {
+func (this *Links) LinkInfoUpdated(logger logger.LogContext, name string, access *LinkAccessInfo, dns *LinkDNSInfo) *Link {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 	old := this.links[name]
 	if old != nil {
-		if old.LinkAccessInfo == access {
-			new := *old
+		new := *old
+		if access != nil && old.LinkAccessInfo.Equal(*access) {
 			new.UpdatePending = false
 			logger.Infof("access updated for link %s: %s", name, access)
+		} else {
+			access = nil
+		}
+		if dns != nil && old.LinkDNSInfo.Equal(*dns) {
+			new.UpdatePending = false
+			logger.Infof("dns info updated for link %s: %s", name, dns)
+		} else {
+			dns = nil
+		}
+		if access != nil || dns != nil {
 			return this.replaceLink(&new)
 		}
 	}
 	return old
 }
 
-func (this *Links) UpdateLinkAccess(logger logger.LogContext, name string, access LinkAccessInfo, pending bool) (*Link, bool) {
+func (this *Links) UpdateLinkInfo(logger logger.LogContext, name string, access *LinkAccessInfo, dns *LinkDNSInfo, pending bool) (*Link, bool) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 	old := this.links[name]
 	if old != nil {
-		if old.LinkAccessInfo != access {
+		new := *old
+		if access != nil && !old.LinkAccessInfo.Equal(*access) {
 			if !old.UpdatePending || pending {
-				new := *old
-				new.LinkAccessInfo = access
+				new.LinkAccessInfo = *access
 				new.UpdatePending = pending
 				if pending {
 					logger.Infof("new access info pending for link %s", name)
 				} else {
 					logger.Infof("updated access info for link %s", name)
 				}
-				return this.replaceLink(&new), true
+			} else {
+				access = nil
 			}
+		} else {
+			access = nil
+		}
+		if dns != nil && !old.LinkDNSInfo.Equal(*dns) {
+			if !old.UpdatePending || pending {
+				new.LinkDNSInfo = *dns
+				new.UpdatePending = pending
+				if pending {
+					logger.Infof("new dns info pending for link %s", name)
+				} else {
+					logger.Infof("updated dns info for link %s", name)
+				}
+			} else {
+				dns = nil
+			}
+		} else {
+			dns = nil
+		}
+		if access != nil || dns != nil {
+			return this.replaceLink(&new), true
 		}
 	}
 	return old, false

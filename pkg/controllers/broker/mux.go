@@ -38,6 +38,7 @@ import (
 type ConnectionHandler interface {
 	UpdateAccess(hello *ConnectionHello)
 	GetAccess() kubelink.LinkAccessInfo
+	GetDNSInfo() kubelink.LinkDNSInfo
 }
 
 type LinkStateHandler interface {
@@ -315,7 +316,7 @@ func (this *Mux) HandleTun() error {
 		packet := bytes[:n]
 		t := this.FindConnection(log, packet)
 		if t != nil {
-			err = t.WritePacket(packet)
+			err = t.WritePacket(PACKET_TYPE_DATA, packet)
 			if err != nil {
 				return err
 			}

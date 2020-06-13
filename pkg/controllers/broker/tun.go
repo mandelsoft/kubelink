@@ -59,7 +59,7 @@ func (this *Tun) Read(buf []byte) (int, error) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func NewTun(logger logger.LogContext, name string, clusterAddress net.IP, clusterCIDR *net.IPNet) (*Tun, error) {
+func NewTun(logger logger.LogContext, name string, clusterAddress *net.IPNet) (*Tun, error) {
 
 	tun, err := taptun.NewTun(name)
 	if err != nil {
@@ -78,7 +78,7 @@ func NewTun(logger logger.LogContext, name string, clusterAddress net.IP, cluste
 		return nil, fmt.Errorf("cannot get link for %q: %s", tun, err)
 	}
 
-	rule := []string{"-o", tun.String(), "-j", "SNAT", "--to-source", clusterAddress.String()}
+	rule := []string{"-o", tun.String(), "-j", "SNAT", "--to-source", clusterAddress.IP.String()}
 	ok, err := ipt.Exists(IPTAB, IPCHAIN, rule...)
 	if err != nil {
 		tun.Close()
@@ -104,23 +104,10 @@ func NewTun(logger logger.LogContext, name string, clusterAddress net.IP, cluste
 		},
 	}
 
-	cidr := *clusterCIDR
-	cidr.IP = clusterAddress
-
-	addr := &netlink.Addr{
-		IPNet: &cidr,
-	}
-	logger.Infof("adding address %s to %q", cidr.String(), tun)
-	err = netlink.AddrAdd(link, addr)
+	err = SetLinkAddress(logger, link, clusterAddress)
 	if err != nil {
 		result.Close()
-		return nil, fmt.Errorf("cannot add addr %q to %s: %s", addr, tun, err)
-	}
-
-	err = netlink.LinkSetUp(link)
-	if err != nil {
-		result.Close()
-		return nil, fmt.Errorf("cannot bring up %q: %s", tun, err)
+		return nil, err
 	}
 
 	ifce, err := net.InterfaceByName(tun.String())
@@ -136,4 +123,21 @@ func NewTun(logger logger.LogContext, name string, clusterAddress net.IP, cluste
 	}
 	logger.Infof("%s: MTU: %d, Flags: %s, Addr: %v", result, ifce.MTU, ifce.Flags, addrs)
 	return result, nil
+}
+
+func SetLinkAddress(logger logger.LogContext, link netlink.Link, addr *net.IPNet) error {
+	nladdr := &netlink.Addr{
+		IPNet: addr,
+	}
+	logger.Infof("adding address %s to %q", addr, link.Attrs().Name)
+	err := netlink.AddrAdd(link, nladdr)
+	if err != nil {
+		return fmt.Errorf("cannot add addr %q to %s: %s", addr, link.Attrs().Name, err)
+	}
+
+	err = netlink.LinkSetUp(link)
+	if err != nil {
+		return fmt.Errorf("cannot bring up %q: %s", link.Attrs().Name, err)
+	}
+	return nil
 }

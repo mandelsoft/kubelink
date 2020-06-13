@@ -30,6 +30,7 @@ import (
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
+	"github.com/mandelsoft/kubelink/pkg/tcp"
 	kutils "github.com/mandelsoft/kubelink/pkg/utils"
 )
 
@@ -46,7 +47,7 @@ type Config struct {
 	service     string
 	responsible string
 
-	ClusterAddress net.IP
+	ClusterAddress *net.IPNet
 	ClusterCIDR    *net.IPNet
 	ClusterName    string
 
@@ -65,18 +66,22 @@ type Config struct {
 	DNSName    string
 	Service    string
 	Interface  string
+	MeshDomain string
 
-	coreServiceAccount string
-	CoreServiceAccount resources.ObjectName
-	MeshDomain         string
-	coreDNSServiceIP   string
-	CoreDNSServiceIP   net.IP
-	CoreDNSDeployment  string
-	CoreDNSSecret      string
-	DNSPropagation     bool
-	DNSAdvertisement   bool
-	CoreDNSConfigure   bool
-	CoreDNSMode        string
+	serviceAccount   string
+	ServiceAccount   resources.ObjectName
+	DNSAdvertisement bool
+
+	DNSPropagation    string
+	coreDNSServiceIP  string
+	CoreDNSServiceIP  net.IP
+	CoreDNSDeployment string
+	CoreDNSSecret     string
+	CoreDNSConfigure  bool
+
+	dnsServiceIP  string
+	DNSServiceIP  net.IP
+	ClusterDomain string
 
 	AutoConnect   bool
 	DisableBridge bool
@@ -99,15 +104,19 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.DNSName, "dns-name", "", "", "DNS Name for managed certificate")
 	set.AddStringOption(&this.Service, "service", "", "", "Service name for managed certificate")
 	set.AddStringOption(&this.Interface, "ifce-name", "", "", "Name of the tun interface")
-	set.AddStringOption(&this.coreServiceAccount, "coredns-service-account", "", "", "Service Account to use for CoreDNS API Server Access")
 	set.AddStringOption(&this.MeshDomain, "mesh-domain", "", "kubelink", "Base domain for cluster mesh services")
+
+	set.AddStringOption(&this.serviceAccount, "service-account", "", "", "Service Account for API Access propagation")
+
+	set.AddBoolOption(&this.DNSAdvertisement, "dns-advertisement", "", false, "Enable automatic advertisement of DNS access info")
+	set.AddStringOption(&this.dnsServiceIP, "dns-service-ip", "", "", "IP of Cluster DNS Service (for DNS Info Propagation)")
+	set.AddStringOption(&this.ClusterDomain, "cluster-domain", "", "cluster.local", "Cluster Domain of Cluster DNS Service (for DNS Info Propagation)")
+
+	set.AddStringOption(&this.DNSPropagation, "dns-propagation", "", "none", "Mode for accessing foreign DNS information (none, dns or kubernetes)")
 	set.AddStringOption(&this.coreDNSServiceIP, "coredns-service-ip", "", "", "Service IP of coredns deployment used by kubelink")
 	set.AddStringOption(&this.CoreDNSDeployment, "coredns-deployment", "", "kubelink-coredns", "Name of coredns deployment used by kubelink")
 	set.AddStringOption(&this.CoreDNSSecret, "coredns-secret", "", "kubelink-coredns", "Name of dns secret used by kubelink")
-	set.AddBoolOption(&this.DNSPropagation, "dns-propagation", "", false, "Enable DNS Record propagation for Services")
-	set.AddBoolOption(&this.DNSAdvertisement, "dns-advertisement", "", false, "Enable automatic advertisement of DNS access info")
 	set.AddBoolOption(&this.CoreDNSConfigure, "coredns-configure", "", false, "Enable automatic configuration of cluster DNS (coredns)")
-	set.AddStringOption(&this.CoreDNSMode, "coredns-mode", "", "kubernetes", "Mode for accessing foreign DNS information (dns or kubernetes)")
 	set.AddBoolOption(&this.AutoConnect, "auto-connect", "", false, "Automatically register cluster for authenticated incoming requests")
 }
 
@@ -117,10 +126,12 @@ func (this *Config) Prepare() error {
 		return err
 	}
 
-	this.ClusterAddress, this.ClusterCIDR, err = this.RequireCIDR(this.address, "link-address")
+	ip, cidr, err := this.RequireCIDR(this.address, "link-address")
 	if err != nil {
 		return err
 	}
+	this.ClusterCIDR = cidr
+	this.ClusterAddress = tcp.CIDRIP(cidr, ip)
 
 	_, this.ServiceCIDR, err = this.OptionalCIDR(this.service, "service-cidr")
 	if err != nil {
@@ -173,17 +184,18 @@ func (this *Config) Prepare() error {
 		}
 	}
 
-	if this.coreServiceAccount != "" {
-		names := strings.Split(this.coreServiceAccount, "/")
+	if this.serviceAccount != "" {
+		names := strings.Split(this.serviceAccount, "/")
 		if len(names) > 2 {
 			return fmt.Errorf("invalid service account name")
 		}
 		if len(names) == 2 {
-			this.CoreServiceAccount = resources.NewObjectName(names...)
+			this.ServiceAccount = resources.NewObjectName(names...)
 		} else {
-			this.CoreServiceAccount = resources.NewObjectName("kube-system", names[0])
+			this.ServiceAccount = resources.NewObjectName("kube-system", names[0])
 		}
 	}
+
 	if this.coreDNSServiceIP != "" {
 		this.CoreDNSServiceIP = net.ParseIP(this.coreDNSServiceIP)
 		if this.CoreDNSServiceIP == nil {
@@ -191,11 +203,23 @@ func (this *Config) Prepare() error {
 		}
 	}
 
-	this.CoreDNSMode = strings.ToLower(this.CoreDNSMode)
-	switch this.CoreDNSMode {
-	case DNSMODE_KUBERNETES, DNSMODE_DNS:
+	if this.dnsServiceIP != "" {
+		this.DNSServiceIP = net.ParseIP(this.dnsServiceIP)
+		if this.DNSServiceIP == nil {
+			return fmt.Errorf("invalid ip of coredns service: %s", this.coreDNSServiceIP)
+		}
+	}
+	if this.DNSServiceIP == nil {
+		if this.ServiceCIDR != nil {
+			this.DNSServiceIP = tcp.SubIP(this.ServiceCIDR, CLUSTER_DNS_IP)
+		}
+	}
+
+	this.DNSPropagation = strings.ToLower(this.DNSPropagation)
+	switch this.DNSPropagation {
+	case DNSMODE_KUBERNETES, DNSMODE_DNS, DNSMODE_NONE:
 	default:
-		return fmt.Errorf("invalid dns mode: %s", this.CoreDNSMode)
+		return fmt.Errorf("invalid dns mode: %s", this.DNSPropagation)
 	}
 	return nil
 }

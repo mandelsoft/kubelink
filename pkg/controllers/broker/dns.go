@@ -30,6 +30,7 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
+	"github.com/gardener/controller-manager-library/pkg/utils"
 	"gopkg.in/yaml.v2"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,8 +42,10 @@ import (
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
+const CLUSTER_DNS_IP = 10
 const KUBELINK_DNS_IP = 11
 
+const DNSMODE_NONE = "none"
 const DNSMODE_KUBERNETES = "kubernetes"
 const DNSMODE_DNS = "dns"
 
@@ -88,7 +91,11 @@ func (this Kubeconfig) AddCluster(name, url, ca, token string) {
 	})
 }
 
-func coreEntry(first *bool, name, basedomain string, dnsIP string, local bool) string {
+func coreEntry(first *bool, name, basedomain string, dnsIP, clusterDomain string, local bool) string {
+	if !strings.HasSuffix(clusterDomain, ".") {
+		clusterDomain += "."
+	}
+	escapedDomain := strings.Replace(clusterDomain, ".", `\.`, -1)
 	header := ""
 	if *first {
 		*first = false
@@ -120,9 +127,9 @@ func coreEntry(first *bool, name, basedomain string, dnsIP string, local bool) s
 	plugin := ""
 	if dnsIP != "" {
 		plugin = fmt.Sprintf(`
-    rewrite name suffix .%s.%s. .cluster.local.
+    rewrite name regex (.*)\.%s\.%s\. {1}.%s answer name (.*)\.%s {1}.%s.%s.
     forward . %s
-`, name, basedomain, dnsIP)
+`, name, basedomain, clusterDomain, escapedDomain, name, basedomain, dnsIP)
 	} else {
 		if local {
 			plugin = fmt.Sprintf(`
@@ -174,203 +181,268 @@ func (this *reconciler) getSecret(logger logger.LogContext, name resources.Objec
 }
 
 func (this *reconciler) handleLinkAccess(logger logger.LogContext, klink *api.KubeLink, entry *kubelink.Link) (error, error) {
-	if this.config.DNSPropagation {
+	if this.config.DNSPropagation != DNSMODE_NONE {
 		this.tasks.ScheduleTask(NewConnectTask(klink.Name, this), false)
 	}
 	if entry.UpdatePending {
-		return this.updateSecretFromLink(logger, klink, entry)
+		return this.updateObjectFromLink(logger, klink, entry)
 	} else {
-		return this.updateLinkFromSecret(logger, klink, entry)
+		return this.updateLinkFromObject(logger, klink, entry)
 	}
 }
 
-func (this *reconciler) updateLinkFromSecret(logger logger.LogContext, klink *api.KubeLink, entry *kubelink.Link) (error, error) {
+func (this *reconciler) updateLinkFromObject(logger logger.LogContext, klink *api.KubeLink, entry *kubelink.Link) (error, error) {
+	var access *kubelink.LinkAccessInfo
+	var dnsInfo *kubelink.LinkDNSInfo
+	var err error
+	var terr error
+
+	// API Access
 	name := this.getSecretName(klink)
+	if name != nil {
+		var secret *_core.Secret
 
-	if name == nil {
-		return nil, nil
-	}
-	logger.Infof("handle api access for dns propagation of link %s evaluating secret %q", klink.Name, name)
-	this.secrets.UpdateSecret(name, resources.NewObjectName(klink.Name))
+		logger.Infof("handle api access of link %s evaluating secret %q", klink.Name, name)
+		this.secrets.UpdateSecret(name, resources.NewObjectName(klink.Name))
+		_, secret, terr, err = this.getSecret(logger, name)
+		if terr != nil || err != nil {
+			return terr, err
+		}
 
-	_, secret, terr, err := this.getSecret(logger, name)
-	if terr != nil || err != nil {
-		return terr, err
+		access = &kubelink.LinkAccessInfo{}
+		v := secret.Data["token"]
+		if v != nil {
+			access.Token = string(v)
+		} else {
+			err = fmt.Errorf("token missing in secret")
+		}
+		v = secret.Data["certificate-authority-data"]
+		if v != nil {
+			access.CACert = string(v)
+		} else {
+			err = fmt.Errorf("certificate-authority-data missing in secret")
+		}
 	}
 
-	access := kubelink.LinkAccessInfo{}
-	v := secret.Data["token"]
-	if v != nil {
-		access.Token = string(v)
-	} else {
-		err = fmt.Errorf("token missing in secret")
+	// DNS Propagation
+	if err == nil && klink.Spec.DNS != nil {
+		dnsInfo = &kubelink.LinkDNSInfo{
+			ClusterDomain: klink.Spec.DNS.BaseDomain,
+		}
+		if dnsInfo.ClusterDomain == "" {
+			dnsInfo.ClusterDomain = "cluster.local"
+		}
+		if klink.Spec.DNS.DNSIP != "" {
+			ip := net.ParseIP(klink.Spec.DNS.DNSIP)
+			if ip == nil {
+				return nil, fmt.Errorf("invalid DNS IP Address (%s)", klink.Spec.DNS.DNSIP)
+			}
+			dnsInfo.DnsIP = ip
+		} else {
+			_, cidr, err := net.ParseCIDR(klink.Spec.CIDR)
+			if err == nil {
+				dnsInfo.DnsIP = tcp.SubIP(cidr, CLUSTER_DNS_IP)
+			}
+		}
 	}
-	v = secret.Data["certificate-authority-data"]
-	if v != nil {
-		access.CACert = string(v)
-	} else {
-		err = fmt.Errorf("certificate-authority-data missing in secret")
-	}
-	this.Links().UpdateLinkAccess(logger, klink.Name, access, false)
+	this.Links().UpdateLinkInfo(logger, klink.Name, access, dnsInfo, false)
 	return nil, err
 }
 
-func (this *reconciler) updateSecretFromLink(logger logger.LogContext, klink *api.KubeLink, entry *kubelink.Link) (error, error) {
-	if !this.config.DNSPropagation {
-		return nil, nil
-	}
+func (this *reconciler) updateObjectFromLink(logger logger.LogContext, klink *api.KubeLink, entry *kubelink.Link) (error, error) {
+
 	var secret *_core.Secret
 	var sobj resources.Object
 	var terr, err error
 
-	if entry.Token == "" {
-		return nil, nil
-	}
-
-	logger.Infof("persist pending link access info")
-	create := false
-
-	name := this.getSecretName(klink)
-	if name == nil {
-		create = true
-		secret = &_core.Secret{
-			TypeMeta: v1.TypeMeta{},
-			ObjectMeta: v1.ObjectMeta{
-				GenerateName: fmt.Sprintf("%s-", entry.Name),
-				Namespace:    this.Controller().GetEnvironment().Namespace(),
-			},
-			Type: _core.SecretTypeOpaque,
+	_, _, err = this.linkResource.Modify(klink, func(data resources.ObjectData) (bool, error) {
+		klink := data.(*api.KubeLink)
+		mod := utils.ModificationState{}
+		if entry.DnsIP != nil || klink.Spec.DNS != nil {
+			if entry.DnsIP != nil {
+				if klink.Spec.DNS == nil {
+					klink.Spec.DNS = &api.KubeLinkDNS{}
+				}
+				mod.AssureStringValue(&klink.Spec.DNS.DNSIP, entry.DnsIP.String())
+				mod.AssureStringValue(&klink.Spec.DNS.BaseDomain, entry.ClusterDomain)
+			} else {
+				klink.Spec.DNS = nil
+				mod.Modify(true)
+			}
 		}
-	} else {
-		logger.Infof("found secret name %s for link %s", name, klink.Name)
-		sobj, secret, terr, err = this.getSecret(logger, name)
-		if terr != nil {
-			return terr, err
-		}
-		if err != nil { // not found -> create it
-			logger.Infof("requested secret not -> create it")
+		return mod.IsModified(), nil
+	})
+
+	if err == nil && entry.Token != "" {
+		logger.Infof("persist pending link access info")
+		create := false
+
+		name := this.getSecretName(klink)
+		if name == nil {
+			create = true
 			secret = &_core.Secret{
 				TypeMeta: v1.TypeMeta{},
 				ObjectMeta: v1.ObjectMeta{
-					Name:      name.Name(),
-					Namespace: name.Namespace(),
+					GenerateName: fmt.Sprintf("%s-", entry.Name),
+					Namespace:    this.Controller().GetEnvironment().Namespace(),
 				},
 				Type: _core.SecretTypeOpaque,
 			}
-			create = true
 		} else {
-			secret = secret.DeepCopy()
-		}
-	}
-
-	secretData := map[string][]byte{}
-	secretData["token"] = []byte(entry.Token)
-	if entry.CACert != "" {
-		secretData["certificate-authority-data"] = []byte(entry.CACert)
-	}
-	secret.Data = secretData
-	if create {
-		sobj, err = this.secretResource.Create(secret)
-		if err != nil {
-			return fmt.Errorf("cannot create secret for link %q: err", entry.Name, err), nil
-		}
-		access := _core.SecretReference{
-			Name:      sobj.GetName(),
-			Namespace: sobj.GetNamespace(),
-		}
-		logger.Infof("created secret %s for link %s", access.Name, klink.Name)
-		if name == nil {
-			_, mod, err := this.linkResource.Modify(klink, func(data resources.ObjectData) (bool, error) {
-				klink := data.(*api.KubeLink)
-				if klink.Spec.APIAccess == nil {
-					klink.Spec.APIAccess = &access
-					logger.Infof("setting secret %s for link %s", access.Name, klink.Name)
-					return true, nil
+			logger.Infof("found secret name %s for link %s", name, klink.Name)
+			sobj, secret, terr, err = this.getSecret(logger, name)
+			if terr != nil {
+				return terr, err
+			}
+			if err != nil { // not found -> create it
+				logger.Infof("requested secret not -> create it")
+				secret = &_core.Secret{
+					TypeMeta: v1.TypeMeta{},
+					ObjectMeta: v1.ObjectMeta{
+						Name:      name.Name(),
+						Namespace: name.Namespace(),
+					},
+					Type: _core.SecretTypeOpaque,
 				}
-				name = this.getSecretName(klink)
-				return false, nil
-			})
+				create = true
+			} else {
+				secret = secret.DeepCopy()
+			}
+		}
+
+		secretData := map[string][]byte{}
+		secretData["token"] = []byte(entry.Token)
+		if entry.CACert != "" {
+			secretData["certificate-authority-data"] = []byte(entry.CACert)
+		}
+		secret.Data = secretData
+		if create {
+			sobj, err = this.secretResource.Create(secret)
 			if err != nil {
-				sobj.Delete()
-				return err, nil
+				return fmt.Errorf("cannot create secret for link %q: err", entry.Name, err), nil
 			}
-			if mod {
-				this.Links().LinkAccessUpdated(logger, entry.Name, entry.LinkAccessInfo)
-				return nil, nil
+			access := _core.SecretReference{
+				Name:      sobj.GetName(),
+				Namespace: sobj.GetNamespace(),
 			}
-			if !resources.EqualsObjectName(name, sobj.ObjectName()) {
-				sobj.Delete()
-				sobj, secret, terr, err = this.getSecret(logger, name)
-				if terr != nil || err != nil {
-					return terr, err
+			logger.Infof("created secret %s for link %s", access.Name, klink.Name)
+			if name == nil {
+				_, mod, err := this.linkResource.Modify(klink, func(data resources.ObjectData) (bool, error) {
+					klink := data.(*api.KubeLink)
+					if klink.Spec.APIAccess == nil {
+						klink.Spec.APIAccess = &access
+						logger.Infof("setting secret %s for link %s", access.Name, klink.Name)
+						return true, nil
+					}
+					name = this.getSecretName(klink)
+					return false, nil
+				})
+				if err != nil {
+					sobj.Delete()
+					return err, nil
+				}
+				if mod {
+					this.Links().LinkInfoUpdated(logger, entry.Name, &entry.LinkAccessInfo, nil)
+					return nil, nil
+				}
+				if !resources.EqualsObjectName(name, sobj.ObjectName()) {
+					sobj.Delete()
+					sobj, secret, terr, err = this.getSecret(logger, name)
+					if terr != nil || err != nil {
+						return terr, err
+					}
 				}
 			}
 		}
-	}
 
-	_, err = sobj.Modify(func(data resources.ObjectData) (bool, error) {
-		old := data.(*_core.Secret)
-		mod := !reflect.DeepEqual(secretData, old.Data)
-		if mod {
-			old.Data = secretData
-			logger.Infof("update secret for link %s", entry.Name)
+		_, err = sobj.Modify(func(data resources.ObjectData) (bool, error) {
+			old := data.(*_core.Secret)
+			mod := !reflect.DeepEqual(secretData, old.Data)
+			if mod {
+				old.Data = secretData
+				logger.Infof("update secret for link %s", entry.Name)
+			}
+			return mod, nil
+		})
+
+		if err != nil {
+			logger.Errorf("cannot update secret: %s", err)
 		}
-		return mod, nil
-	})
-
+	}
 	if err == nil {
-		this.Links().LinkAccessUpdated(logger, entry.Name, entry.LinkAccessInfo)
-	} else {
-		logger.Errorf("cannot update secret: %s", err)
+		this.Links().LinkInfoUpdated(logger, entry.Name, &entry.LinkAccessInfo, &entry.LinkDNSInfo)
 	}
 	return err, nil
 }
 
 func (this *reconciler) updateCorefile(logger logger.LogContext) {
-	if !this.config.DNSPropagation {
+	if this.config.DNSPropagation == DNSMODE_NONE {
 		return
 	}
 	logger.Debug("update corefile")
+	data := map[string][]byte{}
+
 	first := true
 	keys := []string{}
-	kubeconfig := NewKubeconfig()
 
-	this.Links().Visit(func(l *kubelink.Link) bool {
-		if l.Token != "" {
-			ip := tcp.SubIP(l.ServiceCIDR, 1)
-			kubeconfig.AddCluster(l.Name, fmt.Sprintf("https://%s", ip), l.CACert, l.Token)
+	kubeconfig := NewKubeconfig()
+	if this.config.DNSPropagation == DNSMODE_KUBERNETES {
+
+		this.Links().Visit(func(l *kubelink.Link) bool {
+			if l.Token != "" {
+				ip := tcp.SubIP(l.ServiceCIDR, 1)
+				kubeconfig.AddCluster(l.Name, fmt.Sprintf("https://%s", ip), l.CACert, l.Token)
+				keys = append(keys, l.Name)
+			}
+			return true
+		})
+	} else {
+		this.Links().Visit(func(l *kubelink.Link) bool {
 			keys = append(keys, l.Name)
-		}
-		return true
-	})
+			return true
+		})
+	}
+	b, err := yaml.Marshal(kubeconfig)
+	if err != nil {
+		logger.Errorf("cannot marshal kubeconfig: %s", err)
+		return
+	}
+	data["kubeconfig"] = b
 	sort.Strings(keys)
 
 	corefile := ""
 	ip := ""
 	if this.config.ClusterName != "" {
-		if this.config.CoreDNSMode == DNSMODE_DNS {
-			ip = tcp.SubIP(this.config.ServiceCIDR, 10).String()
+		clusterDomain := "cluster.local"
+		if this.config.DNSPropagation == DNSMODE_DNS {
+			if this.dnsInfo.DnsIP != nil {
+				ip = this.dnsInfo.DnsIP.String()
+			} else {
+				ip = tcp.SubIP(this.config.ServiceCIDR, CLUSTER_DNS_IP).String()
+			}
+			if this.dnsInfo.ClusterDomain != "" {
+				clusterDomain = this.dnsInfo.ClusterDomain
+			}
 		}
-		corefile += coreEntry(&first, this.config.ClusterName, this.config.MeshDomain, ip, true)
+		corefile += coreEntry(&first, this.config.ClusterName, this.config.MeshDomain, ip, clusterDomain, true)
 	}
 	for _, k := range keys {
+		clusterDomain := "cluster.local"
 		l := this.Links().GetLink(k)
-		if this.config.CoreDNSMode == DNSMODE_DNS {
-			ip = tcp.SubIP(l.ServiceCIDR, 10).String()
+		if this.config.DNSPropagation == DNSMODE_DNS {
+			if l.DnsIP != nil {
+				ip = l.DnsIP.String()
+			} else {
+				ip = tcp.SubIP(l.ServiceCIDR, CLUSTER_DNS_IP).String()
+			}
+			if l.ClusterDomain != "" {
+				clusterDomain = l.ClusterDomain
+			}
+
 		}
-		corefile += coreEntry(&first, k, this.config.MeshDomain, ip, false)
+		corefile += coreEntry(&first, k, this.config.MeshDomain, ip, clusterDomain, false)
 	}
-
-	b, err := yaml.Marshal(kubeconfig)
-
-	if err != nil {
-		logger.Errorf("cannot marshal kubeconfig: %s", err)
-		return
-	}
-	data := map[string][]byte{
-		"Corefile":   []byte(corefile),
-		"kubeconfig": b,
-	}
+	data["Corefile"] = []byte(corefile)
 
 	name := resources.NewObjectName(this.Controller().GetEnvironment().Namespace(), this.config.CoreDNSSecret)
 	_, mod, err := this.secretResource.CreateOrModifyByName(name,
@@ -383,6 +455,10 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 			return true, nil
 		})
 
+	if err != nil {
+		logger.Errorf("cannot update secret %s: %s", this.config.CoreDNSSecret, err)
+		return
+	}
 	if mod {
 		logger.Infof("coredns secret %s updated", name)
 		this.RestartDeployment(logger,
@@ -390,13 +466,13 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 	}
 }
 
-func (this *reconciler) updateLink(logger logger.LogContext, name string, access kubelink.LinkAccessInfo) {
+func (this *reconciler) updateLink(logger logger.LogContext, name string, access *kubelink.LinkAccessInfo, dns *kubelink.LinkDNSInfo) {
 	_, err := this.linkResource.GetCached(resources.NewObjectName(name))
 	if err != nil {
 		logger.Infof("cannot get link %s: %s", name, err)
 		return
 	}
-	_, mod := this.Links().UpdateLinkAccess(logger, name, access, true)
+	_, mod := this.Links().UpdateLinkInfo(logger, name, access, dns, true)
 	if mod {
 		logger.Infof("link access for %s modified -> trigger link", name)
 		this.TriggerUpdate()
@@ -446,7 +522,6 @@ func (this *configureCorednsTask) Execute(logger logger.LogContext) reconcile.St
 	name := resources.NewObjectName("kube-system", "coredns-custom")
 
 	var ip net.IP
-
 	if this.config.CoreDNSServiceIP == nil {
 		if this.config.ServiceCIDR == nil {
 			return reconcile.Failed(logger, fmt.Errorf("local service cidr or coredns ip required for establishing coredns connection"))
@@ -456,6 +531,7 @@ func (this *configureCorednsTask) Execute(logger logger.LogContext) reconcile.St
 	} else {
 		ip = this.config.CoreDNSServiceIP
 	}
+
 	_, err := this.Controller().GetMainCluster().Resources().GetObjectInto(name, cm)
 	if err != nil {
 		if !errors.IsNotFound(err) {

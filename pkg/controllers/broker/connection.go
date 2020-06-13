@@ -37,6 +37,15 @@ import (
 
 const BufferSize = 17000
 
+// Packet types:
+// 0: Normal data payload
+// 1: Hello message
+// More types planned for intermediate transfer of meta information
+// Unknown packets have to be skipped and returned with reject bit set
+
+const PACKET_TYPE_DATA = 0
+const PACKET_TYPE_HELLO = 1
+
 ////////////////////////////////////////////////////////////////////////////////
 
 type ConnectionFailHandler interface {
@@ -51,6 +60,9 @@ type TunnelConnection struct {
 	clusterCIDR   *net.IPNet
 	remoteAddress string
 	handlers      []ConnectionFailHandler
+
+	wlock sync.Mutex
+	rlock sync.Mutex
 }
 
 func NewTunnelConnection(mux *Mux, conn net.Conn, link *kubelink.Link, handlers ...ConnectionFailHandler) (*TunnelConnection, *ConnectionHello, error) {
@@ -87,6 +99,7 @@ func NewTunnelConnection(mux *Mux, conn net.Conn, link *kubelink.Link, handlers 
 			}
 		}
 		if mux.connectionHandler != nil {
+			t.Infof("start hello handling....")
 			go mux.connectionHandler.UpdateAccess(hello)
 		}
 	}
@@ -143,22 +156,34 @@ func (this *TunnelConnection) Close() error {
 
 func (this *TunnelConnection) writeHello(hello *ConnectionHello) error {
 	data := hello.Data()
-	return this.write(this.conn, data)
+	return this.WritePacket(PACKET_TYPE_HELLO, data)
 }
 
 func (this *TunnelConnection) readHello() (*ConnectionHello, error) {
+	var buffer [BufferSize]byte
+	n, ty, err := this.ReadPacket(buffer[:])
+	if err != nil {
+		return nil, err
+	}
+	if ty != PACKET_TYPE_HELLO {
+		return nil, fmt.Errorf("unexpected packet %d instead of hello handshake", ty)
+	}
+	return this.parseHelloPacket(buffer[:n])
+}
+
+func (this *TunnelConnection) parseHelloPacket(data []byte) (*ConnectionHello, error) {
 	var header ConnectionHelloHeader
-	err := this.read(this.conn, header[:])
+	if len(data) < len(header) {
+		return nil, fmt.Errorf("hello packet too short (%d expected %d)", len(data), len(header))
+	}
+	copy(header[:], data)
+	hello, err := ParseConnectionHello(this.mux, &header, data[len(header):])
 	if err != nil {
+		this.Errorf("invalid hello packet: %s", err)
 		return nil, err
 	}
-	len := header.GetExtensionLength()
-	buf := make([]byte, len)
-	err = this.read(this.conn, buf)
-	if err != nil {
-		return nil, err
-	}
-	return ParseConnectionHello(this.mux, &header, buf)
+	this.Infof("hello packet with %d extensions", len(hello.Extensions))
+	return hello, nil
 }
 
 func (this *TunnelConnection) createHello() *ConnectionHello {
@@ -208,7 +233,7 @@ func (this *TunnelConnection) Serve() error {
 func (this *TunnelConnection) serve() error {
 	var buffer [BufferSize]byte
 	for {
-		n, err := this.ReadPacket(buffer[:])
+		n, ty, err := this.ReadPacket(buffer[:])
 		if n < 0 || err != nil {
 			this.Infof("connection aborted: %d bytes, err=%s", n, err)
 			if n <= 0 {
@@ -220,6 +245,10 @@ func (this *TunnelConnection) serve() error {
 			continue
 		}
 		packet := buffer[:n]
+		if ty != PACKET_TYPE_DATA {
+			this.Infof("got packet of unknown type %x", ty)
+			continue
+		}
 		vers := int(packet[0]) >> 4
 		if vers == ipv4.Version {
 			header, err := ipv4.ParseHeader(packet)
@@ -298,27 +327,31 @@ func (this *TunnelConnection) write(w io.Writer, data []byte) error {
 	return nil
 }
 
-func (this *TunnelConnection) ReadPacket(data []byte) (int, error) {
-	lbuf := [2]byte{}
+func (this *TunnelConnection) ReadPacket(data []byte) (int, byte, error) {
+	this.rlock.Lock()
+	defer this.rlock.Unlock()
+	lbuf := [3]byte{}
 	err := this.read(this.conn, lbuf[:])
 
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
-	length := tcp.NtoHs(lbuf[:])
+	length := tcp.NtoHs(lbuf[:2])
 	if int(length) > len(data) {
-		return 0, fmt.Errorf("buffer too small (%d): packet size is %d", len(data), length)
+		return 0, 0, fmt.Errorf("buffer too small (%d): packet size is %d", len(data), length)
 	}
-	return int(length), this.read(this.conn, data[0:length])
+	return int(length), lbuf[2], this.read(this.conn, data[0:length])
 }
 
-func (this *TunnelConnection) WritePacket(data []byte) error {
+func (this *TunnelConnection) WritePacket(ty byte, data []byte) error {
 	if len(data) > 65535 {
 		return fmt.Errorf("packet too large (%d)", len(data))
 	}
 	lbuf := tcp.HtoNs(uint16(len(data)))
-	err := this.write(this.conn, lbuf)
+	this.wlock.Lock()
+	defer this.wlock.Unlock()
+	err := this.write(this.conn, append(lbuf, ty))
 	if err != nil {
 		return err
 	}

@@ -28,7 +28,8 @@ import (
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
-const EXT_DNS = 1
+const EXT_APIACCESS = 1
+const EXT_DNS = 2
 
 type ConnectionHelloExtensionHandler interface {
 	Parse(id byte, data []byte) (ConnectionHelloExtension, error)
@@ -83,7 +84,7 @@ func ParseConnectionHello(logger logger.LogContext, header *ConnectionHelloHeade
 
 	for start < len(data) {
 		if len(data)-start < 3 {
-			return nil, fmt.Errorf("data too short: next extesion requires at least 3 bytes, but found %d", len(data)-start)
+			return nil, fmt.Errorf("data too short: next extension requires at least 3 bytes, but found %d", len(data)-start)
 		}
 		id := data[start]
 		el := int(tcp.NtoHs(data[start+1:]))

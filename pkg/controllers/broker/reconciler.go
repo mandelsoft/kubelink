@@ -54,8 +54,9 @@ type reconciler struct {
 	deploymentResource resources.Interface
 	secrets            *SecretCache
 
-	access kubelink.LinkAccessInfo
-	mux    *Mux
+	access  kubelink.LinkAccessInfo
+	dnsInfo kubelink.LinkDNSInfo
+	mux     *Mux
 
 	lock            sync.RWMutex
 	requiredSecrets map[resources.ObjectName]resources.ObjectNameSet
@@ -141,7 +142,7 @@ func (this *reconciler) Setup() {
 	if this.config.IPIP != controllers.IPIP_NONE {
 		this.WaitIPIP()
 	}
-	tun, err := NewTun(this.Controller(), this.config.Interface, this.config.ClusterAddress, this.config.ClusterCIDR)
+	tun, err := NewTun(this.Controller(), this.config.Interface, this.config.ClusterAddress)
 	if err != nil {
 		panic(fmt.Errorf("cannot setup tun device: %s", err))
 	}
@@ -157,14 +158,10 @@ func (this *reconciler) Setup() {
 	if this.config.ServiceCIDR != nil {
 		local.Add(this.config.ServiceCIDR)
 	}
-	addr := &net.IPNet{
-		IP:   this.config.ClusterAddress,
-		Mask: this.config.ClusterCIDR.Mask,
-	}
-	mux := NewMux(this.Controller().GetContext(), this.Controller(), this.certInfo, uint16(this.config.AdvertisedPort), addr, local, tun, this.Links(), this)
+	mux := NewMux(this.Controller().GetContext(), this.Controller(), this.certInfo, uint16(this.config.AdvertisedPort), this.config.ClusterAddress, local, tun, this.Links(), this)
 
 	if this.config.DNSAdvertisement {
-		mux.connectionHandler = &DNSHandler{this}
+		mux.connectionHandler = &DefaultConnectionHandler{this}
 	}
 
 	go func() {
@@ -194,7 +191,7 @@ func (this *reconciler) Start() {
 					this.mux.tun.Close()
 					time.Sleep(100 * time.Millisecond)
 					this.Controller().Infof("recreating tun device")
-					this.mux.tun, err = NewTun(this.Controller(), this.config.Interface, this.config.ClusterAddress, this.config.ClusterCIDR)
+					this.mux.tun, err = NewTun(this.Controller(), this.config.Interface, this.config.ClusterAddress)
 					if err != nil {
 						panic(fmt.Errorf("cannot setup tun device: %s", err))
 					}
@@ -213,7 +210,7 @@ func (this *reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 		logger.Debug("update tun")
 		this.reconcileTun(logger)
 	}
-	if this.config.CoreServiceAccount != nil {
+	if this.config.ServiceAccount != nil {
 		logger.Debug("update service account")
 		access, err := this.getServiceAccountToken()
 		if err != nil {
@@ -240,30 +237,19 @@ func (this *reconciler) Deleted(logger logger.LogContext, key resources.ClusterO
 
 func (this *reconciler) reconcileTun(logger logger.LogContext) {
 	tun := this.mux.tun
-	cidr := *this.config.ClusterCIDR
-	cidr.IP = this.config.ClusterAddress
 
 	addrs, err := netlink.AddrList(tun.link, netlink.FAMILY_V4)
 
 	for _, a := range addrs {
-		if a.IP.Equal(this.config.ClusterAddress) {
+		if a.IP.Equal(this.config.ClusterAddress.IP) {
 			logger.Debugf("address still set for %q", tun)
 			return
 		}
 	}
 
-	addr := &netlink.Addr{
-		IPNet: &cidr,
-	}
-	logger.Infof("lost address -> adding address %s to %q", cidr.String(), tun)
-	err = netlink.AddrAdd(tun.link, addr)
+	err = SetLinkAddress(logger, tun.link, this.config.ClusterAddress)
 	if err != nil {
-		logger.Errorf("cannot add addr %q to %s: %s", addr, tun, err)
-	}
-
-	err = netlink.LinkSetUp(tun.link)
-	if err != nil {
-		logger.Errorf("cannot bring up %q: %s", tun, err)
+		logger.Errorf("%s", err)
 	}
 }
 
@@ -277,11 +263,11 @@ func (this *reconciler) Notify(l *kubelink.Link, err error) {
 }
 
 func (this *reconciler) getServiceAccountToken() (*kubelink.LinkAccessInfo, error) {
-	if this.config.CoreServiceAccount == nil {
+	if this.config.ServiceAccount == nil {
 		return nil, fmt.Errorf("no service accound specified")
 	}
 	sa := core.ServiceAccount{}
-	_, err := this.saResource.GetInto(this.config.CoreServiceAccount, &sa)
+	_, err := this.saResource.GetInto(this.config.ServiceAccount, &sa)
 	if err != nil {
 		return nil, err
 	}

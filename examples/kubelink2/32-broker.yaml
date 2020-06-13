@@ -58,6 +58,11 @@ spec:
             - --ifce-name=kubelink
             - --service-cidr=100.64.16.0/20
             - --ipip=shared
+            - --dns-advertisement
+            - --dns-propagation=dns
+            - --coredns-configure
+            - --cluster-name=kubelink2
+
           securityContext:
             privileged: true
           livenessProbe:
