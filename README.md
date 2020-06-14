@@ -94,6 +94,25 @@ dependent on the used operation system/image. For heterogeneous clusters
 with nodes using different operating systems, this will not work (only if the
 set of interfaces is known in advance for configuring the calico daemon set).
 
+If [Gardener](https://gardener.cloud) is used to maintain the involved Kubernetes clusters
+the required calico config can be directly described in the shoot manifest.
+The section `networking` has to be adapted as follows (change to the interface
+of your environment):
+
+```yaml
+    networking:
+      type: calico
+      providerConfig:
+        apiVersion: calico.networking.extensions.gardener.cloud/v1alpha1
+        kind: NetworkConfig
+        backend: bird
+        ipam:
+          type: host-local
+          cidr: usePodCIDR
+        ipv4:
+          autoDetectionMethod: interface=eth0
+```
+
 ## Implementation
 
 The two used controllers are bundled into one controller manager (`kubelink`)
