@@ -1,17 +1,7 @@
 /*
- * Copyright 2019 SAP SE or an SAP affiliate company. All rights reserved. This file is licensed under the Apache Software License, v. 2 except as noted otherwise in the LICENSE file
+ * SPDX-FileCopyrightText: 2019 SAP SE or an SAP affiliate company and Gardener contributors
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package resources
@@ -27,9 +17,10 @@ import (
 	"k8s.io/client-go/tools/record"
 
 	"github.com/gardener/controller-manager-library/pkg/resources/abstract"
+	"github.com/gardener/controller-manager-library/pkg/utils"
 )
 
-type KeyFilter func(key ClusterObjectKey) bool
+type KeyFilter = abstract.KeyFilter
 type ObjectFilter func(obj Object) bool
 type GroupKindProvider = abstract.GroupKindProvider
 type ClusterGroupKind = abstract.ClusterGroupKind
@@ -61,10 +52,20 @@ type Cluster interface {
 
 	GetName() string
 	GetId() string
+	GetMigrationIds() utils.StringSet
 	Config() restclient.Config
 
 	GetAttr(key interface{}) interface{}
 	SetAttr(key, value interface{})
+}
+
+type ClusterIdMigrationProvider interface {
+	GetClusterIdMigration() ClusterIdMigration
+}
+
+type ClusterIdMigration interface {
+	RequireMigration(id string) string
+	String() string
 }
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -74,9 +75,6 @@ type EventRecorder interface {
 
 	// Eventf is just like Event, but with Sprintf for the message field.
 	Eventf(eventtype, reason, messageFmt string, args ...interface{})
-
-	// PastEventf is just like Eventf, but with an option to specify the event's 'timestamp' field.
-	PastEventf(timestamp metav1.Time, eventtype, reason, messageFmt string, args ...interface{})
 
 	// AnnotatedEventf is just like eventf, but with annotations attached
 	AnnotatedEventf(annotations map[string]string, eventtype, reason, messageFmt string, args ...interface{})
@@ -88,7 +86,20 @@ type ResourceEventHandlerFuncs struct {
 	DeleteFunc func(obj Object)
 }
 
+type ResourceInfoEventHandlerFuncs struct {
+	AddFunc    func(obj ObjectInfo)
+	UpdateFunc func(oldObj, newObj ObjectInfo)
+	DeleteFunc func(obj ObjectInfo)
+}
+
 type Modifier func(ObjectData) (bool, error)
+
+type ObjectInfo interface {
+	Key() ObjectKey
+	GetResourceVersion() string
+	Description() string
+	ClusterSource
+}
 
 type Object interface {
 	abstract.Object
@@ -127,14 +138,21 @@ type Interface interface {
 	Namespaced() bool
 	Info() *Info
 	ResourceContext() ResourceContext
+
 	AddSelectedEventHandler(eventHandlers ResourceEventHandlerFuncs, namespace string, optionsFunc TweakListOptionsFunc) error
 	AddEventHandler(eventHandlers ResourceEventHandlerFuncs) error
+
+	AddSelectedInfoEventHandler(eventHandlers ResourceInfoEventHandlerFuncs, namespace string, optionsFunc TweakListOptionsFunc) error
+	AddInfoEventHandler(eventHandlers ResourceInfoEventHandlerFuncs) error
+
 	AddRawEventHandler(handlers cache.ResourceEventHandlerFuncs) error
+	AddRawInfoEventHandler(handlers cache.ResourceEventHandlerFuncs) error
 
 	Wrap(ObjectData) (Object, error)
 	New(ObjectName) Object
 
 	GetInto(ObjectName, ObjectData) (Object, error)
+	GetInto1(ObjectData) (Object, error)
 
 	GetCached(interface{}) (Object, error)
 	// GET_ deprecrated: use Get
@@ -186,6 +204,7 @@ type Resources interface {
 	Decode(bytes []byte) (Object, error)
 
 	GetObjectInto(ObjectName, ObjectData) (Object, error)
+	GetObjectInto1(ObjectData) (Object, error)
 
 	GetObject(spec interface{}) (Object, error)
 	GetCachedObject(spec interface{}) (Object, error)

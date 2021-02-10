@@ -1,17 +1,7 @@
 /*
- * Copyright 2019 SAP SE or an SAP affiliate company. All rights reserved. This file is licensed under the Apache Software License, v. 2 except as noted otherwise in the LICENSE file
+ * SPDX-FileCopyrightText: 2019 SAP SE or an SAP affiliate company and Gardener contributors
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package cluster
@@ -19,12 +9,15 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	areacfg "github.com/gardener/controller-manager-library/pkg/controllermanager/config"
 	"github.com/gardener/controller-manager-library/pkg/logger"
+	"github.com/gardener/controller-manager-library/pkg/resources"
 	"github.com/gardener/controller-manager-library/pkg/utils"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 const CLUSTERID_GROUP = "gardener.cloud"
@@ -34,7 +27,11 @@ type Definitions interface {
 	CreateClusters(ctx context.Context, logger logger.LogContext, cfg *areacfg.Config, cache SchemeCache, names utils.StringSet) (Clusters, error)
 	ExtendConfig(cfg *areacfg.Config)
 	GetScheme() *runtime.Scheme
+	ClusterNames() []string
+	Reconfigure(modifiers ...ConfigurationModifier) Definitions
 }
+
+type ConfigurationModifier func(c Configuration) Configuration
 
 var _ Definitions = &_Definitions{}
 
@@ -47,6 +44,9 @@ type Definition interface {
 
 	Definition() Definition
 	Configure() Configuration
+
+	IsMinimalWatchEnforced(schema.GroupKind) bool
+	MinimalWatches() []schema.GroupKind
 }
 
 type _Definition struct {
@@ -55,6 +55,7 @@ type _Definition struct {
 	configOptionName string
 	description      string
 	scheme           *runtime.Scheme
+	minimalWatches   resources.GroupKindSet
 }
 
 func copy(d Definition) *_Definition {
@@ -64,6 +65,7 @@ func copy(d Definition) *_Definition {
 		d.ConfigOptionName(),
 		d.Description(),
 		d.Scheme(),
+		resources.NewGroupKindSetByArray(d.MinimalWatches()),
 	}
 }
 
@@ -83,14 +85,38 @@ func (this *_Definition) Scheme() *runtime.Scheme {
 	return this.scheme
 }
 func (this *_Definition) Definition() Definition {
-	return this
+	copy := this.copy()
+	return &copy
+}
+
+func (this *_Definition) IsMinimalWatchEnforced(gk schema.GroupKind) bool {
+	return this.minimalWatches.Contains(gk)
+}
+
+func (this *_Definition) MinimalWatches() []schema.GroupKind {
+	return this.minimalWatches.AsArray()
 }
 
 func (this *_Definition) Configure() Configuration {
-	return Configuration{*this}
+	return Configuration{this.copy()}
+}
+
+func (this *_Definition) copy() _Definition {
+	copy := *this
+	copy.minimalWatches = resources.NewGroupKindSetByArray(this.MinimalWatches())
+	return copy
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+
+type _Definitions struct {
+	lock        sync.RWMutex
+	definitions Registrations
+	scheme      *runtime.Scheme
+}
+
+var _ Definition = &_Definition{}
+var _ Definitions = &_Definitions{}
 
 func (this *_Definitions) create(ctx context.Context, logger logger.LogContext, cfg *Config, req Definition) (Interface, error) {
 
@@ -111,6 +137,9 @@ func (this *_Definitions) create(ctx context.Context, logger logger.LogContext, 
 		cluster.SetAttr(SUBOPTION_DISABLE_DEPLOY_CRDS, true)
 	}
 
+	if !cfg.MigrationIds.IsEmpty() {
+		cluster.AddMigrationIds(cfg.MigrationIds.AsArray()...)
+	}
 	err = callExtensions(func(e Extension) error { return e.Extend(cluster, cfg) })
 	if err != nil {
 		return nil, err
@@ -161,7 +190,7 @@ func (this *_Definitions) handleCluster(ctx context.Context, logger logger.LogCo
 	}
 	ccfg := cfg.GetSource(configTargetKey(req)).(*Config)
 
-	if name != DEFAULT && ccfg.KubeConfig != "" {
+	if name != DEFAULT && ccfg.IsConfigured() {
 		c, err = this.create(ctx, logger, ccfg, req)
 		if err != nil {
 			return err
@@ -203,4 +232,44 @@ func (this *_Definitions) ExtendConfig(cfg *areacfg.Config) {
 		callExtensions(func(e Extension) error { e.ExtendConfig(req, clusterCfg); return nil })
 		cfg.AddSource(configTargetKey(req), clusterCfg)
 	}
+}
+
+func (this *_Definitions) ClusterNames() []string {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+	names := []string{}
+	for k := range this.definitions {
+		names = append(names, k)
+	}
+	return names
+}
+
+func (this *_Definitions) Get(name string) Definition {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+	if c, ok := this.definitions[name]; ok {
+		return c
+	}
+	return nil
+}
+
+func (this *_Definitions) GetScheme() *runtime.Scheme {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+	return this.scheme
+}
+
+func (this *_Definitions) Reconfigure(modifiers ...ConfigurationModifier) Definitions {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+
+	definitions := &_Definitions{definitions: Registrations{}, scheme: this.scheme}
+	for _, name := range this.ClusterNames() {
+		configuration := this.Get(name).Configure()
+		for _, modifier := range modifiers {
+			configuration = modifier(configuration)
+		}
+		definitions.definitions[name] = configuration.Definition()
+	}
+	return definitions
 }

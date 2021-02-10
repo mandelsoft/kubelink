@@ -21,6 +21,7 @@ package kubelink
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
 	"github.com/vishvananda/netlink"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
@@ -50,7 +52,9 @@ type Link struct {
 	ClusterAddress *net.IPNet
 	Gateway        net.IP
 	Host           string
+	Port           int
 	Endpoint       string
+	PublicKey      *wgtypes.Key
 	LinkForeignData
 }
 
@@ -95,6 +99,10 @@ func (this *Link) AllowIngress(ip net.IP) (granted bool, set bool) {
 		return true, false
 	}
 	return this.Ingress.Contains(ip), true
+}
+
+func (this *Link) IsWireguard() bool {
+	return this.PublicKey != nil && this.Endpoint != "none"
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -143,10 +151,29 @@ func (this *Links) LinkFor(link *v1alpha1.KubeLink) (*Link, error) {
 	if gateway == nil {
 		return nil, fmt.Errorf("invalid gateway address %q", link.Status.Gateway)
 	}
+
 	endpoint := link.Spec.Endpoint
 	parts := strings.Split(endpoint, ":")
-	if len(parts) == 1 {
-		endpoint = fmt.Sprintf("%s:%d", endpoint, DEFAULT_PORT)
+	port := this.defaultport
+	if len(endpoint) != 0 && endpoint != "none" {
+		if len(parts) == 1 {
+			endpoint = fmt.Sprintf("%s:%d", endpoint, port)
+		} else {
+			i, err := strconv.ParseInt(parts[1], 10, 32)
+			if err != nil {
+				return nil, fmt.Errorf("invalid gateway port %q: %s", parts[1], err)
+			}
+			port = int(i)
+		}
+	}
+
+	var publicKey *wgtypes.Key
+	if !utils.Empty(link.Spec.PublicKey) {
+		key, err := wgtypes.ParseKey(link.Spec.PublicKey)
+		if err != nil {
+			return nil, fmt.Errorf("invalid public wireguard key %q: %s", link.Spec.PublicKey, err)
+		}
+		publicKey = &key
 	}
 
 	l := &Link{
@@ -157,7 +184,9 @@ func (this *Links) LinkFor(link *v1alpha1.KubeLink) (*Link, error) {
 		ClusterAddress: ccidr,
 		Gateway:        gateway,
 		Host:           parts[0],
+		Port:           port,
 		Endpoint:       endpoint,
+		PublicKey:      publicKey,
 	}
 	return l, err
 }
@@ -166,13 +195,13 @@ func (this *Links) LinkFor(link *v1alpha1.KubeLink) (*Link, error) {
 
 var linksKey = ctxutil.SimpleKey("kubelinks")
 
-func GetSharedLinks(controller controller.Interface) *Links {
+func GetSharedLinks(controller controller.Interface, defaultport int) *Links {
 	return controller.GetEnvironment().GetOrCreateSharedValue(linksKey, func() interface{} {
 		resc, err := controller.GetMainCluster().Resources().Get(&v1alpha1.KubeLink{})
 		if err != nil {
 			controller.Errorf("cannot get kubelink resource: %s", err)
 		}
-		return NewLinks(resc)
+		return NewLinks(resc, defaultport)
 	}).(*Links)
 }
 
@@ -180,14 +209,16 @@ type Links struct {
 	lock        sync.RWMutex
 	resource    resources.Interface
 	initialized bool
+	defaultport int
 	links       map[string]*Link
 	endpoints   map[string]*Link
 	clusteraddr map[string]*Link
 }
 
-func NewLinks(resc resources.Interface) *Links {
+func NewLinks(resc resources.Interface, defaultport int) *Links {
 	return &Links{
 		resource:    resc,
+		defaultport: defaultport,
 		links:       map[string]*Link{},
 		endpoints:   map[string]*Link{},
 		clusteraddr: map[string]*Link{},
@@ -335,10 +366,27 @@ func (this *Links) RemoveLink(name string) {
 	}
 }
 
-func (this *Links) Visit(visitor func(l *Link) bool) {
-	// this.lock.Lock()
-	// defer this.lock.Unlock()
+func (this *Links) HasWireguard() bool {
+	this.lock.Lock()
+	defer this.lock.Unlock()
 	for _, l := range this.links {
+		if l.IsWireguard() {
+			return true
+		}
+	}
+	return false
+}
+
+func (this *Links) Visit(visitor func(l *Link) bool) {
+	this.lock.Lock()
+	links := make([]*Link, len(this.links))
+	i := 0
+	for _, l := range this.links {
+		links[i] = l
+		i++
+	}
+	this.lock.Unlock()
+	for _, l := range links {
 		if !visitor(l) {
 			break
 		}
@@ -346,6 +394,22 @@ func (this *Links) Visit(visitor func(l *Link) bool) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+
+func (this *Links) GetMeshGatewaysFor(ip net.IP) (*net.IPNet, []net.IP) {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+
+	var gateways []net.IP
+	var cidr *net.IPNet
+
+	for _, l := range this.links {
+		if l.ClusterAddress.Contains(ip) {
+			cidr = tcp.CIDRNet(l.ClusterAddress)
+			gateways = append(gateways, l.Gateway)
+		}
+	}
+	return cidr, gateways
+}
 
 func (this *Links) GetLinkForIP(ip net.IP) *Link {
 	this.lock.RLock()

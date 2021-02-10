@@ -29,7 +29,6 @@ import (
 
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/crds"
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
-	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 )
 
@@ -51,12 +50,12 @@ func BaseController(name string, config config.OptionSource) controller.Configur
 
 ///////////////////////////////////////////////////////////////////////////////
 
-func CreateBaseReconciler(controller controller.Interface, impl ReconcilerImplementation) (*Reconciler, error) {
+func CreateBaseReconciler(controller controller.Interface, impl ReconcilerImplementation, defaultport int) (*Reconciler, error) {
 	cfg, err := controller.GetOptionSource("options")
 	if err != nil {
 		return nil, err
 	}
-	config := impl.Config(cfg)
+	config := impl.BaseConfig(cfg)
 
 	controller.Infof("using cidr for nodes: %s", config.NodeCIDR)
 
@@ -65,18 +64,18 @@ func CreateBaseReconciler(controller controller.Interface, impl ReconcilerImplem
 		return nil, err
 	}
 
-	ipt, err := iptables.New()
+	tool, err := NewLinkTool()
 	if err != nil {
 		return nil, fmt.Errorf("cannot create iptables access: %s", err)
 	}
 
 	return &Reconciler{
 		Common:     NewCommon(controller),
-		IPT:        ipt,
+		tool:       tool,
 		config:     cfg,
 		baseconfig: config,
 		ifce:       ifce,
-		links:      kubelink.GetSharedLinks(controller),
+		links:      kubelink.GetSharedLinks(controller, defaultport),
 		impl:       impl,
 	}, nil
 }

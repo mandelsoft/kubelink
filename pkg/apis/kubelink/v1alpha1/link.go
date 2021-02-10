@@ -67,9 +67,12 @@ type KubeLinkSpec struct {
 	ClusterAddress string   `json:"clusterAddress"`
 	Endpoint       string   `json:"endpoint"`
 
+	// public key for wireguard
+	// +optional
+	PublicKey string `json:"publicKey,omitempty"`
+
 	// +optional
 	APIAccess *core.SecretReference `json:"apiAccess,omitempty"`
-
 	// +optional
 	DNS *KubeLinkDNS `json:"dns,omitempty"`
 }

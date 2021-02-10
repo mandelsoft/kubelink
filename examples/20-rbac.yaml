@@ -50,6 +50,7 @@ rules:
   - ""
   resources:
     - serviceaccounts
+    - services     # for --service option
   verbs:
     - get
 
@@ -96,7 +97,7 @@ kind: Role
 metadata:
   labels:
     app: kubelink
-  name: kunbelink
+  name: kubelink
   namespace: kube-system
 rules:
 - apiGroups:

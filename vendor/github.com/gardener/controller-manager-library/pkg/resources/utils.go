@@ -1,24 +1,18 @@
 /*
- * Copyright 2019 SAP SE or an SAP affiliate company. All rights reserved. This file is licensed under the Apache Software License, v. 2 except as noted otherwise in the LICENSE file
+ * SPDX-FileCopyrightText: 2019 SAP SE or an SAP affiliate company and Gardener contributors
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package resources
 
 import (
+	"context"
 	"fmt"
 	"reflect"
+	"sync"
+
+	"golang.org/x/sync/semaphore"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -246,4 +240,64 @@ func FilterObjectDeletionError(args ...interface{}) error {
 		return err
 	}
 	return nil
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+type ClusterObjectKeyLocks struct {
+	lock  sync.Mutex
+	locks map[ClusterObjectKey]*semaphore.Weighted
+}
+
+func (this *ClusterObjectKeyLocks) TryLock(key ClusterObjectKey) bool {
+	var lock *semaphore.Weighted
+	this.lock.Lock()
+
+	if this.locks == nil {
+		this.locks = map[ClusterObjectKey]*semaphore.Weighted{}
+	} else {
+		lock = this.locks[key]
+	}
+	if lock == nil {
+		lock = semaphore.NewWeighted(1)
+		this.locks[key] = lock
+	}
+	this.lock.Unlock()
+	return lock.TryAcquire(1)
+}
+
+func (this *ClusterObjectKeyLocks) Lock(ctx context.Context, key ClusterObjectKey) error {
+	var lock *semaphore.Weighted
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	this.lock.Lock()
+
+	if this.locks == nil {
+		this.locks = map[ClusterObjectKey]*semaphore.Weighted{}
+	} else {
+		lock = this.locks[key]
+	}
+	if lock == nil {
+		lock = semaphore.NewWeighted(1)
+		this.locks[key] = lock
+	}
+	this.lock.Unlock()
+	return lock.Acquire(ctx, 1)
+}
+
+func (this *ClusterObjectKeyLocks) Unlock(key ClusterObjectKey) {
+	var lock *semaphore.Weighted
+	this.lock.Lock()
+
+	if this.locks != nil {
+		lock = this.locks[key]
+		if lock != nil {
+			lock.Release(1)
+			if lock.TryAcquire(1) {
+				delete(this.locks, key)
+			}
+		}
+	}
+	this.lock.Unlock()
 }

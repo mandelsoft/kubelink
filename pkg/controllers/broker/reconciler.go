@@ -20,43 +20,44 @@ package broker
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"sync"
 	"time"
 
-	"github.com/gardener/controller-manager-library/pkg/certs"
+	"github.com/gardener/controller-manager-library/pkg/config"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
-	"github.com/gardener/controller-manager-library/pkg/ctxutil"
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
 	"github.com/vishvananda/netlink"
 	_apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 
-	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
+	ctrlcfg "github.com/mandelsoft/kubelink/pkg/controllers/broker/config"
+	"github.com/mandelsoft/kubelink/pkg/controllers/broker/runmode"
 	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
+	"github.com/mandelsoft/kubelink/pkg/tasks"
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
 type reconciler struct {
 	*controllers.Reconciler
-	config   *Config
-	certInfo *CertInfo
+	config *ctrlcfg.Config
 
-	tasks Tasks
+	runmode runmode.RunMode
+
+	tasks tasks.Tasks
 
 	linkResource       resources.Interface
 	saResource         resources.Interface
 	secretResource     resources.Interface
 	deploymentResource resources.Interface
-	secrets            *SecretCache
+	secrets            *controllers.SecretCache
 
 	access  kubelink.LinkAccessInfo
 	dnsInfo kubelink.LinkDNSInfo
-	mux     *Mux
 
 	lock            sync.RWMutex
 	requiredSecrets map[resources.ObjectName]resources.ObjectNameSet
@@ -67,20 +68,20 @@ var _ controllers.ReconcilerImplementation = &reconciler{}
 
 ///////////////////////////////////////////////////////////////////////////////
 
-func (this *reconciler) Config(cfg interface{}) *controllers.Config {
-	return &cfg.(*Config).Config
+func (this *reconciler) BaseConfig(cfg config.OptionSource) *controllers.Config {
+	return &cfg.(*ctrlcfg.Config).Config
 }
 
-func (this *reconciler) Gateway(obj *v1alpha1.KubeLink) (net.IP, error) {
+func (this *reconciler) Gateway(obj *api.KubeLink) (net.IP, error) {
 	gateway := this.NodeInterface().IP
 	match, ip := this.config.MatchLink(obj)
 	if !match {
 		return nil, nil
 	}
-	return gateway, this.mux.GetError(ip)
+	return gateway, this.runmode.GetErrorForMeshNode(ip)
 }
 
-func (this *reconciler) UpdateGateway(link *v1alpha1.KubeLink) *string {
+func (this *reconciler) UpdateGateway(link *api.KubeLink) *string {
 	gateway := this.NodeInterface().IP
 	match, _ := this.config.MatchLink(link)
 	if !match {
@@ -95,7 +96,9 @@ func (this *reconciler) UpdateGateway(link *v1alpha1.KubeLink) *string {
 }
 
 func (this *reconciler) IsManagedRoute(route *netlink.Route, routes kubelink.Routes) bool {
-	if route.LinkIndex == this.mux.tun.link.Attrs().Index {
+	link := this.runmode.GetInterface()
+
+	if link != nil && route.LinkIndex == link.Attrs().Index {
 		return true
 	}
 	if route.Dst != nil {
@@ -109,8 +112,12 @@ func (this *reconciler) IsManagedRoute(route *netlink.Route, routes kubelink.Rou
 }
 
 func (this *reconciler) RequiredRoutes() kubelink.Routes {
-	routes := this.Links().GetRoutesToLink(this.NodeInterface(), this.mux.tun.link)
-	return append(routes, netlink.Route{LinkIndex: this.mux.tun.link.Attrs().Index, Dst: this.config.ClusterCIDR})
+	link := this.runmode.GetInterface()
+	if link == nil {
+		return nil
+	}
+	routes := this.Links().GetRoutesToLink(this.NodeInterface(), link)
+	return append(routes, netlink.Route{LinkIndex: link.Attrs().Index, Dst: this.config.ClusterCIDR})
 }
 
 func (this *reconciler) RequiredSNATRules() iptables.Requests {
@@ -119,86 +126,41 @@ func (this *reconciler) RequiredSNATRules() iptables.Requests {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-func (this *reconciler) Setup() {
-	var err error
-	var certificate certs.CertificateSource
-	if this.config.CertFile != "" {
-		certificate, err = this.CreateFileCertificateSource()
-	} else {
-		if this.config.Secret != "" {
-			certificate, err = this.CreateSecretCertificateSource()
-		}
-	}
-	if err != nil {
-		panic(fmt.Errorf("cannot setup tls: %s", err))
-	}
+func (this *reconciler) Config() *ctrlcfg.Config {
+	return this.config
+}
 
-	this.Reconciler.Setup()
+func (this *reconciler) Secrets() *controllers.SecretCache {
+	return this.secrets
+}
 
-	if this.config.DisableBridge {
-		return
+func (this *reconciler) Tasks() tasks.Tasks {
+	return this.tasks
+}
+
+func (this *reconciler) GetAccess() kubelink.LinkAccessInfo {
+	return this.access
+}
+
+func (this *reconciler) GetDNSInfo() kubelink.LinkDNSInfo {
+	return this.dnsInfo
+}
+
+func (this *reconciler) Setup() error {
+
+	if this.config.Mode == ctrlcfg.RUN_MODE_NONE {
+		return nil
 	}
 
 	if this.config.IPIP != controllers.IPIP_NONE {
 		this.WaitIPIP()
 	}
-	tun, err := NewTun(this.Controller(), this.config.Interface, this.config.ClusterAddress)
-	if err != nil {
-		panic(fmt.Errorf("cannot setup tun device: %s", err))
-	}
 
-	if certificate != nil {
-		if _, err := certificate.GetCertificate(nil); err != nil {
-			panic(fmt.Errorf("no TLS certificate: %s", err))
-		}
-		this.certInfo = NewCertInfo(this.Controller(), certificate)
-	}
-
-	var local tcp.CIDRList
-	if this.config.ServiceCIDR != nil {
-		local.Add(this.config.ServiceCIDR)
-	}
-	mux := NewMux(this.Controller().GetContext(), this.Controller(), this.certInfo, uint16(this.config.AdvertisedPort), this.config.ClusterAddress, local, tun, this.Links(), this)
-
-	if this.config.DNSAdvertisement {
-		mux.connectionHandler = &DefaultConnectionHandler{this}
-	}
-
-	go func() {
-		<-this.Controller().GetContext().Done()
-		this.Controller().Infof("closing tun device %q", tun)
-		tun.Close()
-	}()
-	this.mux = mux
+	return this.runmode.Setup()
 }
 
 func (this *reconciler) Start() {
-	if !this.config.DisableBridge {
-		NewServer("broker", this.mux).Start(this.certInfo, "", this.config.Port)
-		go func() {
-			defer ctxutil.Cancel(this.Controller().GetContext())
-			this.Controller().Infof("starting tun server")
-			for {
-				err := this.mux.HandleTun()
-				if err != nil {
-					if err == io.EOF {
-						this.Controller().Errorf("tun server finished")
-					} else {
-						this.Controller().Errorf("tun handling aborted: %s", err)
-					}
-					break
-				} else {
-					this.mux.tun.Close()
-					time.Sleep(100 * time.Millisecond)
-					this.Controller().Infof("recreating tun device")
-					this.mux.tun, err = NewTun(this.Controller(), this.config.Interface, this.config.ClusterAddress)
-					if err != nil {
-						panic(fmt.Errorf("cannot setup tun device: %s", err))
-					}
-				}
-			}
-		}()
-	}
+	this.runmode.Start()
 	if this.config.CoreDNSConfigure {
 		this.ConnectCoredns()
 	}
@@ -206,9 +168,9 @@ func (this *reconciler) Start() {
 }
 
 func (this *reconciler) Command(logger logger.LogContext, cmd string) reconcile.Status {
-	if !this.config.DisableBridge {
-		logger.Debug("update tun")
-		this.reconcileTun(logger)
+	err := this.runmode.ReconcileInterface(logger)
+	if err != nil {
+		this.Controller().Errorf("wireguard reconcilation failed: %s", err)
 	}
 	if this.config.ServiceAccount != nil {
 		logger.Debug("update service account")
@@ -233,33 +195,6 @@ func (this *reconciler) Reconcile(logger logger.LogContext, obj resources.Object
 func (this *reconciler) Deleted(logger logger.LogContext, key resources.ClusterObjectKey) reconcile.Status {
 	this.secrets.ReleaseSecretForLink(key.ObjectName())
 	return this.Reconciler.Deleted(logger, key)
-}
-
-func (this *reconciler) reconcileTun(logger logger.LogContext) {
-	tun := this.mux.tun
-
-	addrs, err := netlink.AddrList(tun.link, netlink.FAMILY_V4)
-
-	for _, a := range addrs {
-		if a.IP.Equal(this.config.ClusterAddress.IP) {
-			logger.Debugf("address still set for %q", tun)
-			return
-		}
-	}
-
-	err = SetLinkAddress(logger, tun.link, this.config.ClusterAddress)
-	if err != nil {
-		logger.Errorf("%s", err)
-	}
-}
-
-func (this *reconciler) Notify(l *kubelink.Link, err error) {
-	if err != nil {
-		this.Controller().Infof("requeue kubelink %q for failure handling: %s", l.Name, err)
-	} else {
-		this.Controller().Infof("requeue kubelink %q for new connection", l.Name)
-	}
-	this.Controller().EnqueueKey(resources.NewClusterKey(this.Controller().GetMainCluster().GetId(), v1alpha1.KUBELINK, "", l.Name))
 }
 
 func (this *reconciler) getServiceAccountToken() (*kubelink.LinkAccessInfo, error) {
@@ -310,6 +245,20 @@ func (this *reconciler) RestartDeployment(logger logger.LogContext, name resourc
 		logger.Infof("deployment %q restarted", name)
 	}
 	return err
+}
+
+func (this *reconciler) UpdateLink(logger logger.LogContext, name string, access *kubelink.LinkAccessInfo, dns *kubelink.LinkDNSInfo) {
+	_, err := this.linkResource.GetCached(resources.NewObjectName(name))
+	if err != nil {
+		logger.Infof("cannot get link %s: %s", name, err)
+		return
+	}
+	_, mod := this.Links().UpdateLinkInfo(logger, name, access, dns, true)
+	if mod {
+		logger.Infof("link access for %s modified -> trigger link", name)
+		this.TriggerUpdate()
+		this.TriggerLink(name)
+	}
 }
 
 func getStringValue(key string, secret *core.Secret) string {

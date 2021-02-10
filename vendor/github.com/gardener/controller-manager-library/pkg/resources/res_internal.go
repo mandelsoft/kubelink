@@ -1,22 +1,13 @@
 /*
- * Copyright 2019 SAP SE or an SAP affiliate company. All rights reserved. This file is licensed under the Apache Software License, v. 2 except as noted otherwise in the LICENSE file
+ * SPDX-FileCopyrightText: 2019 SAP SE or an SAP affiliate company and Gardener contributors
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package resources
 
 import (
+	"context"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -43,8 +34,8 @@ type Internal interface {
 	I_modifyByName(name ObjectDataName, status_only, create bool, modifier Modifier) (Object, bool, error)
 	I_modify(data ObjectData, status_only, read, create bool, modifier Modifier) (ObjectData, bool, error)
 
-	I_getInformer(namespace string, optionsFunc TweakListOptionsFunc) (GenericInformer, error)
-	I_lookupInformer(namespace string) (GenericInformer, error)
+	I_getInformer(minimal bool, namespace string, optionsFunc TweakListOptionsFunc) (GenericInformer, error)
+	I_lookupInformer(minimal bool, namespace string) (GenericInformer, error)
 	I_list(namespace string, opts metav1.ListOptions) ([]Object, error)
 }
 
@@ -59,10 +50,14 @@ type Internal interface {
 type _i_resource struct {
 	*_resource
 	lock  sync.Mutex
-	cache GenericInformer
+	cache map[bool]GenericInformer
 }
 
 var _ Internal = &_i_resource{}
+
+func new_i_resource(r *_resource) *_i_resource {
+	return &_i_resource{_resource: r, cache: map[bool]GenericInformer{}}
+}
 
 func (this *_i_resource) Resource() Interface {
 	return this._resource
@@ -77,7 +72,7 @@ func (this *_i_resource) I_update(data ObjectData) (ObjectData, error) {
 	result := this.CreateData()
 	return result, this.objectRequest(this.client.Put(), data).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 }
 
@@ -86,7 +81,7 @@ func (this *_i_resource) I_updateStatus(data ObjectData) (ObjectData, error) {
 	result := this.CreateData()
 	return result, this.objectRequest(this.client.Put(), data, "status").
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 }
 
@@ -94,37 +89,41 @@ func (this *_i_resource) I_create(data ObjectData) (ObjectData, error) {
 	result := this.CreateData()
 	return result, this.resourceRequest(this.client.Post(), data).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 }
 
 func (this *_i_resource) I_get(data ObjectData) error {
 	return this.objectRequest(this.client.Get(), data).
-		Do().
+		Do(context.TODO()).
 		Into(data)
 }
 
 func (this *_i_resource) I_delete(data ObjectDataName) error {
 	return this.objectRequest(this.client.Delete(), data).
 		Body(&metav1.DeleteOptions{}).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
-func (this *_i_resource) I_getInformer(namespace string, optionsFunc TweakListOptionsFunc) (GenericInformer, error) {
-	if this.cache != nil {
-		return this.cache, nil
+func (this *_i_resource) I_getInformer(minimal bool, namespace string, optionsFunc TweakListOptionsFunc) (GenericInformer, error) {
+	if cached, ok := this.cache[minimal]; ok {
+		return cached, nil
 	}
 	this.lock.Lock()
 	defer this.lock.Unlock()
 
-	if this.cache != nil {
-		return this.cache, nil
+	if cached, ok := this.cache[minimal]; ok {
+		return cached, nil
 	}
 
-	informers := this.ResourceContext().SharedInformerFactory().Structured()
-	if this.IsUnstructured() {
+	var informers GenericFilteredInformerFactory
+	if minimal {
+		informers = this.ResourceContext().SharedInformerFactory().MinimalObject()
+	} else if this.IsUnstructured() {
 		informers = this.ResourceContext().SharedInformerFactory().Unstructured()
+	} else {
+		informers = this.ResourceContext().SharedInformerFactory().Structured()
 	}
 	informer, err := informers.FilteredInformerFor(this.GroupVersionKind(), namespace, optionsFunc)
 	if err != nil {
@@ -135,20 +134,20 @@ func (this *_i_resource) I_getInformer(namespace string, optionsFunc TweakListOp
 	}
 
 	if namespace == "" && optionsFunc == nil {
-		this.cache = informer
+		this.cache[minimal] = informer
 	}
 	return informer, nil
 }
 
-func (this *_i_resource) I_lookupInformer(namespace string) (GenericInformer, error) {
-	if this.cache != nil {
-		return this.cache, nil
+func (this *_i_resource) I_lookupInformer(minimal bool, namespace string) (GenericInformer, error) {
+	if cached, ok := this.cache[minimal]; ok {
+		return cached, nil
 	}
 	this.lock.Lock()
 	defer this.lock.Unlock()
 
-	if this.cache != nil {
-		return this.cache, nil
+	if cached, ok := this.cache[minimal]; ok {
+		return cached, nil
 	}
 
 	informers := this.ResourceContext().SharedInformerFactory().Structured()
@@ -169,7 +168,7 @@ func (this *_i_resource) I_lookupInformer(namespace string) (GenericInformer, er
 func (this *_i_resource) I_list(namespace string, options metav1.ListOptions) ([]Object, error) {
 	result := this.CreateListData()
 	err := this.namespacedRequest(this.client.Get(), namespace).VersionedParams(&options, this.GetParameterCodec()).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	if err != nil {
 		return nil, err

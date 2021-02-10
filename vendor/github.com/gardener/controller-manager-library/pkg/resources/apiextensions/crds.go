@@ -1,17 +1,7 @@
 /*
- * Copyright 2019 SAP SE or an SAP affiliate company. All rights reserved. This file is licensed under the Apache Software License, v. 2 except as noted otherwise in the LICENSE file
+ * SPDX-FileCopyrightText: 2019 SAP SE or an SAP affiliate company and Gardener contributors
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package apiextensions
@@ -30,6 +20,7 @@ import (
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 
+	"github.com/gardener/controller-manager-library/pkg/controllermanager/extension"
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources/errors"
 	"github.com/gardener/controller-manager-library/pkg/utils"
@@ -151,7 +142,7 @@ func (this *CustomResourceDefinition) DataFor(cluster resources.Cluster, cp Webh
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func CreateCRDFromObject(log logger.LogContext, cluster resources.Cluster, crd resources.ObjectData, maintainer string) error {
+func CreateCRDFromObject(log logger.LogContext, cluster resources.Cluster, crd resources.ObjectData, maintainer extension.MaintainerInfo) error {
 	var err error
 
 	if abs, ok := crd.(*CustomResourceDefinition); ok {
@@ -161,20 +152,30 @@ func CreateCRDFromObject(log logger.LogContext, cluster resources.Cluster, crd r
 		return errors.New(errors.ERR_INVALID, "invalid crd")
 	}
 	msg := logger.NewOptionalSingletonMessage(log.Infof, "foreign %s", crd.GetName())
-	resources.SetAnnotation(crd, A_MAINTAINER, maintainer)
+	if maintainer.Ident != "" {
+		resources.SetAnnotation(crd, A_MAINTAINER, maintainer.Ident)
+	}
 	found, err := cluster.Resources().GetObject(crd)
 	if err == nil {
-		if found.GetAnnotation(A_MAINTAINER) == maintainer {
+		if maintainer.ForceCRDUpdate || maintainer.Idents.Contains(found.GetAnnotation(A_MAINTAINER)) {
 			msg.ResetWith("uptodate %s", crd.GetName())
 			new, _ := resources.GetObjectSpec(crd)
 			_, err := found.Modify(func(data resources.ObjectData) (bool, error) {
+				mod := false
 				spec, _ := resources.GetObjectSpec(data)
 				if !reflect.DeepEqual(spec, new) {
 					msg.Default("updating %s", crd.GetName())
 					resources.SetObjectSpec(data, new)
-					return true, nil
+					mod = true
 				}
-				return false, nil
+				if v, _ := resources.GetAnnotation(data, A_MAINTAINER); v != maintainer.Ident {
+					if maintainer.Ident == "" {
+						mod = resources.RemoveAnnotation(data, A_MAINTAINER) || mod
+					} else {
+						mod = resources.SetAnnotation(data, A_MAINTAINER, maintainer.Ident) || mod
+					}
+				}
+				return mod, nil
 			})
 			if err != nil {
 				log.Errorf("cannot update crd: %s", err)

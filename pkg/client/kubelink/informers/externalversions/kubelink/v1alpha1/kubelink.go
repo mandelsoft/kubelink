@@ -19,6 +19,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"context"
 	time "time"
 
 	kubelinkv1alpha1 "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
@@ -61,13 +62,13 @@ func NewFilteredKubeLinkInformer(client versioned.Interface, namespace string, r
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.KubelinkV1alpha1().KubeLinks(namespace).List(options)
+				return client.KubelinkV1alpha1().KubeLinks(namespace).List(context.TODO(), options)
 			},
 			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.KubelinkV1alpha1().KubeLinks(namespace).Watch(options)
+				return client.KubelinkV1alpha1().KubeLinks(namespace).Watch(context.TODO(), options)
 			},
 		},
 		&kubelinkv1alpha1.KubeLink{},

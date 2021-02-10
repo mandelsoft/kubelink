@@ -1,17 +1,7 @@
 /*
- * Copyright 2019 SAP SE or an SAP affiliate company. All rights reserved. This file is licensed under the Apache Software License, v. 2 except as noted otherwise in the LICENSE file
+ * SPDX-FileCopyrightText: 2019 SAP SE or an SAP affiliate company and Gardener contributors
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package resources
@@ -128,12 +118,12 @@ func (this *UsageCache) RenewOwner(obj Object) bool {
 func (this *UsageCache) renewOwner(obj Object) bool {
 	key := obj.ClusterKey()
 	oldused := this.byOwner[key]
-	ńewused := this.used(obj)
-	if len(ńewused) == 0 && len(oldused) == 0 {
+	newused := this.used(obj)
+	if len(newused) == 0 && len(oldused) == 0 {
 		return false
 	}
 	if len(oldused) > 0 {
-		add, del := ńewused.DiffFrom(oldused)
+		add, del := newused.DiffFrom(oldused)
 		for e := range add {
 			this.add(key, e)
 		}
@@ -142,7 +132,7 @@ func (this *UsageCache) renewOwner(obj Object) bool {
 		}
 		return len(add)+len(del) > 0
 	} else {
-		for e := range ńewused {
+		for e := range newused {
 			this.add(key, e)
 		}
 	}

@@ -23,57 +23,52 @@ import (
 
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
-	"github.com/gardener/controller-manager-library/pkg/resources"
 
 	_apps "k8s.io/api/apps/v1"
 	_core "k8s.io/api/core/v1"
 
 	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
+	"github.com/mandelsoft/kubelink/pkg/controllers/broker/config"
+	"github.com/mandelsoft/kubelink/pkg/tasks"
 	kutils "github.com/mandelsoft/kubelink/pkg/utils"
 )
-
-var secretGK = resources.NewGroupKind("", "Secret")
 
 func init() {
 	_ = _apps.Deployment{}
 
-	controllers.BaseController("broker", &Config{}).
+	controllers.BaseController("broker", &config.Config{}).
 		RequireLease().
-		Reconciler(Create).
-		WorkerPool("secrets", 1, 0).
-		Reconciler(CreateSecrets, "secrets").
-		ReconcilerWatchByGK("secrets", secretGK).
-		With(TaskReconciler(1)).
+		Reconciler(Create).With(controllers.SecretCacheReconciler).
+		With(tasks.TaskReconciler(10)).
 		MustRegister()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 func Create(controller controller.Interface) (reconcile.Interface, error) {
-
-	this := &reconciler{
-		secrets: GetSharedSecrets(controller),
-	}
-
 	cfg, err := controller.GetOptionSource("options")
 	if err != nil {
 		return nil, err
 	}
+	this := &reconciler{
+		secrets: controllers.GetSharedSecrets(controller),
+		config:  cfg.(*config.Config),
+	}
+
 	var impl controllers.ReconcilerImplementation
-	if cfg.(*Config).DisableBridge {
+	if this.config.Mode == config.RUN_MODE_NONE {
 		impl = &dummy{}
 	} else {
 		impl = this
 	}
 
-	this.tasks = GetTaskClient(controller)
+	this.tasks = tasks.GetTaskClient(controller)
 
-	this.Reconciler, err = controllers.CreateBaseReconciler(controller, impl)
+	this.Reconciler, err = controllers.CreateBaseReconciler(controller, impl, DefaultPort(this.config.Mode))
 	if err != nil {
 		return nil, err
 	}
-	this.config = this.Reconciler.Config().(*Config)
 
 	r, err := controller.GetMainCluster().Resources().GetByExample(&api.KubeLink{})
 	if err != nil {
@@ -99,6 +94,12 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 	}
 	this.deploymentResource = r
 
+	controller.Infof("using runmode %s", this.config.Mode)
+	this.runmode, err = CreateRunMode(this.config.Mode, this)
+	if err != nil {
+		return nil, err
+	}
+
 	if this.config.ServiceAccount != nil {
 		controller.Infof("advertise api access with service account %q", this.config.ServiceAccount)
 
@@ -114,15 +115,15 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 		controller.Infof("api access advertisement disabled")
 	}
 
+	this.dnsInfo.ClusterDomain = this.config.ClusterDomain
+	this.dnsInfo.DnsIP = this.config.DNSServiceIP
 	if this.config.DNSAdvertisement {
-		this.dnsInfo.ClusterDomain = this.config.ClusterDomain
-		this.dnsInfo.DnsIP = this.config.DNSServiceIP
 		controller.Infof("advertise dns access with with dns IP %s and cluster domain %s", this.dnsInfo.DnsIP, this.dnsInfo.ClusterDomain)
 	} else {
 		controller.Infof("dns access advertisement disabled")
 	}
 
-	if this.config.DNSPropagation != DNSMODE_NONE {
+	if this.config.DNSPropagation != config.DNSMODE_NONE {
 		controller.Infof("enable dns propagation (%s)", this.config.DNSPropagation)
 		controller.Infof("  handle coredns deployment %q", this.config.CoreDNSDeployment)
 		controller.Infof("  using coredns secret %q", this.config.CoreDNSSecret)
@@ -148,15 +149,4 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 	}
 
 	return this, nil
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
-func CreateSecrets(controller controller.Interface) (reconcile.Interface, error) {
-	this := &secretReconciler{
-		Common: controllers.NewCommon(controller),
-		cache:  GetSharedSecrets(controller),
-	}
-	return this, nil
-
 }

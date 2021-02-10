@@ -38,16 +38,11 @@ import (
 	_core "k8s.io/api/core/v1"
 
 	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	"github.com/mandelsoft/kubelink/pkg/controllers/broker/config"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
+	"github.com/mandelsoft/kubelink/pkg/tasks"
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
-
-const CLUSTER_DNS_IP = 10
-const KUBELINK_DNS_IP = 11
-
-const DNSMODE_NONE = "none"
-const DNSMODE_KUBERNETES = "kubernetes"
-const DNSMODE_DNS = "dns"
 
 type Manifest map[string]interface{}
 
@@ -181,9 +176,7 @@ func (this *reconciler) getSecret(logger logger.LogContext, name resources.Objec
 }
 
 func (this *reconciler) handleLinkAccess(logger logger.LogContext, klink *api.KubeLink, entry *kubelink.Link) (error, error) {
-	if this.config.DNSPropagation != DNSMODE_NONE {
-		this.tasks.ScheduleTask(NewConnectTask(klink.Name, this), false)
-	}
+	this.runmode.HandleDNSPropagation(klink)
 	if entry.UpdatePending {
 		return this.updateObjectFromLink(logger, klink, entry)
 	} else {
@@ -241,7 +234,7 @@ func (this *reconciler) updateLinkFromObject(logger logger.LogContext, klink *ap
 		} else {
 			_, cidr, err := net.ParseCIDR(klink.Spec.CIDR)
 			if err == nil {
-				dnsInfo.DnsIP = tcp.SubIP(cidr, CLUSTER_DNS_IP)
+				dnsInfo.DnsIP = tcp.SubIP(cidr, config.CLUSTER_DNS_IP)
 			}
 		}
 	}
@@ -376,7 +369,7 @@ func (this *reconciler) updateObjectFromLink(logger logger.LogContext, klink *ap
 }
 
 func (this *reconciler) updateCorefile(logger logger.LogContext) {
-	if this.config.DNSPropagation == DNSMODE_NONE {
+	if this.config.DNSPropagation == config.DNSMODE_NONE {
 		return
 	}
 	logger.Debug("update corefile")
@@ -386,7 +379,7 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 	keys := []string{}
 
 	kubeconfig := NewKubeconfig()
-	if this.config.DNSPropagation == DNSMODE_KUBERNETES {
+	if this.config.DNSPropagation == config.DNSMODE_KUBERNETES {
 
 		this.Links().Visit(func(l *kubelink.Link) bool {
 			if l.Token != "" {
@@ -414,11 +407,11 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 	ip := ""
 	if this.config.ClusterName != "" {
 		clusterDomain := "cluster.local"
-		if this.config.DNSPropagation == DNSMODE_DNS {
+		if this.config.DNSPropagation == config.DNSMODE_DNS {
 			if this.dnsInfo.DnsIP != nil {
 				ip = this.dnsInfo.DnsIP.String()
 			} else {
-				ip = tcp.SubIP(this.config.ServiceCIDR, CLUSTER_DNS_IP).String()
+				ip = tcp.SubIP(this.config.ServiceCIDR, config.CLUSTER_DNS_IP).String()
 			}
 			if this.dnsInfo.ClusterDomain != "" {
 				clusterDomain = this.dnsInfo.ClusterDomain
@@ -429,11 +422,11 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 	for _, k := range keys {
 		clusterDomain := "cluster.local"
 		l := this.Links().GetLink(k)
-		if this.config.DNSPropagation == DNSMODE_DNS {
+		if this.config.DNSPropagation == config.DNSMODE_DNS {
 			if l.DnsIP != nil {
 				ip = l.DnsIP.String()
 			} else {
-				ip = tcp.SubIP(l.ServiceCIDR, CLUSTER_DNS_IP).String()
+				ip = tcp.SubIP(l.ServiceCIDR, config.CLUSTER_DNS_IP).String()
 			}
 			if l.ClusterDomain != "" {
 				clusterDomain = l.ClusterDomain
@@ -466,20 +459,6 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 	}
 }
 
-func (this *reconciler) updateLink(logger logger.LogContext, name string, access *kubelink.LinkAccessInfo, dns *kubelink.LinkDNSInfo) {
-	_, err := this.linkResource.GetCached(resources.NewObjectName(name))
-	if err != nil {
-		logger.Infof("cannot get link %s: %s", name, err)
-		return
-	}
-	_, mod := this.Links().UpdateLinkInfo(logger, name, access, dns, true)
-	if mod {
-		logger.Infof("link access for %s modified -> trigger link", name)
-		this.TriggerUpdate()
-		this.TriggerLink(name)
-	}
-}
-
 func Base64Encode(data []byte, max int) string {
 	str := base64.StdEncoding.EncodeToString(data)
 	if max > 0 {
@@ -505,13 +484,13 @@ func (this *reconciler) ConnectCoredns() {
 }
 
 type configureCorednsTask struct {
-	BaseTask
+	tasks.BaseTask
 	*reconciler
 }
 
-func newConfigureCorednsTask(reconciler *reconciler) Task {
+func newConfigureCorednsTask(reconciler *reconciler) tasks.Task {
 	return &configureCorednsTask{
-		BaseTask:   NewBaseTask("coredns", "configure"),
+		BaseTask:   tasks.NewBaseTask("coredns", "configure"),
 		reconciler: reconciler,
 	}
 }
@@ -527,7 +506,7 @@ func (this *configureCorednsTask) Execute(logger logger.LogContext) reconcile.St
 			return reconcile.Failed(logger, fmt.Errorf("local service cidr or coredns ip required for establishing coredns connection"))
 		}
 		ip = tcp.CloneIP(this.config.ServiceCIDR.IP)
-		ip[len(ip)-1] |= KUBELINK_DNS_IP
+		ip[len(ip)-1] |= config.KUBELINK_DNS_IP
 	} else {
 		ip = this.config.CoreDNSServiceIP
 	}

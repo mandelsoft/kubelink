@@ -1,17 +1,7 @@
 /*
- * Copyright 2019 SAP SE or an SAP affiliate company. All rights reserved. This file is licensed under the Apache Software License, v. 2 except as noted otherwise in the LICENSE file
+ * SPDX-FileCopyrightText: 2019 SAP SE or an SAP affiliate company and Gardener contributors
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package controller
@@ -20,6 +10,8 @@ import (
 	"fmt"
 	"time"
 
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -57,6 +49,17 @@ func LocalNamespaceSelection(c Interface) (string, resources.TweakListOptionsFun
 	return c.GetEnvironment().Namespace(), nil
 }
 
+type ObjectSelectorFunction func(c Interface) resources.ObjectName
+
+func ObjectSelection(sel ObjectSelectorFunction) WatchSelectionFunction {
+	return func(c Interface) (string, resources.TweakListOptionsFunc) {
+		name := sel(c)
+		return name.Namespace(), func(options *v1.ListOptions) {
+			options.FieldSelector = fields.OneTermEqualSelector("metadata.name", name.Name()).String()
+		}
+	}
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Option Source Creators
 
@@ -80,6 +83,37 @@ func (this *syncerdef) GetCluster() string {
 }
 func (this *syncerdef) GetResource() ResourceKey {
 	return this.resource
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+type foreignclusterrefs struct {
+	from string
+	to   utils.StringSet
+}
+
+var _ ForeignClusterRefs = &foreignclusterrefs{}
+
+func NewForeignClusterRefs(from string) *foreignclusterrefs {
+	return &foreignclusterrefs{from, utils.StringSet{}}
+}
+
+func (this *foreignclusterrefs) From() string {
+	return this.from
+}
+func (this *foreignclusterrefs) To() utils.StringSet {
+	return this.to.Copy()
+}
+func (this *foreignclusterrefs) Add(names ...string) ForeignClusterRefs {
+	this.to.Add(names...)
+	return this
+}
+func (this *foreignclusterrefs) AddSet(sets ...utils.StringSet) ForeignClusterRefs {
+	this.to.AddSet(sets...)
+	return this
+}
+func (this *foreignclusterrefs) String() string {
+	return fmt.Sprintf("%s=>%s", this.from, this.to)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -111,6 +145,7 @@ type watchdef struct {
 type rescdef struct {
 	rtype      ResourceKey
 	selectFunc WatchSelectionFunction
+	minimal    bool
 }
 
 func (this *rescdef) ResourceType() ResourceKey {
@@ -119,11 +154,18 @@ func (this *rescdef) ResourceType() ResourceKey {
 func (this *rescdef) WatchSelectionFunction() WatchSelectionFunction {
 	return this.selectFunc
 }
+func (this *rescdef) ShouldEnforceMinimal() bool {
+	return this.minimal
+}
 func (this *rescdef) String() string {
+	s := this.rtype.String()
 	if this.selectFunc != nil {
-		return this.rtype.String() + " with selector"
+		s += " with selector"
 	}
-	return this.rtype.String()
+	if this.minimal {
+		s += " (minimal)"
+	}
+	return s
 }
 
 func (this *watchdef) Reconciler() string {
@@ -162,8 +204,10 @@ type _Definition struct {
 	after                []string
 	before               []string
 	required_clusters    []string
+	identity_clusters    map[string]*foreignclusterrefs
 	required_controllers []string
 	require_lease        bool
+	lease_cluster        string
 	pools                map[string]PoolDefinition
 	configs              extension.OptionDefinitions
 	configsources        extension.OptionSourceDefinitions
@@ -178,17 +222,21 @@ var _ Definition = &_Definition{}
 
 func (this *_Definition) String() string {
 	s := fmt.Sprintf("controller %q:\n", this.name)
-	s += fmt.Sprintf("  main rsc:    %s\n", this.main)
+	s += fmt.Sprintf("  main rsc:    %s\n", this.main.String())
 	s += fmt.Sprintf("  clusters:    %s\n", utils.Strings(this.RequiredClusters()...))
+	s += fmt.Sprintf("  ref targets: %s\n", this.CrossClusterReferences())
 	s += fmt.Sprintf("  required:    %s\n", utils.Strings(this.RequiredControllers()...))
 	s += fmt.Sprintf("  after:       %s\n", utils.Strings(this.After()...))
-	s += fmt.Sprintf("  before:       %s\n", utils.Strings(this.Before()...))
+	s += fmt.Sprintf("  before:      %s\n", utils.Strings(this.Before()...))
 	s += fmt.Sprintf("  reconcilers: %s\n", toString(this.reconcilers))
 	s += fmt.Sprintf("  watches:     %s\n", toString(this.watches))
 	s += fmt.Sprintf("  commands:    %s\n", toString(this.commands))
 	s += fmt.Sprintf("  pools:       %s\n", toString(this.pools))
 	s += fmt.Sprintf("  finalizer:   %s\n", this.FinalizerName())
 	s += fmt.Sprintf("  explicit :   %t\n", this.activateExplicitly)
+	if this.require_lease {
+		s += fmt.Sprintf("  lease on:    %s\n", this.LeaseClusterName())
+	}
 	if this.scheme != nil {
 		s += fmt.Sprintf("  scheme is set\n")
 	}
@@ -228,11 +276,43 @@ func (this *_Definition) RequiredClusters() []string {
 	}
 	return []string{cluster.DEFAULT}
 }
+
+func (this *_Definition) mapCluster(n string) string {
+	if n == CLUSTER_MAIN {
+		if len(this.required_clusters) > 0 {
+			n = this.required_clusters[0]
+		} else {
+			n = cluster.DEFAULT
+		}
+	}
+	return n
+}
+
+func (this *_Definition) CrossClusterReferences() CrossClusterRefs {
+	result := CrossClusterRefs{}
+
+	for _, r := range this.identity_clusters {
+		from := this.mapCluster(r.from)
+		to := utils.NewStringSet()
+		for t := range r.to {
+			to.Add(this.mapCluster(t))
+		}
+		result[from] = &foreignclusterrefs{from, to}
+	}
+	return result
+}
+
 func (this *_Definition) RequiredControllers() []string {
 	return this.required_controllers
 }
 func (this *_Definition) RequireLease() bool {
 	return this.require_lease
+}
+func (this *_Definition) LeaseClusterName() string {
+	if this.lease_cluster != "" {
+		return this.lease_cluster
+	}
+	return CLUSTER_MAIN
 }
 func (this *_Definition) FinalizerName() string {
 	if this.finalizerName == "" {
@@ -263,6 +343,7 @@ func (this *_Definition) Syncers() map[string]SyncerDefinition {
 	}
 	return syncers
 }
+
 func (this *_Definition) Pools() map[string]PoolDefinition {
 	pools := map[string]PoolDefinition{}
 	for n, d := range this.pools {
@@ -273,20 +354,13 @@ func (this *_Definition) Pools() map[string]PoolDefinition {
 	}
 	return pools
 }
-func (this *_Definition) ConfigOptions() map[string]OptionDefinition {
-	cfgs := map[string]OptionDefinition{}
-	for n, d := range this.configs {
-		cfgs[n] = d
-	}
-	return cfgs
+
+func (this *_Definition) ConfigOptions() extension.OptionDefinitions {
+	return this.configs.Copy()
 }
 
 func (this *_Definition) ConfigOptionSources() extension.OptionSourceDefinitions {
-	cfgs := extension.OptionSourceDefinitions{}
-	for n, d := range this.configsources {
-		cfgs[n] = d
-	}
-	return cfgs
+	return this.configsources.Copy()
 }
 
 func (this *_Definition) ActivateExplicitly() bool {
@@ -317,12 +391,13 @@ func (this *configState) pushState() {
 func Configure(name string) Configuration {
 	return Configuration{
 		settings: _Definition{
-			name:          name,
-			reconcilers:   map[string]ReconcilerType{},
-			syncers:       map[string]SyncerDefinition{},
-			pools:         map[string]PoolDefinition{},
-			configs:       extension.OptionDefinitions{},
-			configsources: extension.OptionSourceDefinitions{},
+			name:              name,
+			reconcilers:       map[string]ReconcilerType{},
+			syncers:           map[string]SyncerDefinition{},
+			pools:             map[string]PoolDefinition{},
+			configs:           extension.OptionDefinitions{},
+			configsources:     extension.OptionSourceDefinitions{},
+			identity_clusters: map[string]*foreignclusterrefs{},
 		},
 		configState: configState{
 			cluster:    CLUSTER_MAIN,
@@ -408,10 +483,15 @@ func (this Configuration) DefaultCluster() Configuration {
 	return this.Cluster(cluster.DEFAULT)
 }
 
-func (this Configuration) Cluster(name string) Configuration {
+func (this Configuration) Cluster(name string, to ...string) Configuration {
 	this.pushState()
+	if name == "" {
+		name = CLUSTER_MAIN
+	}
 	this.cluster = name
-	this.pool = DEFAULT_POOL
+	if this.pool == "" {
+		this.pool = DEFAULT_POOL
+	}
 	if name != CLUSTER_MAIN {
 		for i, n := range this.settings.required_clusters {
 			if n == name {
@@ -423,6 +503,36 @@ func (this Configuration) Cluster(name string) Configuration {
 		}
 		this.settings.required_clusters = append([]string{}, this.settings.required_clusters...)
 		this.settings.required_clusters = append(this.settings.required_clusters, name)
+	}
+	if len(to) > 0 {
+		return this.CrossClusterReferences(name, to...)
+	}
+	return this
+}
+
+func (this *Configuration) verifyCluster(name string) {
+	if name != CLUSTER_MAIN {
+		for _, c := range this.settings.required_clusters {
+			if c == name {
+				return
+			}
+		}
+		panic(fmt.Errorf("unknown cluster %q", name))
+	}
+}
+
+func (this Configuration) CrossClusterReferences(from string, to ...string) Configuration {
+	this.pushState()
+
+	this.verifyCluster(from)
+	refs := this.settings.identity_clusters[from]
+	if refs == nil {
+		refs = NewForeignClusterRefs(from)
+		this.settings.identity_clusters[from] = refs
+	}
+	for _, name := range to {
+		this.verifyCluster(name)
+		refs.to.Add(name)
 	}
 	return this
 }
@@ -478,18 +588,27 @@ func (this Configuration) Syncer(name string, resc ResourceKey) Configuration {
 func (this *Configuration) assureWatches() {
 	if this.settings.watches == nil {
 		this.settings.watches = map[string][]Watch{}
+	} else {
+		copy := map[string][]Watch{}
+		for k, v := range this.settings.watches {
+			copy[k] = v
+		}
+		this.settings.watches = copy
 	}
 }
 
 func (this Configuration) Watches(keys ...ResourceKey) Configuration {
 	return this.ReconcilerWatches(DEFAULT_RECONCILER, keys...)
 }
+
 func (this Configuration) WatchesByGK(gks ...schema.GroupKind) Configuration {
 	return this.ReconcilerWatchesByGK(DEFAULT_RECONCILER, gks...)
 }
+
 func (this Configuration) SelectedWatches(sel WatchSelectionFunction, keys ...ResourceKey) Configuration {
 	return this.ReconcilerSelectedWatches(DEFAULT_RECONCILER, sel, keys...)
 }
+
 func (this Configuration) SelectedWatchesByGK(sel WatchSelectionFunction, gks ...schema.GroupKind) Configuration {
 	return this.ReconcilerSelectedWatchesByGK(DEFAULT_RECONCILER, sel, gks...)
 }
@@ -497,12 +616,15 @@ func (this Configuration) SelectedWatchesByGK(sel WatchSelectionFunction, gks ..
 func (this Configuration) Watch(group, kind string) Configuration {
 	return this.ReconcilerWatches(DEFAULT_RECONCILER, NewResourceKey(group, kind))
 }
+
 func (this Configuration) WatchByGK(gk schema.GroupKind) Configuration {
 	return this.ReconcilerWatchesByGK(DEFAULT_RECONCILER, gk)
 }
+
 func (this Configuration) SelectedWatch(sel WatchSelectionFunction, group, kind string) Configuration {
 	return this.ReconcilerSelectedWatches(DEFAULT_RECONCILER, sel, NewResourceKey(group, kind))
 }
+
 func (this Configuration) SelectedWatchByGK(sel WatchSelectionFunction, gk schema.GroupKind) Configuration {
 	return this.ReconcilerSelectedWatchesByGK(DEFAULT_RECONCILER, sel, gk)
 }
@@ -510,12 +632,15 @@ func (this Configuration) SelectedWatchByGK(sel WatchSelectionFunction, gk schem
 func (this Configuration) ForWatches(keys ...ResourceKey) Configuration {
 	return this.ReconcilerWatches(this.reconciler, keys...)
 }
+
 func (this Configuration) ForWatchesByGK(gks ...schema.GroupKind) Configuration {
 	return this.ReconcilerWatchesByGK(this.reconciler, gks...)
 }
+
 func (this Configuration) ForSelectedWatches(sel WatchSelectionFunction, keys ...ResourceKey) Configuration {
 	return this.ReconcilerSelectedWatches(this.reconciler, sel, keys...)
 }
+
 func (this Configuration) ForSelectedWatchesByGK(sel WatchSelectionFunction, gks ...schema.GroupKind) Configuration {
 	return this.ReconcilerSelectedWatchesByGK(this.reconciler, sel, gks...)
 }
@@ -523,12 +648,15 @@ func (this Configuration) ForSelectedWatchesByGK(sel WatchSelectionFunction, gks
 func (this Configuration) ForWatch(group, kind string) Configuration {
 	return this.ReconcilerWatches(this.reconciler, NewResourceKey(group, kind))
 }
+
 func (this Configuration) ForWatchByGK(gk schema.GroupKind) Configuration {
 	return this.ReconcilerWatches(this.reconciler, NewResourceKeyByGK(gk))
 }
+
 func (this Configuration) ForSelectedWatch(sel WatchSelectionFunction, group, kind string) Configuration {
 	return this.ReconcilerSelectedWatches(this.reconciler, sel, NewResourceKey(group, kind))
 }
+
 func (this Configuration) ForSelectedWatchByGK(sel WatchSelectionFunction, gk schema.GroupKind) Configuration {
 	return this.ReconcilerSelectedWatchesByGK(this.reconciler, sel, gk)
 }
@@ -536,6 +664,7 @@ func (this Configuration) ForSelectedWatchByGK(sel WatchSelectionFunction, gk sc
 func (this Configuration) ReconcilerWatch(reconciler, group, kind string) Configuration {
 	return this.ReconcilerWatches(reconciler, NewResourceKey(group, kind))
 }
+
 func (this Configuration) ReconcilerWatchByGK(reconciler string, gk schema.GroupKind) Configuration {
 	return this.ReconcilerWatches(reconciler, NewResourceKeyByGK(gk))
 }
@@ -544,16 +673,17 @@ func (this Configuration) ReconcilerWatches(reconciler string, keys ...ResourceK
 	this.assureWatches()
 	for _, key := range keys {
 		// logger.Infof("adding watch for %q:%q to pool %q", this.cluster, key, this.pool)
-		this.settings.watches[this.cluster] = append(this.settings.watches[this.cluster], &watchdef{rescdef{key, nil}, reconciler, this.pool})
+		this.settings.watches[this.cluster] = append(this.settings.watches[this.cluster], &watchdef{rescdef{key, nil, false}, reconciler, this.pool})
 	}
 	return this
 }
+
 func (this Configuration) ReconcilerWatchesByGK(reconciler string, gks ...schema.GroupKind) Configuration {
 	this.assureWatches()
 	for _, gk := range gks {
 		key := NewResourceKeyByGK(gk)
 		// logger.Infof("adding watch for %q:%q to pool %q", this.cluster, key, this.pool)
-		this.settings.watches[this.cluster] = append(this.settings.watches[this.cluster], &watchdef{rescdef{key, nil}, reconciler, this.pool})
+		this.settings.watches[this.cluster] = append(this.settings.watches[this.cluster], &watchdef{rescdef{key, nil, false}, reconciler, this.pool})
 	}
 	return this
 }
@@ -562,16 +692,37 @@ func (this Configuration) ReconcilerSelectedWatches(reconciler string, sel Watch
 	this.assureWatches()
 	for _, key := range keys {
 		// logger.Infof("adding watch for %q:%q to pool %q", this.cluster, key, this.pool)
-		this.settings.watches[this.cluster] = append(this.settings.watches[this.cluster], &watchdef{rescdef{key, sel}, reconciler, this.pool})
+		this.settings.watches[this.cluster] = append(this.settings.watches[this.cluster], &watchdef{rescdef{key, sel, false}, reconciler, this.pool})
 	}
 	return this
 }
+
 func (this Configuration) ReconcilerSelectedWatchesByGK(reconciler string, sel WatchSelectionFunction, gks ...schema.GroupKind) Configuration {
 	this.assureWatches()
 	for _, gk := range gks {
 		key := NewResourceKeyByGK(gk)
 		// logger.Infof("adding watch for %q:%q to pool %q", this.cluster, key, this.pool)
-		this.settings.watches[this.cluster] = append(this.settings.watches[this.cluster], &watchdef{rescdef{key, sel}, reconciler, this.pool})
+		this.settings.watches[this.cluster] = append(this.settings.watches[this.cluster], &watchdef{rescdef{key, sel, false}, reconciler, this.pool})
+	}
+	return this
+}
+
+func (this Configuration) MinimalWatches(gks ...schema.GroupKind) Configuration {
+	this.assureWatches()
+	for i, watch := range this.settings.watches[this.cluster] {
+		for _, gk := range gks {
+			if watch.(*watchdef).rtype.GroupKind() == gk {
+				new := *watch.(*watchdef)
+				new.minimal = true
+				this.settings.watches[this.cluster][i] = &new
+				continue
+			}
+		}
+	}
+	for _, gk := range gks {
+		if this.settings.main.rtype.GroupKind() == gk {
+			this.settings.main.minimal = true
+		}
 	}
 	return this
 }
@@ -584,6 +735,12 @@ func (this Configuration) ActivateExplicitly() Configuration {
 func (this *Configuration) assureCommands() {
 	if this.settings.commands == nil {
 		this.settings.commands = map[string][]Command{}
+	} else {
+		copy := map[string][]Command{}
+		for k, v := range this.settings.commands {
+			copy[k] = v
+		}
+		this.settings.commands = copy
 	}
 }
 
@@ -610,6 +767,7 @@ func (this Configuration) ReconcilerCommands(reconciler string, cmd ...string) C
 	}
 	return this
 }
+
 func (this Configuration) ReconcilerCommandMatchers(reconciler string, cmd ...utils.Matcher) Configuration {
 	this.assureCommands()
 	for _, cmd := range cmd {
@@ -641,8 +799,22 @@ func (this Configuration) FinalizerDomain(name string) Configuration {
 	this.settings.finalizerDomain = name
 	return this
 }
-func (this Configuration) RequireLease() Configuration {
+
+func (this Configuration) RequireLease(clusters ...string) Configuration {
 	this.settings.require_lease = true
+	if len(clusters) > 0 {
+		found := false
+		for _, name := range this.settings.required_clusters {
+			if name == clusters[0] {
+				found = true
+				break
+			}
+		}
+		if !found {
+			panic(fmt.Sprintf("lease cluster %s not found", clusters[0]))
+		}
+		this.settings.lease_cluster = clusters[0]
+	}
 	return this
 }
 
@@ -654,6 +826,7 @@ func (this Configuration) Scheme(scheme *runtime.Scheme) Configuration {
 func (this Configuration) StringOption(name string, desc string) Configuration {
 	return this.addOption(name, config.StringOption, "", desc)
 }
+
 func (this Configuration) DefaultedStringOption(name, def string, desc string) Configuration {
 	return this.addOption(name, config.StringOption, def, desc)
 }
@@ -661,6 +834,7 @@ func (this Configuration) DefaultedStringOption(name, def string, desc string) C
 func (this Configuration) StringArrayOption(name string, desc string) Configuration {
 	return this.addOption(name, config.StringArrayOption, nil, desc)
 }
+
 func (this Configuration) DefaultedStringArrayOption(name string, def []string, desc string) Configuration {
 	return this.addOption(name, config.StringArrayOption, def, desc)
 }
@@ -668,6 +842,7 @@ func (this Configuration) DefaultedStringArrayOption(name string, def []string, 
 func (this Configuration) IntOption(name string, desc string) Configuration {
 	return this.addOption(name, config.IntOption, 0, desc)
 }
+
 func (this Configuration) DefaultedIntOption(name string, def int, desc string) Configuration {
 	return this.addOption(name, config.IntOption, def, desc)
 }
@@ -675,6 +850,7 @@ func (this Configuration) DefaultedIntOption(name string, def int, desc string) 
 func (this Configuration) BoolOption(name string, desc string) Configuration {
 	return this.addOption(name, config.BoolOption, false, desc)
 }
+
 func (this Configuration) DefaultedBoolOption(name string, def bool, desc string) Configuration {
 	return this.addOption(name, config.BoolOption, def, desc)
 }
@@ -682,6 +858,7 @@ func (this Configuration) DefaultedBoolOption(name string, def bool, desc string
 func (this Configuration) DurationOption(name string, desc string) Configuration {
 	return this.addOption(name, config.DurationOption, time.Duration(0), desc)
 }
+
 func (this Configuration) DefaultedDurationOption(name string, def time.Duration, desc string) Configuration {
 	return this.addOption(name, config.DurationOption, def, desc)
 }

@@ -1,23 +1,15 @@
 /*
- * Copyright 2019 SAP SE or an SAP affiliate company. All rights reserved. This file is licensed under the Apache Software License, v. 2 except as noted otherwise in the LICENSE file
+ * SPDX-FileCopyrightText: 2019 SAP SE or an SAP affiliate company and Gardener contributors
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package utils
 
 import (
 	"fmt"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func AssureBoolValue(mod bool, old bool, value bool) (bool, bool) {
@@ -28,6 +20,13 @@ func AssureBoolValue(mod bool, old bool, value bool) (bool, bool) {
 }
 
 func AssureStringValue(mod bool, old string, value string) (string, bool) {
+	if old != value {
+		return value, true
+	}
+	return old, mod
+}
+
+func AssureTimeValue(mod bool, old metav1.Time, value metav1.Time) (metav1.Time, bool) {
 	if old != value {
 		return value, true
 	}
@@ -122,6 +121,11 @@ func (this *ModificationState) Modify(m bool) *ModificationState {
 
 func (this *ModificationState) AssureBoolValue(dst *bool, val bool) *ModificationState {
 	*dst, this.Modified = AssureBoolValue(this.Modified, *dst, val)
+	return this
+}
+
+func (this *ModificationState) AssureTimeValue(dst *metav1.Time, val metav1.Time) *ModificationState {
+	*dst, this.Modified = AssureTimeValue(this.Modified, *dst, val)
 	return this
 }
 

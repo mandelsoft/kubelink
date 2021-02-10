@@ -24,6 +24,8 @@ import (
 	"strings"
 
 	"github.com/gardener/controller-manager-library/pkg/config"
+
+	"github.com/mandelsoft/kubelink/pkg/utils"
 )
 
 const IPIP_NONE = "none"
@@ -63,21 +65,9 @@ func (this *Config) Prepare() error {
 }
 
 func (this *Config) RequireCIDR(s, name string) (net.IP, *net.IPNet, error) {
-	ip, cidr, err := this.OptionalCIDR(s, name)
-	if cidr == nil && err == nil {
-		return nil, nil, fmt.Errorf("%s must be set", name)
-	}
-	return ip, cidr, err
+	return utils.RequireCIDR(s, name)
 }
 
 func (this *Config) OptionalCIDR(s, name string) (net.IP, *net.IPNet, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil, nil, nil
-	}
-	ip, cidr, err := net.ParseCIDR(s)
-	if err != nil {
-		return nil, nil, fmt.Errorf("invalid cidr (%s): %s", name, err)
-	}
-	return ip, cidr, nil
+	return utils.OptionalCIDR(s, name)
 }

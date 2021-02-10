@@ -1,19 +1,7 @@
 /*
- * Copyright 2019 SAP SE or an SAP affiliate company. All rights reserved.
- * This file is licensed under the Apache Software License, v. 2 except as noted
- * otherwise in the LICENSE file
+ * SPDX-FileCopyrightText: 2019 SAP SE or an SAP affiliate company and Gardener contributors
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package controller
@@ -21,15 +9,11 @@ package controller
 import (
 	"context"
 	"fmt"
-	"os"
-	"time"
 
-	"github.com/gardener/controller-manager-library/pkg/controllermanager/cluster"
+	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/lease"
 	"github.com/gardener/controller-manager-library/pkg/ctxutil"
 
-	k8s "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/leaderelection"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
 type leasestartupgroup struct {
@@ -49,6 +33,7 @@ func (this *leasestartupgroup) Startup() error {
 	}
 	msg += ")"
 
+	leasecfg := &this.extension.config.Lease
 	this.extension.Infof("leader election required for %s", msg)
 	runit := func() {
 		this.extension.Infof("Acquired leadership, starting controllers for %s.", msg)
@@ -57,15 +42,15 @@ func (this *leasestartupgroup) Startup() error {
 		}
 	}
 
-	if this.extension.config.OmitLease {
+	if leasecfg.OmitLease {
 		this.extension.Infof("omitting lease %q for cluster %s in namespace %q",
 			this.extension.Name(), msg, this.extension.Namespace())
 		ctxutil.WaitGroupRun(this.extension.GetContext(), runit)
 	} else {
 		this.extension.Infof("requesting lease %q for cluster %s in namespace %q",
-			this.extension.config.LeaseName, msg, this.extension.Namespace())
-		leaderElectionConfig, err := makeLeaderElectionConfig(this.cluster,
-			this.extension.Namespace(), this.extension.config.LeaseName)
+			leasecfg.LeaseName, msg, this.extension.Namespace())
+		leaderElectionConfig, err := lease.MakeLeaderElectionConfig(this.cluster,
+			this.extension.Namespace(), &this.extension.config.Lease)
 		if err != nil {
 			return err
 		}
@@ -91,39 +76,4 @@ func (this *leasestartupgroup) Startup() error {
 	}
 
 	return nil
-}
-
-func makeLeaderElectionConfig(cluster cluster.Interface, namespace, name string) (*leaderelection.LeaderElectionConfig, error) {
-	hostname, err := os.Hostname()
-	hostname = fmt.Sprintf("%s/%d", hostname, os.Getpid())
-	if err != nil {
-		return nil, fmt.Errorf("unable to get hostname: %v", err)
-	}
-
-	cfg := cluster.Config()
-	client, err := k8s.NewForConfig(&cfg)
-	if err != nil {
-		return nil, err
-	}
-	lock, err := resourcelock.New(
-		"configmaps",
-		namespace,
-		name,
-		client.CoreV1(),
-		client.CoordinationV1(),
-		resourcelock.ResourceLockConfig{
-			Identity:      hostname,
-			EventRecorder: cluster.Resources(),
-		},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("couldn't create resources lock: %v", err)
-	}
-
-	return &leaderelection.LeaderElectionConfig{
-		Lock:          lock,
-		LeaseDuration: 15 * time.Second,
-		RenewDeadline: 10 * time.Second,
-		RetryPeriod:   2 * time.Second,
-	}, nil
 }

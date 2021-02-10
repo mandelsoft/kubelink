@@ -1,5 +1,5 @@
 #############      builder       #############
-FROM golang:1.13.9 AS builder
+FROM golang:1.15.4 AS builder
 
 ARG TARGETS=dev
 

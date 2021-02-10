@@ -38,7 +38,7 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 
 	this := &reconciler{}
 
-	this.Reconciler, err = controllers.CreateBaseReconciler(controller, this)
+	this.Reconciler, err = controllers.CreateBaseReconciler(controller, this, 0)
 	if err != nil {
 		return nil, err
 	}

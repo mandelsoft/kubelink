@@ -21,10 +21,12 @@ package broker
 import (
 	"net"
 
+	"github.com/gardener/controller-manager-library/pkg/config"
 	"github.com/vishvananda/netlink"
 
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
+	ctrlcfg "github.com/mandelsoft/kubelink/pkg/controllers/broker/config"
 	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 )
@@ -43,8 +45,8 @@ func (this *dummy) RequiredSNATRules() iptables.Requests {
 	return nil
 }
 
-func (this *dummy) Config(cfg interface{}) *controllers.Config {
-	return &cfg.(*Config).Config
+func (this *dummy) BaseConfig(cfg config.OptionSource) *controllers.Config {
+	return &cfg.(*ctrlcfg.Config).Config
 }
 
 func (this *dummy) Gateway(obj *v1alpha1.KubeLink) (net.IP, error) {

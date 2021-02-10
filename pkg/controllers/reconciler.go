@@ -30,6 +30,7 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
 	"github.com/vishvananda/netlink"
+	"golang.zx2c4.com/wireguard/wgctrl"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -46,7 +47,7 @@ type ReconcilerImplementation interface {
 	IsManagedRoute(*netlink.Route, kubelink.Routes) bool
 	RequiredRoutes() kubelink.Routes
 	RequiredSNATRules() iptables.Requests
-	Config(interface{}) *Config
+	BaseConfig(config.OptionSource) *Config
 
 	Gateway(obj *v1alpha1.KubeLink) (net.IP, error)
 	UpdateGateway(link *v1alpha1.KubeLink) *string
@@ -84,7 +85,7 @@ func (this *Common) TriggerLink(name string) {
 
 type Reconciler struct {
 	Common
-	IPT *iptables.IPTables
+	tool *LinkTool
 
 	config     config.OptionSource
 	baseconfig *Config
@@ -101,6 +102,10 @@ var _ reconcile.Interface = &Reconciler{}
 
 func (this *Reconciler) Config() config.OptionSource {
 	return this.config
+}
+
+func (this *Reconciler) LinkTool() *LinkTool {
+	return this.tool
 }
 
 func (this *Reconciler) NodeInterface() *kubelink.NodeInterface {
@@ -128,11 +133,11 @@ func (this *Reconciler) Reconcile(logger logger.LogContext, obj resources.Object
 
 func (this *Reconciler) ReconcileLink(logger logger.LogContext, obj resources.Object,
 	updater func(logger logger.LogContext, link *v1alpha1.KubeLink, entry *kubelink.Link) (error, error)) reconcile.Status {
-	_, status := this.ReconcileAngGetLink(logger, obj, updater)
+	_, status := this.ReconcileAndGetLink(logger, obj, updater)
 	return status
 }
 
-func (this *Reconciler) ReconcileAngGetLink(logger logger.LogContext, obj resources.Object,
+func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resources.Object,
 	updater func(logger logger.LogContext, link *v1alpha1.KubeLink, entry *kubelink.Link) (error, error)) (*kubelink.Link, reconcile.Status) {
 	orig := obj.Data().(*v1alpha1.KubeLink)
 	link := orig
@@ -246,13 +251,11 @@ func String(r netlink.Route) string {
 	return fmt.Sprintf("%s proto: %d", r, r.Protocol)
 }
 
-const IPTAB = "nat"
-
 func (this *Reconciler) updateSNATRules(logger logger.LogContext) error {
 	reqs := this.impl.RequiredSNATRules()
 
 	for _, r := range reqs {
-		err := this.IPT.Execute(logger, r)
+		err := this.tool.ChainRequest(logger, r)
 		if err != nil {
 			return err
 		}
@@ -310,6 +313,43 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 
 	logger.Infof("found %d managed (%d deleted) and %d created routes (%d other)", mcnt, dcnt, ccnt, ocnt)
 
+	wg, err := wgctrl.New()
+	if err == nil {
+		defer wg.Close()
+		devs, err := wg.Devices()
+		if err == nil {
+			logger.Infof("found %d wireguard device(s)", len(devs))
+			for _, d := range devs {
+				match := false
+				link, err := netlink.LinkByName(d.Name)
+				if err != nil {
+					logger.Errorf("link %s not found: %s", d.Name, err)
+					continue
+				}
+				addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
+				if err != nil {
+					logger.Errorf("cannot get address list for link %s: %s", d.Name, err)
+					continue
+				}
+				for _, a := range addrs {
+					cidr, gateways := this.Links().GetMeshGatewaysFor(a.IP)
+					if cidr != nil {
+						if tcp.IPList(gateways).Contains(this.ifce.IP) {
+							match = true
+							break
+						}
+						logger.Infof("  gateways %s for cluster address %s does not match node ip %s", gateways, a.IP, this.ifce.IP)
+					} else {
+						logger.Infof("  no klink found for links address %s", a.IP)
+					}
+				}
+				if !match {
+					logger.Infof("  garbage collecting unused wireguard interface %q", link.Attrs().Name)
+					netlink.LinkDel(link)
+				}
+			}
+		}
+	}
 	return reconcile.Succeeded(logger)
 }
 

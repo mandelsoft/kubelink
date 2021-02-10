@@ -1,19 +1,7 @@
 /*
- * Copyright 2019 SAP SE or an SAP affiliate company. All rights reserved.
- * This file is licensed under the Apache Software License, v. 2 except as noted
- * otherwise in the LICENSE file
+ * SPDX-FileCopyrightText: 2019 SAP SE or an SAP affiliate company and Gardener contributors
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package abstract
@@ -89,6 +77,8 @@ func NewGroupKind(group, kind string) schema.GroupKind {
 // ClusterObjectKey
 ////////////////////////////////////////////////////////////////////////////////
 
+type KeyFilter func(ClusterObjectKey) bool
+
 func EqualsClusterObjectKey(a, b ClusterObjectKey) bool {
 	return EqualsObjectName(a.name, b.name) &&
 		a.groupKind == b.groupKind &&
@@ -101,6 +91,11 @@ func NewClusterKeyForObject(cluster string, key ObjectKey) ClusterObjectKey {
 
 func NewClusterKey(cluster string, groupKind schema.GroupKind, namespace, name string) ClusterObjectKey {
 	return ClusterObjectKey{cluster, objectKey{ObjectKey{groupKind, NewObjectName(namespace, name)}}}
+}
+
+func (this ClusterObjectKey) ChangeCluster(id string) ClusterObjectKey {
+	this.cluster = id
+	return this
 }
 
 func (this ClusterObjectKey) String() string {
@@ -130,6 +125,26 @@ func (this ClusterObjectKey) AsRefFor(clusterid string) string {
 	return this.asString()
 }
 
+func (a ClusterObjectKey) Compare(b ClusterObjectKey) int {
+	if a == b {
+		return 0
+	}
+	r := strings.Compare(a.Cluster(), b.Cluster())
+	if r == 0 {
+		r = strings.Compare(a.Group(), b.Group())
+		if r == 0 {
+			r = strings.Compare(a.Kind(), b.Kind())
+			if r == 0 {
+				r = strings.Compare(a.Namespace(), b.Namespace())
+				if r == 0 {
+					r = strings.Compare(a.Name(), b.Name())
+				}
+			}
+		}
+	}
+	return r
+}
+
 func ParseClusterObjectKey(clusterid string, key string) (ClusterObjectKey, error) {
 	id := clusterid
 	i := strings.Index(key, ":")
@@ -145,6 +160,16 @@ func ParseClusterObjectKey(clusterid string, key string) (ClusterObjectKey, erro
 		return ClusterObjectKey{}, errors.NewInvalid("invalid cluster object key format: %s", key)
 	}
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// Sortable Cluster Object Key Array
+////////////////////////////////////////////////////////////////////////////////
+
+type ClusterObjectKeys []ClusterObjectKey
+
+func (p ClusterObjectKeys) Len() int           { return len(p) }
+func (p ClusterObjectKeys) Less(i, j int) bool { return p[i].Compare(p[j]) < 0 }
+func (p ClusterObjectKeys) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Cluster Object Key Set
@@ -252,12 +277,28 @@ func (this ClusterObjectKeySet) Copy() ClusterObjectKeySet {
 	return set
 }
 
-func (this ClusterObjectKeySet) AsArray() []ClusterObjectKey {
+func (this ClusterObjectKeySet) AsArray() ClusterObjectKeys {
 	a := []ClusterObjectKey{}
 	for n := range this {
 		a = append(a, n)
 	}
 	return a
+}
+
+func (this ClusterObjectKeySet) Filter(filter KeyFilter) ClusterObjectKeySet {
+	if this == nil {
+		return nil
+	}
+	if filter == nil {
+		return this
+	}
+	set := NewClusterObjectKeySet()
+	for n := range this {
+		if filter(n) {
+			set[n] = struct{}{}
+		}
+	}
+	return set
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -299,6 +340,9 @@ func (this GroupKindSet) String() string {
 }
 
 func (this GroupKindSet) Contains(n schema.GroupKind) bool {
+	if this == nil {
+		return false
+	}
 	_, ok := this[n]
 	return ok
 }

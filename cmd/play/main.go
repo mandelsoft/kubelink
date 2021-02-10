@@ -20,47 +20,63 @@ package main
 
 import (
 	"fmt"
-	"net"
-	"time"
+	"os"
+	"reflect"
 
-	"github.com/gardener/controller-manager-library/pkg/utils"
-
-	"github.com/mandelsoft/kubelink/pkg/iptables"
-	"github.com/mandelsoft/kubelink/pkg/kubelink"
-	"github.com/mandelsoft/kubelink/pkg/tcp"
+	"github.com/vishvananda/netlink"
+	"golang.zx2c4.com/wireguard/wgctrl"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
+const NAME = "wireguard"
+
+func CheckErr(err error) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(1)
+	}
+}
+
+var lnf = reflect.TypeOf(&netlink.LinkNotFoundError{}).Elem()
+
+func IsLinkNotFound(err error) bool {
+	return err != nil && reflect.ValueOf(err).Type() == lnf
+}
+
 func main() {
-	var list tcp.CIDRList
-
-	fmt.Printf("set: %t, empty: %t\n", list.IsSet(), list.IsEmpty())
-
-	list = tcp.CIDRList{}
-	fmt.Printf("set: %t, empty: %t\n", list.IsSet(), list.IsEmpty())
-	list.Add(&net.IPNet{})
-	fmt.Printf("set: %t, empty: %t\n", list.IsSet(), list.IsEmpty())
-
-	access := kubelink.LinkAccessInfo{
-		CACert: "CERT",
-		Token:  "TOKEN",
+	fmt.Printf("Hello Wireguard\n")
+	link, err := netlink.LinkByName(NAME)
+	if IsLinkNotFound(err) {
+		fmt.Printf("creating link\n")
+		attrs := netlink.NewLinkAttrs()
+		attrs.Name = NAME
+		link = &netlink.GenericLink{
+			LinkAttrs: attrs,
+			LinkType:  "wireguard",
+		}
+		err = netlink.LinkAdd(link)
 	}
-	fmt.Printf("direct : %s\n", access)
-	fmt.Printf("pointer: %s\n", &access)
+	CheckErr(err)
+	fmt.Printf("Link: %s %+v\n", link.Type(), link.Attrs())
 
-	r := utils.NewDefaultRateLimiter(10*time.Second, 10*time.Minute)
+	c, err := wgctrl.New()
+	CheckErr(err)
 
-	for i := 1; i < 20; i++ {
-		r.Failed()
-		fmt.Printf("%d: %s\n", i, r.RateLimit())
+	port := 8777
+	key, err := wgtypes.GeneratePrivateKey()
+	CheckErr(err)
+	config := wgtypes.Config{
+		//pub := key.PublicKey()
+		PrivateKey: &key,
+		ListenPort: &port,
 	}
-
-	args := []string{
-		"-A", "chain", "-o", "eth0", "-d", "127.2.2.2", "-j", "SNAT", "--to-source", "x",
-	}
-
-	rule := iptables.ParseRule(args)
-	fmt.Printf("rule: %+v\n", rule)
-	fmt.Printf("list: %+v\n", rule.AsList())
-	rule.Remove(iptables.Opt("-j", "SNAT"))
-	fmt.Printf("rem: %+v\n", rule.RemoveOption("-A"))
+	_ = config
+	fmt.Printf("configure with key %s\n", key.PublicKey())
+	err = c.ConfigureDevice(NAME, config)
+	CheckErr(err)
+	devs, err := c.Devices()
+	CheckErr(err)
+	fmt.Printf("%s\n", devs)
+	/*
+	 */
 }

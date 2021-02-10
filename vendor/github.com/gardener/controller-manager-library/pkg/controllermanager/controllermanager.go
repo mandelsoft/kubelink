@@ -1,17 +1,7 @@
 /*
- * Copyright 2019 SAP SE or an SAP affiliate company. All rights reserved. This file is licensed under the Apache Software License, v. 2 except as noted otherwise in the LICENSE file
+ * SPDX-FileCopyrightText: 2019 SAP SE or an SAP affiliate company and Gardener contributors
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package controllermanager
@@ -40,22 +30,24 @@ import (
 )
 
 type ControllerManager struct {
-	logger.LogContext
+	extension.SharedAttributesImpl
 	lock       sync.Mutex
 	extensions extension.Extensions
 	order      []string
 
 	namespace  string
-	definition *Definition
+	definition Definition
 
 	context  context.Context
 	config   *areacfg.Config
 	clusters cluster.Clusters
+
+	migrations resources.ClusterIdMigration
 }
 
 var _ extension.ControllerManager = &ControllerManager{}
 
-func NewControllerManager(ctx context.Context, def *Definition) (*ControllerManager, error) {
+func NewControllerManager(ctx context.Context, def Definition) (*ControllerManager, error) {
 	maincfg := configmain.Get(ctx)
 	cfg := areacfg.GetConfig(maincfg)
 	lgr := logger.New()
@@ -63,9 +55,10 @@ func NewControllerManager(ctx context.Context, def *Definition) (*ControllerMana
 	config.Print(logger.Infof, "", cfg.OptionSet)
 	logger.Info("-----------------------")
 	ctx = logger.Set(ctxutil.WaitGroupContext(ctx, "controllermanager"), lgr)
-	ctx = context.WithValue(ctx, resources.ATTR_EVENTSOURCE, def.GetName())
+	ctx = context.WithValue(ctx, resources.ATTR_EVENTSOURCE, def.GetName()) // golint: ignore
 
-	for _, e := range def.extensions {
+	extensions := def.GetExtensions()
+	for _, e := range extensions {
 		err := e.Validate()
 		if err != nil {
 			return nil, err
@@ -79,14 +72,11 @@ func NewControllerManager(ctx context.Context, def *Definition) (*ControllerMana
 		logger.Infof("disable namespace restriction for access control")
 	}
 
-	name := def.GetName()
-	if cfg.Name != "" {
-		name = cfg.Name
-	} else {
-		cfg.Name = name
+	if cfg.Name == "" {
+		cfg.Name = def.GetName()
 	}
-	if cfg.Maintainer == "" {
-		cfg.Maintainer = cfg.Name
+	if len(cfg.CRDMaintainer.Idents) == 0 {
+		cfg.CRDMaintainer.Idents = utils.NewStringSet(cfg.Name)
 	}
 
 	namespace := run.GetConfig(maincfg).Namespace
@@ -95,7 +85,7 @@ func NewControllerManager(ctx context.Context, def *Definition) (*ControllerMana
 	}
 
 	found := false
-	for _, e := range def.extensions {
+	for _, e := range extensions {
 		if e.Size() > 0 {
 			found = true
 			break
@@ -105,27 +95,27 @@ func NewControllerManager(ctx context.Context, def *Definition) (*ControllerMana
 		return nil, fmt.Errorf("no controller manager extension registered")
 	}
 
-	for _, e := range def.extensions {
+	for _, e := range extensions {
 		if e.Size() > 0 {
 			logger.Infof("configured %s: %s", e.Name(), e.Names())
 		}
 	}
 
-	order, _, err := extension.Order(def.extensions)
+	order, _, err := extension.Order(extensions)
 	if err != nil {
 		return nil, fmt.Errorf("controller manager extension cycle: %s", err)
 	}
 	logger.Infof("found configured controller manager extensions:")
 	for _, n := range order {
-		logger.Infof(" - %s (%d elements): %s", n, def.extensions[n].Size(), def.extensions[n].Description())
+		logger.Infof(" - %s (%d elements): %s", n, extensions[n].Size(), extensions[n].Description())
 	}
 
 	cm := &ControllerManager{
-		LogContext: lgr,
-		namespace:  namespace,
-		definition: def,
-		order:      order,
-		config:     cfg,
+		SharedAttributesImpl: *extension.NewSharedAttributes(lgr),
+		namespace:            namespace,
+		definition:           def,
+		order:                order,
+		config:               cfg,
 	}
 	ctx = ctx_controllermanager.WithValue(ctx, cm)
 	cm.context = ctx
@@ -134,12 +124,12 @@ func NewControllerManager(ctx context.Context, def *Definition) (*ControllerMana
 
 	cm.extensions = extension.Extensions{}
 	for _, n := range order {
-		d := def.extensions[n]
+		d := extensions[n]
 		e, err := d.CreateExtension(cm)
 		if err != nil {
 			return nil, err
 		}
-		if e == nil {
+		if utils.IsNil(e) {
 			logger.Infof("skipping unused extension %q", d.Name())
 			continue
 		}
@@ -159,14 +149,39 @@ func NewControllerManager(ctx context.Context, def *Definition) (*ControllerMana
 	if err != nil {
 		return nil, err
 	}
+	reftgtset := utils.StringSet{}
+	for _, e := range cm.extensions {
+		req := e.RequiredClusterIds(clusters)
+		if err != nil {
+			return nil, err
+		}
+		reftgtset.AddSet(req)
+	}
+
+	cm.Infof("enforcing explicit cluster ids for %s", reftgtset)
+	for reftgt := range reftgtset {
+		c := clusters.GetCluster(reftgt)
+		if c != nil {
+			if err = c.EnforceExplicitClusterIdentity(cm); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	cm.clusters = clusters
+	list := []resources.Cluster{}
+	for c := range clusters.Names() {
+		list = append(list, clusters.GetCluster(c))
+	}
+	cm.migrations = resources.ClusterIdMigrationFor(list...)
 
 	for _, n := range cm.order {
 		e := cm.extensions[n]
-		err = e.Setup(cm.context)
-		if err != nil {
-			return nil, err
+		if e != nil {
+			err = e.Setup(cm.context)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -177,8 +192,8 @@ func (this *ControllerManager) GetName() string {
 	return this.config.Name
 }
 
-func (this *ControllerManager) GetMaintainer() string {
-	return this.config.Maintainer
+func (this *ControllerManager) GetMaintainer() extension.MaintainerInfo {
+	return this.config.CRDMaintainer
 }
 
 func (this *ControllerManager) GetNamespace() string {
@@ -209,8 +224,12 @@ func (this *ControllerManager) GetClusters() cluster.Clusters {
 	return this.clusters
 }
 
+func (this *ControllerManager) GetClusterIdMigration() resources.ClusterIdMigration {
+	return this.migrations
+}
+
 func (this *ControllerManager) GetDefaultScheme() *runtime.Scheme {
-	return this.definition.cluster_defs.GetScheme()
+	return this.definition.ClusterDefinitions().GetScheme()
 }
 
 func (this *ControllerManager) Run() error {
@@ -220,9 +239,12 @@ func (this *ControllerManager) Run() error {
 	server.ServeFromMainConfig(this.context, "httpserver")
 
 	for _, n := range this.order {
-		err = this.extensions[n].Start(this.context)
-		if err != nil {
-			return err
+		e := this.extensions[n]
+		if e != nil {
+			err = e.Start(this.context)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

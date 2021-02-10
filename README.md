@@ -30,19 +30,25 @@ a kubernetes service of type `Loadbalancer`. The DNS name can automatically be
 provisioned by using the DNS controllers provided by the
 [external-dns-management project](//github.com/gardener/external-dns-management)
 
-The connection among the clusters is implemented by TLS secured TCP connections
-maintained by the *kubelink-broker*. The required server certificate is taken
-from a secret. It might best be maintained by an ACME-protocol based certificate
-provider. For this the project 
-[cert-management](//github.com/gardener/cert-management) can be used, which offers
-a kubernetes controller manager working together with the above mentioned DNS
-eco-system. 
+For the connection among the clusters two modes are available:
+- Wireing using TLS secured TCP connections maintained by the *kubelink-broker*.
+  The required server certificate is taken from a secret. It might best be
+  maintained by an ACME-protocol based certificate provider. For this the
+  project [cert-management](//github.com/gardener/cert-management) can be used,
+  which offers a kubernetes controller manager working together with the above
+  mentioned DNS eco-system. 
+- Kernel based VPN solution offered by
+  [_wireguard_](https://www.wireguard.com/papers/wireguard.pdf). Here again the
+  *kubelink-broker* is used to maintain a wireguard device, which then
+  handled the network traffic by its own.
 
 The examples just provide such a setup.
 
 Besides this connection management controller there is an additional controller
 (*kubelink-router*) that manages the required routes on the cluster nodes.
 Hereby the node where the broker is running is used as gateway.
+
+### TLS Based Connection
 
 On the gateway the broker maintains a tun device with the cidr of the cluster mesh
 and the IP address assigned to the dedicated cluster. This address is also
@@ -59,8 +65,21 @@ The certificate, private key and CA certificate is taken from a standard kuberne
 TLS secret. Here it is maintained by the certificate service, but it can also
 be maintained manually.
 
+### Wireguard
+
+On the gateway the broker maintains a wireguard device with the cidr of the cluster mesh
+and the IP address assigned to the dedicated cluster. This address is also
+used to provide an S-NAT for outgoing traffic to the other clusters.
+
+The broker does not handle the inter-cluster network traffic, which is now
+completely handled by the wireguard device. Therefore the broker configures
+the wireguard device and its peers according the desired cluster links,
+which must provide a public wireguard key for the dedicated endpoint. 
+
+## Configuring Links between Clusters
+
 The connections between two clusters can be configured dynamically just be adding
-an instance of the *kubelink* custom resource.
+an instance of the *KubeLink* custom resource.
 
 ```yaml
 apiVersion: kubelink.mandelsoft.org/v1alpha1
@@ -71,10 +90,15 @@ spec:
   cidr: <service cidr of remote cluster>
   clusterAddress: <cidr notation of IP and netmask of the connected cluster in the cluster mesh network>
   endpoint: <the FQDN of the mesh endpoint of this cluster>
+  publicKey: <public key, for wireguard, only>
 ```
 
-That's it, no certificate, no key, nothing else required in best case when
-using the DNS and server certificate provisioning controllers proposed above.
+That's it. For the TLS bases user space solution no certificate, key, nothing
+else required in best case when using the DNS and server certificate provisioning 
+controllers proposed above.
+
+For the wireguard solution only the public key of the foreign sites are required
+(and the local private key, which is maintained in secret)
 
 ## Constraints
 
@@ -93,11 +117,14 @@ primary interface of the nodes has to be configured
 dependent on the used operation system/image. For heterogeneous clusters
 with nodes using different operating systems, this will not work (only if the
 set of interfaces is known in advance for configuring the calico daemon set).
+Newer calico versions now support the detection method `cidr`, which allows 
+detecting the correct interface by the node subnet CIDR, which is operating
+system agnostic.
 
 If [Gardener](https://gardener.cloud) is used to maintain the involved Kubernetes clusters
 the required calico config can be directly described in the shoot manifest.
-The section `networking` has to be adapted as follows (change to the interface
-of your environment):
+The section `networking` has to be adapted as follows (change to the node cidr
+of your environment) .
 
 ```yaml
     networking:
@@ -110,8 +137,14 @@ of your environment):
           type: host-local
           cidr: usePodCIDR
         ipv4:
-          autoDetectionMethod: interface=eth0
+          autoDetectionMethod: cidr=<your node cidr>
 ```
+
+Configure calico to use the new detection method _cidr_.
+Older versions of calico do not support this detection method, here you have to
+use the method _interface_, which unfortunately is operating system dependent.
+The default method does NOT reliably work in all environments together with the
+additional network device.
 
 ## Implementation
 
@@ -162,10 +195,28 @@ services used by the [`kubelink-broker` deployments](examples/kubelink1/32-broke
 Finally the  [`kubelink-router` daemon sets](examples/kubelink1/31-router.yaml)
 have to be deployed into the clusters.
 
+Depending on your network policies it might be required to
+[enable access](examples/52-policy.yaml) from
+the kube dns server to the additional coredns deployment used by _kubelink_.
+
 Now the instrumentation is done and it is possible to define the mesh by applying 
 the appropriate [`kubelink` resources](examples/kubelink1/40-kubelink2.yaml).
 For every connection a pair of such instances have to be deployed into the
 involved clusters.
+
+### Wireguard
+
+For wireguard
+- select the option `--mode=wireguard` for the broker pod.
+- the secret now must specify the private key for the local
+  wireguard device (field `WireGuardPrivateKey`).
+- the broker service must be changed to the UDP protocol.
+- for AWS a network loadbalancer must be enforced by adding the annotation 
+  `service.beta.kubernetes.io/aws-load-balancer-type: "nlb"`
+
+The default port assumed for the link objects then is 8777. In the link
+objects additionally the
+field `publicKey` must be provided.
 
 ### And now?
 
@@ -174,7 +225,7 @@ for example `kubelink2`. The echo service from the examples just deploys a
 tiny http server echoing every request. It does neither offer a load balancer
 nor an ingress, so it's a completely cluster-local service. Looking at the
 service object you get a *ClusterIP* for this service, for example
-100.64.22.1.
+100.64.16.20.
 
 Now you can create a *busybox* pod 
 
@@ -185,7 +236,7 @@ $ kubectl run -it --image busybox busybox --restart=Never
 and call (replace by actual IP address)
 
 ```shell script
-$ wget -O - 100.64.22.1
+$ wget -O - 100.64.16.20
 ```
 
 which reaches the private echo service in the remote cluster.
@@ -232,6 +283,9 @@ to the kubelink coredns service (therefore the fixed cluster IP from above
 is used). This can be done for example by deploying a 
 [`coredns-custom`](examples/kubelink1/51-forward.yaml) configmap.
 
+Depending on your network policies a dediacted [access](examples/52-policy.yaml)
+from the kube's coredns server to the kubelink dns server must be enabled.
+
 There are several ways this DNS support can be used:
 
 - *Explicit Configuration* of the DNS access information of the foreign clusters
@@ -251,7 +305,11 @@ There are several ways this DNS support can be used:
   the option `--dns-advertisement` or `--service-account=<name>`. The settings
   of the foreign `KubeLink` objects are
   now maintained automatically by the broker according to information advertised
-  by the foreign clusters.
+  by the foreign clusters. 
+  
+  **Please note: This mode is NOT supported by the wireguard mode,
+  because here the broker cannot exchange data with other clusters using the
+  connection handshake.**
   
   With this option the *Outbound Advertisement* is enabled. The local
   information is advertised to all foreign members of the mesh, which update
@@ -262,7 +320,7 @@ There are several ways this DNS support can be used:
   
 If the foreign API server is used by the kubernetes plugin of coredns,
 its advertised service account (or the manually maintained credentials)
-are used to access the service objects of the foreign cluster and must have
+is used to access the service objects of the foreign cluster and must have
 the appropriate permissions.
  
 In all cases the option `--dns-propgation` must be set to enable the
@@ -295,7 +353,11 @@ like this (for the example cluster `kubelink1`):
 
 With the option `--coredns-deployment` (default `kubelink-coredns`) it is
 possible to override the name of the coredns deployment used to handle the mesh
-DNS domain.
+DNS domain. Whenever the configuration changes, the deployment is restarted.
+
+Basically this coredns deployment is intentionally not maintained by the broker,
+because this would require extensice permissions (to configure service account and
+RBAC policies).
 
 ## Command Line Reference
 
@@ -322,7 +384,6 @@ Flags:
       --broker.coredns-secret string                Name of dns secret used by kubelink of controller broker (default "kubelink-coredns")
       --broker.coredns-service-ip string            Service IP of coredns deployment used by kubelink of controller broker
       --broker.default.pool.size int                Worker pool size for pool default of controller broker (default 1)
-      --broker.disable-bridge                       Disable network bridge of controller broker
       --broker.dns-advertisement                    Enable automatic advertisement of DNS access info of controller broker
       --broker.dns-name string                      DNS Name for managed certificate of controller broker
       --broker.dns-propagation string               Mode for accessing foreign DNS information (none, dns or kubernetes) of controller broker (default "none")
@@ -332,10 +393,11 @@ Flags:
       --broker.keyfile string                       TLS certificate key file of controller broker
       --broker.link-address string                  CIDR of cluster in cluster network of controller broker
       --broker.mesh-domain string                   Base domain for cluster mesh services of controller broker (default "kubelink")
+      --broker.mode string                          VPN mode (bridge, wireguard, none)  of controller broker
       --broker.node-cidr string                     CIDR of node network of cluster of controller broker
       --broker.pool.resync-period duration          Period for resynchronization of controller broker
       --broker.pool.size int                        Worker pool size of controller broker
-      --broker.secret string                        TLS secret of controller broker
+      --broker.secret string                        TLS/wireguard secret of controller broker
       --broker.secret-manage-mode string            Manage mode for TLS secret of controller broker (default "none")
       --broker.secrets.pool.size int                Worker pool size for pool secrets of controller broker (default 1)
       --broker.served-links string                  Comma separated list of links to serve of controller broker (default "all")
@@ -357,7 +419,6 @@ Flags:
       --coredns-service-ip string                   Service IP of coredns deployment used by kubelink
       --cpuprofile string                           set file for cpu profiling
       --default.pool.size int                       Worker pool size for pool default
-      --disable-bridge                              Disable network bridge
       --disable-namespace-restriction               disable access restriction for namespace local access only
       --dns-advertisement                           Enable automatic advertisement of DNS access info
       --dns-name string                             DNS Name for managed certificate
@@ -376,6 +437,7 @@ Flags:
   -D, --log-level string                            logrus log level
       --maintainer string                           maintainer key for crds (defaulted by manager name)
       --mesh-domain string                          Base domain for cluster mesh services
+      --mode string                                 VPN mode (bridge, wireguard, none)
       --name string                                 name used for controller manager
       --namespace string                            namespace for lease (default "kube-system")
   -n, --namespace-local-access-only                 enable access restriction for namespace local access only (deprecated)
@@ -393,7 +455,7 @@ Flags:
       --router.pool.size int                        Worker pool size of controller router
       --router.update.pool.resync-period duration   Period for resynchronization for pool update of controller router (default 20s)
       --router.update.pool.size int                 Worker pool size for pool update of controller router (default 1)
-      --secret string                               TLS secret
+      --secret string                               TLS/wireguard secret
       --secret-manage-mode string                   Manage mode for TLS secret
       --secrets.pool.size int                       Worker pool size for pool secrets
       --served-links string                         Comma separated list of links to serve

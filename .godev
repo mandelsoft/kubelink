@@ -1,1 +1,4 @@
 # name: klink
+
+echo "adding commands"
+export PATH="$PATH:$PWD/local"

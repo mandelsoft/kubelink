@@ -1,32 +1,21 @@
 /*
- * Copyright 2019 SAP SE or an SAP affiliate company. All rights reserved. This file is licensed under the Apache Software License, v. 2 except as noted otherwise in the LICENSE file
+ * SPDX-FileCopyrightText: 2019 SAP SE or an SAP affiliate company and Gardener contributors
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package resources
 
 import (
+	"fmt"
 	"reflect"
-
-	"k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/gardener/controller-manager-library/pkg/logger"
 
+	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 )
@@ -65,7 +54,7 @@ func newResource(ctx ResourceContext, otype, ltype reflect.Type, gvk schema.Grou
 		info:   info,
 		client: client,
 	}
-	r.AbstractResource, _ = NewAbstractResource(ctx, &_i_resource{_resource: r}, otype, ltype, gvk)
+	r.AbstractResource, _ = NewAbstractResource(ctx, new_i_resource(r), otype, ltype, gvk)
 	return r, nil
 }
 
@@ -82,8 +71,6 @@ func (this *_resource) Resources() Resources {
 }
 
 var unstructuredType = reflect.TypeOf(unstructured.Unstructured{})
-
-var unstructuredListType = reflect.TypeOf(unstructured.UnstructuredList{})
 
 func (this *_resource) IsUnstructured() bool {
 	return this.ObjectType() == unstructuredType
@@ -105,9 +92,25 @@ func (this *_resource) AddRawEventHandler(handlers cache.ResourceEventHandlerFun
 	return this.AddRawSelectedEventHandler(handlers, "", nil)
 }
 
+func (this *_resource) AddRawInfoEventHandler(handlers cache.ResourceEventHandlerFuncs) error {
+	return this.AddRawSelectedInfoEventHandler(handlers, "", nil)
+}
+
 func (this *_resource) AddRawSelectedEventHandler(handlers cache.ResourceEventHandlerFuncs, namespace string, optionsFunc TweakListOptionsFunc) error {
-	logger.Infof("adding watch for %s", this.GroupVersionKind())
-	informer, err := this.helper.Internal.I_getInformer(namespace, optionsFunc)
+	return this.addRawSelectedEventHandler(false, handlers, namespace, optionsFunc)
+}
+
+func (this *_resource) AddRawSelectedInfoEventHandler(handlers cache.ResourceEventHandlerFuncs, namespace string, optionsFunc TweakListOptionsFunc) error {
+	return this.addRawSelectedEventHandler(true, handlers, namespace, optionsFunc)
+}
+
+func (this *_resource) addRawSelectedEventHandler(minimal bool, handlers cache.ResourceEventHandlerFuncs, namespace string, optionsFunc TweakListOptionsFunc) error {
+	withNamespace := "global"
+	if namespace != "" {
+		withNamespace = fmt.Sprintf("namespace %s", namespace)
+	}
+	logger.Infof("adding watch for %s (cluster %s, %s)", this.GroupVersionKind(), this.GetCluster().GetId(), withNamespace)
+	informer, err := this.helper.Internal.I_getInformer(minimal, namespace, optionsFunc)
 	if err != nil {
 		return err
 	}
@@ -121,6 +124,14 @@ func (this *_resource) AddEventHandler(handlers ResourceEventHandlerFuncs) error
 
 func (this *_resource) AddSelectedEventHandler(handlers ResourceEventHandlerFuncs, namespace string, optionsFunc TweakListOptionsFunc) error {
 	return this.AddRawSelectedEventHandler(*convert(this, &handlers), namespace, optionsFunc)
+}
+
+func (this *_resource) AddInfoEventHandler(handlers ResourceInfoEventHandlerFuncs) error {
+	return this.AddRawInfoEventHandler(*convertInfo(this, &handlers))
+}
+
+func (this *_resource) AddSelectedInfoEventHandler(handlers ResourceInfoEventHandlerFuncs, namespace string, optionsFunc TweakListOptionsFunc) error {
+	return this.AddRawSelectedInfoEventHandler(*convertInfo(this, &handlers), namespace, optionsFunc)
 }
 
 func (this *_resource) NormalEventf(name ObjectDataName, reason, msgfmt string, args ...interface{}) {

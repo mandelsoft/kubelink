@@ -1,17 +1,7 @@
 /*
-Copyright 2014 The Kubernetes Authors.
+SPDX-FileCopyrightText:  2014 The Kubernetes Authors.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+SPDX-License-Identifier: Apache-2.0
 */
 
 package resources
@@ -61,6 +51,8 @@ func NewDefaultingCodecForScheme(
 	return NewCodec(encoder, decoder, runtime.UnsafeObjectConvertor(scheme), scheme, scheme, scheme, encodeVersion, decodeVersion, scheme.Name())
 }
 
+const codecIdentifier runtime.Identifier = "controller-manager-library-resources-versioning-codec"
+
 // NewCodec takes objects in their internal versions and converts them to external versions before
 // serializing them. It assumes the serializer provided to it only deals with external versions.
 // This class is also a serializer, but is generally used with a specific version.
@@ -91,6 +83,8 @@ func NewCodec(
 	return internal
 }
 
+var _ runtime.Codec = &codec{}
+
 type codec struct {
 	encoder   runtime.Encoder
 	decoder   runtime.Decoder
@@ -106,6 +100,10 @@ type codec struct {
 	originalSchemeName string
 }
 
+func (c *codec) Identifier() runtime.Identifier {
+	return codecIdentifier
+}
+
 // Decode attempts a decode of the object, then tries to convert it to the internal version. If into is provided and the decoding is
 // successful, the returned runtime.Object will be the value passed as into. Note that this may bypass conversion if you pass an
 // into that matches the serialized version.
@@ -114,10 +112,6 @@ func (c *codec) Decode(data []byte, defaultGVK *schema.GroupVersionKind, into ru
 	var versioned versionedObjects
 	switch v := into.(type) {
 	case *VersionedObjects:
-		into = v.Last()
-		objects = &v.Objects
-		versioned = v
-	case *runtime.VersionedObjects:
 		into = v.Last()
 		objects = &v.Objects
 		versioned = v

@@ -1,17 +1,7 @@
 /*
- * Copyright 2019 SAP SE or an SAP affiliate company. All rights reserved. This file is licensed under the Apache Software License, v. 2 except as noted otherwise in the LICENSE file
+ * SPDX-FileCopyrightText: 2019 SAP SE or an SAP affiliate company and Gardener contributors
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package utils
@@ -67,6 +57,9 @@ func (this StringSet) IsEmpty() bool {
 }
 
 func (this StringSet) Contains(n string) bool {
+	if this == nil {
+		return false
+	}
 	_, ok := this[n]
 	return ok
 }
@@ -107,9 +100,37 @@ func (this StringSet) RemoveSet(sets ...StringSet) StringSet {
 	return this
 }
 
-func (this StringSet) AddAllSplitted(n string) StringSet {
-	for _, p := range strings.Split(n, ",") {
-		this.Add(strings.ToLower(strings.TrimSpace(p)))
+func (this StringSet) AddAllSplitted(n string, seps ...string) StringSet {
+	return this.AddAllSplittedSelected(n, StandardStringElement, seps...)
+}
+
+func StandardStringElement(s string) (string, bool) {
+	return strings.ToLower(strings.TrimSpace(s)), true
+}
+
+func StandardNonEmptyStringElement(s string) (string, bool) {
+	s, _ = StandardStringElement(s)
+	return s, s != ""
+}
+
+func NonEmptyStringElement(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	return s, s != ""
+}
+
+func StringElement(s string) (string, bool) {
+	return strings.TrimSpace(s), true
+}
+
+func (this StringSet) AddAllSplittedSelected(n string, sel func(s string) (string, bool), seps ...string) StringSet {
+	sep := ","
+	if len(seps) > 0 {
+		sep = seps[0]
+	}
+	for _, p := range strings.Split(n, sep) {
+		if v, ok := sel(p); ok {
+			this.Add(v)
+		}
 	}
 	return this
 }

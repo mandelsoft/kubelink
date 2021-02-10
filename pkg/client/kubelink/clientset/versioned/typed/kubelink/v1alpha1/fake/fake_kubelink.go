@@ -19,6 +19,8 @@ limitations under the License.
 package fake
 
 import (
+	"context"
+
 	v1alpha1 "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
@@ -39,7 +41,7 @@ var kubelinksResource = schema.GroupVersionResource{Group: "kubelink.mandelsoft.
 var kubelinksKind = schema.GroupVersionKind{Group: "kubelink.mandelsoft.org", Version: "v1alpha1", Kind: "KubeLink"}
 
 // Get takes name of the kubeLink, and returns the corresponding kubeLink object, and an error if there is any.
-func (c *FakeKubeLinks) Get(name string, options v1.GetOptions) (result *v1alpha1.KubeLink, err error) {
+func (c *FakeKubeLinks) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1alpha1.KubeLink, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewGetAction(kubelinksResource, c.ns, name), &v1alpha1.KubeLink{})
 
@@ -50,7 +52,7 @@ func (c *FakeKubeLinks) Get(name string, options v1.GetOptions) (result *v1alpha
 }
 
 // List takes label and field selectors, and returns the list of KubeLinks that match those selectors.
-func (c *FakeKubeLinks) List(opts v1.ListOptions) (result *v1alpha1.KubeLinkList, err error) {
+func (c *FakeKubeLinks) List(ctx context.Context, opts v1.ListOptions) (result *v1alpha1.KubeLinkList, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewListAction(kubelinksResource, kubelinksKind, c.ns, opts), &v1alpha1.KubeLinkList{})
 
@@ -72,14 +74,14 @@ func (c *FakeKubeLinks) List(opts v1.ListOptions) (result *v1alpha1.KubeLinkList
 }
 
 // Watch returns a watch.Interface that watches the requested kubeLinks.
-func (c *FakeKubeLinks) Watch(opts v1.ListOptions) (watch.Interface, error) {
+func (c *FakeKubeLinks) Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
 	return c.Fake.
 		InvokesWatch(testing.NewWatchAction(kubelinksResource, c.ns, opts))
 
 }
 
 // Create takes the representation of a kubeLink and creates it.  Returns the server's representation of the kubeLink, and an error, if there is any.
-func (c *FakeKubeLinks) Create(kubeLink *v1alpha1.KubeLink) (result *v1alpha1.KubeLink, err error) {
+func (c *FakeKubeLinks) Create(ctx context.Context, kubeLink *v1alpha1.KubeLink, opts v1.CreateOptions) (result *v1alpha1.KubeLink, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewCreateAction(kubelinksResource, c.ns, kubeLink), &v1alpha1.KubeLink{})
 
@@ -90,7 +92,7 @@ func (c *FakeKubeLinks) Create(kubeLink *v1alpha1.KubeLink) (result *v1alpha1.Ku
 }
 
 // Update takes the representation of a kubeLink and updates it. Returns the server's representation of the kubeLink, and an error, if there is any.
-func (c *FakeKubeLinks) Update(kubeLink *v1alpha1.KubeLink) (result *v1alpha1.KubeLink, err error) {
+func (c *FakeKubeLinks) Update(ctx context.Context, kubeLink *v1alpha1.KubeLink, opts v1.UpdateOptions) (result *v1alpha1.KubeLink, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewUpdateAction(kubelinksResource, c.ns, kubeLink), &v1alpha1.KubeLink{})
 
@@ -102,7 +104,7 @@ func (c *FakeKubeLinks) Update(kubeLink *v1alpha1.KubeLink) (result *v1alpha1.Ku
 
 // UpdateStatus was generated because the type contains a Status member.
 // Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *FakeKubeLinks) UpdateStatus(kubeLink *v1alpha1.KubeLink) (*v1alpha1.KubeLink, error) {
+func (c *FakeKubeLinks) UpdateStatus(ctx context.Context, kubeLink *v1alpha1.KubeLink, opts v1.UpdateOptions) (*v1alpha1.KubeLink, error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewUpdateSubresourceAction(kubelinksResource, "status", c.ns, kubeLink), &v1alpha1.KubeLink{})
 
@@ -113,7 +115,7 @@ func (c *FakeKubeLinks) UpdateStatus(kubeLink *v1alpha1.KubeLink) (*v1alpha1.Kub
 }
 
 // Delete takes name of the kubeLink and deletes it. Returns an error if one occurs.
-func (c *FakeKubeLinks) Delete(name string, options *v1.DeleteOptions) error {
+func (c *FakeKubeLinks) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
 	_, err := c.Fake.
 		Invokes(testing.NewDeleteAction(kubelinksResource, c.ns, name), &v1alpha1.KubeLink{})
 
@@ -121,15 +123,15 @@ func (c *FakeKubeLinks) Delete(name string, options *v1.DeleteOptions) error {
 }
 
 // DeleteCollection deletes a collection of objects.
-func (c *FakeKubeLinks) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewDeleteCollectionAction(kubelinksResource, c.ns, listOptions)
+func (c *FakeKubeLinks) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error {
+	action := testing.NewDeleteCollectionAction(kubelinksResource, c.ns, listOpts)
 
 	_, err := c.Fake.Invokes(action, &v1alpha1.KubeLinkList{})
 	return err
 }
 
 // Patch applies the patch and returns the patched kubeLink.
-func (c *FakeKubeLinks) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1alpha1.KubeLink, err error) {
+func (c *FakeKubeLinks) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1alpha1.KubeLink, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewPatchSubresourceAction(kubelinksResource, c.ns, name, pt, data, subresources...), &v1alpha1.KubeLink{})
 

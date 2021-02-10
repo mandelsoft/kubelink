@@ -1,17 +1,7 @@
 /*
- * Copyright 2020 SAP SE or an SAP affiliate company. All rights reserved. This file is licensed under the Apache Software License, v. 2 except as noted otherwise in the LICENSE file
+ * SPDX-FileCopyrightText: 2020 SAP SE or an SAP affiliate company and Gardener contributors
  *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *       http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
  *
  *
  */
@@ -22,6 +12,7 @@ import (
 	"reflect"
 
 	"github.com/gardener/controller-manager-library/pkg/fieldpath"
+	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources/conditions"
 	"github.com/gardener/controller-manager-library/pkg/utils"
 )
@@ -30,14 +21,26 @@ type ModificationState struct {
 	utils.ModificationState
 	object  Object
 	handler conditions.ModificationHandler
+	logger.LogContext
 }
 
-func NewModificationState(object Object, mod ...bool) *ModificationState {
+func NewModificationState(object Object, settings ...interface{}) *ModificationState {
+	var log logger.LogContext
 	aggr := false
-	for _, m := range mod {
-		aggr = aggr || m
+	for _, s := range settings {
+		switch v := s.(type) {
+		case bool:
+			aggr = aggr || v
+		case logger.LogContext:
+			log = v
+		default:
+			return nil
+		}
 	}
-	s := &ModificationState{utils.ModificationState{aggr}, object, nil}
+	if log == nil {
+		log = logger.New()
+	}
+	s := &ModificationState{utils.ModificationState{aggr}, object, nil, log}
 	s.handler = &modhandler{s}
 	return s
 }
@@ -87,11 +90,11 @@ func (this *ModificationState) AssureLabel(name, value string) *ModificationStat
 	return this
 }
 
-func (this *ModificationState) Get(field fieldpath.Field) (interface{}, error) {
+func (this *ModificationState) Get(field fieldpath.Path) (interface{}, error) {
 	return field.Get(this.object.Data())
 }
 
-func (this *ModificationState) Set(field fieldpath.Field, value interface{}) error {
+func (this *ModificationState) Set(field fieldpath.Path, value interface{}) error {
 	old, err := field.Get(this.object.Data())
 	if err != nil {
 		return err

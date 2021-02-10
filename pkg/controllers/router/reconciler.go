@@ -21,6 +21,7 @@ package router
 import (
 	"net"
 
+	"github.com/gardener/controller-manager-library/pkg/config"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
 	"github.com/vishvananda/netlink"
 
@@ -41,7 +42,7 @@ var _ controllers.ReconcilerImplementation = &reconciler{}
 
 ///////////////////////////////////////////////////////////////////////////////
 
-func (this *reconciler) Config(cfg interface{}) *controllers.Config {
+func (this *reconciler) BaseConfig(cfg config.OptionSource) *controllers.Config {
 	return &cfg.(*Config).Config
 }
 

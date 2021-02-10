@@ -1,17 +1,7 @@
 /*
- * Copyright 2019 SAP SE or an SAP affiliate company. All rights reserved. This file is licensed under the Apache Software License, v. 2 except as noted otherwise in the LICENSE file
+ * SPDX-FileCopyrightText: 2019 SAP SE or an SAP affiliate company and Gardener contributors
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- *
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 package reconcile
@@ -143,6 +133,16 @@ func Update(logger logger.LogContext, upd resources.ObjectUpdater, d ...time.Dur
 		return Succeeded(logger)
 	}
 	return RescheduleAfter(logger, d[0])
+}
+
+func UpdateStandardObjectStatus(logger logger.LogContext, obj resources.Object, state, msg string) Status {
+	_, err := resources.UpdateStandardObjectStatus(logger, obj, state, msg)
+	return DelayOnError(logger, err)
+}
+
+func UpdateStandardObjectStatusf(logger logger.LogContext, obj resources.Object, state, msg string, args ...interface{}) Status {
+	_, err := resources.UpdateStandardObjectStatusf(logger, obj, state, msg, args...)
+	return DelayOnError(logger, err)
 }
 
 ////////////////////////////////////////////////////////////////////////////////

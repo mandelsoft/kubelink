@@ -107,6 +107,16 @@ func CIDRIP(cidr *net.IPNet, ip net.IP) *net.IPNet {
 	return &net
 }
 
+func IPtoCIDR(ip net.IP) *net.IPNet {
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	return &net.IPNet{
+		IP:   ip,
+		Mask: net.CIDRMask(len(ip)*8, len(ip)*8),
+	}
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 type CIDRList []*net.IPNet
@@ -138,6 +148,43 @@ func (this *CIDRList) IsSet() bool {
 func (this *CIDRList) Contains(ip net.IP) bool {
 	for _, c := range *this {
 		if c.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+type IPList []net.IP
+
+func (this IPList) String() string {
+	sep := "["
+	end := ""
+	s := ""
+	for _, c := range this {
+		s = fmt.Sprintf("%s%s%s", s, sep, c)
+		sep = ","
+		end = "]"
+	}
+	return s + end
+}
+
+func (this *IPList) Add(ips ...net.IP) {
+	*this = append(*this, ips...)
+}
+
+func (this IPList) IsEmpty() bool {
+	return len(this) == 0
+}
+
+func (this IPList) IsSet() bool {
+	return this != nil
+}
+
+func (this IPList) Contains(ip net.IP) bool {
+	for _, c := range this {
+		if c.Equal(ip) {
 			return true
 		}
 	}
