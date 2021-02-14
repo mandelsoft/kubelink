@@ -19,6 +19,8 @@
 package kubelink
 
 import (
+	"crypto/sha1"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"strconv"
@@ -101,6 +103,32 @@ func (this *Link) AllowIngress(ip net.IP) (granted bool, set bool) {
 	return this.Ingress.Contains(ip), true
 }
 
+func (this *Link) GetIngressChain() *iptables.Chain {
+	if !this.Ingress.IsSet() {
+		return nil
+	}
+	rules := iptables.Rules{
+		iptables.Rule{
+			iptables.Opt("-m", "comment", "--comment", "firewall settings for link "+this.Name),
+		},
+	}
+	for _, i := range this.Ingress {
+		rules = append(rules, iptables.Rule{
+			iptables.Opt("-d", i.String()),
+			iptables.Opt("-j", "RETURN"),
+		})
+	}
+	rules = append(rules, iptables.Rule{
+		iptables.Opt("-j", MARK_DROP_CHAIN),
+	})
+	return &iptables.Chain{
+		Chain: FW_LINK_CHAIN_PREFIX + encodeName(this.Name),
+		Table: TABLE_LINK_CHAIN,
+		Rules: rules,
+	}
+}
+
+//-A KUBE-SERVICES -d 35.233.60.54/32 -p tcp -m comment --comment "kube-system/addons-nginx-ingress-controller:https loadbalancer IP" -m tcp --dport 443 -j KUBE-FW-ALFYCOAPSFNBERA2
 func (this *Link) IsWireguard() bool {
 	return this.PublicKey != nil && this.Endpoint != "none"
 }
@@ -318,6 +346,12 @@ func (this *Links) UpdateLinkInfo(logger logger.LogContext, name string, access 
 	return old, false
 }
 
+func (this *Links) ReplaceLink(link *Link) *Link {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	return this.replaceLink(link)
+}
+
 func (this *Links) replaceLink(link *Link) *Link {
 	this.links[link.Name] = link
 	this.endpoints[link.Host] = link
@@ -438,25 +472,70 @@ func (this *Links) GetLinkForEndpoint(dnsname string) *Link {
 	return this.endpoints[dnsname]
 }
 
-func (this *Links) GetSNATRules(ifce *NodeInterface) iptables.Requests {
+func (this *Links) GetFirewallChains() []iptables.Chain {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 
-	rules := iptables.Rules{}
+	var rules iptables.Rules
+	var linkchains []iptables.Chain
 	for _, l := range this.links {
-		if !l.Gateway.Equal(ifce.IP) {
-			for _, c := range l.Egress {
-				r := iptables.Rule{
-					iptables.Opt("-d", c.String()),
-					iptables.Opt("-o", ifce.Name),
-					iptables.Opt("-j", "SNAT"),
-					iptables.Opt("--to-source", ifce.IP.String()),
-				}
-				rules.Add(r)
-			}
+		ing := l.GetIngressChain()
+		if ing != nil {
+			linkchains = append(linkchains, *ing)
+			rules = append(rules, iptables.Rule{
+				iptables.Opt("-s", l.ClusterAddress.String()),
+				iptables.Opt("-j", ing.Chain),
+			})
 		}
 	}
-	return iptables.Requests{iptables.NewChainRequest("nat", "kubelink", rules, true)}
+	var chains []iptables.Chain
+	if len(rules) > 0 {
+		chains = append(chains, iptables.Chain{
+			Table: TABLE_DROP_CHAIN,
+			Chain: DROP_CHAIN,
+			Rules: iptables.Rules{
+				iptables.Rule{
+					iptables.Opt("-j", "MARK"),
+					iptables.Opt("--set-xmark", "0x0/0x2000"),
+				},
+				iptables.Rule{
+					iptables.Opt("-j", "DROP"),
+				},
+			},
+		})
+		chains = append(chains, iptables.Chain{
+			Table: TABLE_MARK_DROP_CHAIN,
+			Chain: MARK_DROP_CHAIN,
+			Rules: iptables.Rules{
+				iptables.Rule{
+					iptables.Opt("-j", "MARK", "--set-xmark", "0x2000/0x2000"),
+				},
+			},
+		})
+		chains = append(chains, linkchains...)
+		chains = append(chains, iptables.Chain{
+			Table: TABLE_LINKS_CHAIN,
+			Chain: LINKS_CHAIN,
+			Rules: rules,
+		})
+		chains = append(chains, iptables.Chain{
+			Table: TABLE_FIREWALL_CHAIN,
+			Chain: FIREWALL_CHAIN,
+			Rules: iptables.Rules{
+				iptables.Rule{
+					iptables.Opt("-m", "mark", "--mark", "0x2000/0x2000"),
+					iptables.Opt("-j", DROP_CHAIN),
+				},
+			},
+		})
+
+	}
+	return chains
+}
+
+func encodeName(name string) string {
+	sum := sha1.Sum([]byte(name))
+	return strings.ToUpper(base64.StdEncoding.EncodeToString(sum[:12]))
 }
 
 func (this *Links) GetRoutes(ifce *NodeInterface) Routes {

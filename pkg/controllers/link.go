@@ -21,11 +21,13 @@ package controllers
 import (
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/vishvananda/netlink"
 
 	"github.com/mandelsoft/kubelink/pkg/iptables"
+	"github.com/mandelsoft/kubelink/pkg/kubelink"
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
@@ -46,6 +48,91 @@ func NewLinkTool() (*LinkTool, error) {
 	}, nil
 }
 
+func (this *LinkTool) AssureRule(t string, c string, r iptables.Rule) error {
+	ok, err := this.ipt.Exists(t, c, r.AsList()...)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return this.ipt.AppendRule(t, c, r)
+	}
+	return nil
+}
+
+func (this *LinkTool) ExistsRule(t string, c string, r iptables.Rule) (bool, error) {
+	return this.ipt.Exists(t, c, r.AsList()...)
+}
+
+func (this *LinkTool) AppendRule(t string, c string, r iptables.Rule) error {
+	return this.ipt.AppendRule(t, c, r)
+}
+
+func (this *LinkTool) DeleteRule(t string, c string, r iptables.Rule) error {
+	return this.ipt.DeleteRule(t, c, r)
+}
+
+func (this *LinkTool) ListChains(t string) ([]string, error) {
+	return this.ipt.ListChains(t)
+}
+
+func (this *LinkTool) DeleteChain(t string, c string) error {
+	return this.ipt.DeleteChain(t, c)
+}
+
+func (this *LinkTool) AssureChains(logger logger.LogContext, chains []iptables.Chain, cleanup ...string) error {
+	for _, c := range chains {
+		fmt.Printf("update chain %s{%s]\n", c.Chain, c.Table)
+		err := this.ChainRequest(logger, &iptables.ChainRequest{&c, true})
+		if err != nil {
+			return err
+		}
+	}
+	if len(cleanup) > 0 {
+		cleanupPrefix := cleanup[0]
+		if len(cleanup) == 1 {
+			cleanup = []string{"nat", "filter"}
+		} else {
+			cleanup = cleanup[1:]
+		}
+
+		if cleanupPrefix != "" {
+			for _, t := range cleanup {
+				list, err := this.ListChains(t)
+				if err != nil {
+					return err
+				}
+				err = this.handle(logger, cleanupPrefix, t, chains, list, this.ipt.ClearChain)
+				if err != nil {
+					return err
+				}
+
+				err = this.handle(logger, cleanupPrefix, t, chains, list, this.ipt.DeleteChain)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (this *LinkTool) handle(logger logger.LogContext, cleanupPrefix string, table string, chains []iptables.Chain, found []string, f func(string, string) error) error {
+next:
+	for _, l := range found {
+		for _, c := range chains {
+			if c.Chain == l && c.Table == table {
+				continue next
+			}
+		}
+		if strings.HasPrefix(l, cleanupPrefix) {
+			err := f(table, l)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
 func (this *LinkTool) ChainRequest(logger logger.LogContext, req *iptables.ChainRequest) error {
 	return this.ipt.Execute(logger, req)
 }
@@ -116,6 +203,37 @@ func (this *LinkTool) SetLinkAddress(link netlink.Link, addr *net.IPNet) error {
 	err := netlink.LinkSetUp(link)
 	if err != nil {
 		return fmt.Errorf("cannot bring up %q: %s", link.Attrs().Name, err)
+	}
+	return nil
+}
+
+func (this *LinkTool) HandleFirewall(logger logger.LogContext, chains []iptables.Chain) error {
+	for _, c := range chains {
+		logger.Infof("%s [%s]:", c.Chain, c.Table)
+		for _, r := range c.Rules {
+			logger.Infof("  %s", r)
+		}
+	}
+	embedding := kubelink.FirewallEmbedding()
+	if len(chains) == 0 {
+		logger.Infof("remove embedding")
+		for _, e := range embedding {
+			this.DeleteRule(e.Table, e.Chain, e.Rule)
+		}
+	}
+	logger.Infof("handle chains")
+	err := this.AssureChains(logger, chains, kubelink.CHAIN_PREFIX, "nat", "filter")
+	if err != nil {
+		return err
+	}
+	if len(chains) > 0 {
+		logger.Infof("add embedding")
+		for _, e := range embedding {
+			err = this.AssureRule(e.Table, e.Chain, e.Rule)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

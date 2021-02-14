@@ -19,7 +19,8 @@
 package iptables
 
 import (
-	"strings"
+	"fmt"
+	"regexp"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/gardener/controller-manager-library/pkg/logger"
@@ -37,6 +38,34 @@ func New() (*IPTables, error) {
 	return &IPTables{ipt}, nil
 }
 
+var fields = regexp.MustCompile(`[^\s"]+|"([^"]*)"`)
+
+func Fields(line string) []string {
+	fields := fields.FindAllString(line, -1)
+
+	for i, f := range fields {
+		if len(f) >= 2 {
+			if f[0] == '"' && f[len(f)-1] == '"' {
+				fields[i] = f[1 : len(f)-1]
+			}
+		}
+	}
+	return fields
+}
+
+// CleanupChain deletes all rules in the specified table/chain
+// and finally deletes the chain
+func (this *IPTables) CleanupChain(table, chain string) error {
+	list, err := this.ListChains(table)
+	if err == nil && StringList(list).Index(chain) >= 0 {
+		err = this.IPTables.ClearChain(table, chain)
+		if err == nil {
+			this.IPTables.DeleteChain(table, chain)
+		}
+	}
+	return err
+}
+
 func (this *IPTables) ListChain(table, chain string) (*Chain, error) {
 	list, err := this.IPTables.List(table, chain)
 	if err != nil {
@@ -44,10 +73,14 @@ func (this *IPTables) ListChain(table, chain string) (*Chain, error) {
 	}
 	var rules Rules
 	for _, l := range list {
-		rule := ParseRule(strings.Fields(l))
+		rule := ParseRule(Fields(l)...)
+		//fmt.Printf("line:   %s\n", l)
+		//fmt.Printf("fields: %s\n", Fields(l))
+		//fmt.Printf("rule:   %s\n", rule)
 		if !rule.HasOption("-N") {
 			rule.RemoveOption("-A")
 			rules.Add(rule)
+			fmt.Printf("found %s\n", rule)
 		}
 	}
 	return &Chain{

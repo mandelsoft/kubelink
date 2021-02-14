@@ -91,7 +91,10 @@ func (this *Chain) update(logger logger.LogContext, ipt *IPTables, cleanup bool)
 	for _, e := range this.Rules {
 		if cur.Index(e) < 0 {
 			n.Add(true, "chain %s/%s: appending rule %v", this.Table, this.Chain, e)
-			ipt.AppendRule(this.Table, this.Chain, e)
+			err := ipt.AppendRule(this.Table, this.Chain, e)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	logger.Infof("chain %s/%s: %d managed (%d deleted) and %d created rules", this.Table, this.Chain, len(this.Rules), dcnt, ccnt)

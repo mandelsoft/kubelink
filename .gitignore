@@ -3,4 +3,5 @@
 /kubelink
 /problem
 /bridge
+/cmd/ipt/ipt
 /main

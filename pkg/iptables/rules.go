@@ -96,20 +96,6 @@ func (this Rules) Index(r Rule) int {
 	return -1
 }
 
-func ParseRule(list []string) Rule {
-	lock.RLock()
-	defer lock.RUnlock()
-
-	r := Rule{}
-	for _, t := range types {
-		o, l := t.Extract(list)
-		if o != nil {
-			r.Add(o)
-		}
-		list = l
-	}
-	if len(list) > 0 {
-		r.Add(Option(list))
-	}
-	return r
+func ParseRule(list ...string) Rule {
+	return Rule(registry.ParseOptions(list...))
 }
