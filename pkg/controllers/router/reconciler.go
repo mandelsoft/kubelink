@@ -75,9 +75,12 @@ func (this *reconciler) RequiredRoutes() kubelink.Routes {
 	return this.Links().GetRoutes(this.NodeInterface())
 }
 
-func (this *reconciler) RequiredSNATRules() iptables.Requests {
-	return nil
-	// return this.Links().GetSNATRules(this.NodeInterface())
+func (this *reconciler) RequiredIPTablesChains() iptables.Requests {
+
+	if this.Links().HasWireguard() && !this.Links().IsGateway(this.NodeInterface()) {
+		return iptables.Requests{} // no firewall settings on non-gateway nodes
+	}
+	return nil // no iptables update
 }
 
 func (this *reconciler) Setup() {

@@ -20,7 +20,6 @@ package main
 
 import (
 	"fmt"
-	"net"
 	"os"
 
 	"github.com/gardener/controller-manager-library/pkg/logger"
@@ -28,6 +27,7 @@ import (
 	"github.com/mandelsoft/kubelink/pkg/controllers"
 	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
+	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
 func test() {
@@ -53,19 +53,19 @@ func main() {
 
 	links := kubelink.NewLinks(nil, 8777)
 
-	_, ing1, _ := net.ParseCIDR("192.168.5.0/28")
+	ingress, err := kubelink.ParseIPRange([]string{"192.168.5.0/28", "!192.168.5.5/32"})
+	CheckErr(err)
 
-	_, addr, _ := net.ParseCIDR("192.168.0.13/24")
+	cidr, _ := tcp.ParseIPNet("192.168.0.13/24")
+
 	link := &kubelink.Link{
-		Name: name,
-		Ingress: []*net.IPNet{
-			ing1,
-		},
-		ClusterAddress: addr,
+		Name:           name,
+		Ingress:        ingress,
+		ClusterAddress: cidr,
 	}
 	links.ReplaceLink(link)
 
-	chains := []iptables.Chain{}
+	chains := iptables.Requests{}
 	if name != "clear" {
 		chains = links.GetFirewallChains()
 	}

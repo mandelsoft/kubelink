@@ -117,6 +117,46 @@ func IPtoCIDR(ip net.IP) *net.IPNet {
 	}
 }
 
+// ParseIPNet parses a cidr and return
+// the specified ip/netmask as single IPNet
+func ParseIPNet(s string) (*net.IPNet, error) {
+	ip, cidr, err := net.ParseCIDR(s)
+	if err != nil {
+		return nil, err
+	}
+	return CIDRIP(cidr, ip), nil
+}
+
+
+// ParseIPCIDR parses an ip or cidr and returns
+// the specified ip/netmask as single IPNet
+func ParseIPCIDR(s string) (*net.IPNet, error) {
+	ip, cidr, err := net.ParseCIDR(s)
+	if err == nil {
+		return CIDRIP(cidr, ip), nil
+	}
+	ip = net.ParseIP(s)
+	if ip == nil {
+		return nil, err
+	}
+	return IPtoCIDR(ip), nil
+}
+
+
+// ParseNet parses an ip or cidr and returns
+// the result as cidr describing the netmask/network, only
+func ParseNet(s string) (*net.IPNet, error) {
+	ip, cidr, err := net.ParseCIDR(s)
+	if err == nil {
+		return cidr, nil
+	}
+	ip = net.ParseIP(s)
+	if ip == nil {
+		return nil, err
+	}
+	return IPtoCIDR(ip), nil
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 type CIDRList []*net.IPNet

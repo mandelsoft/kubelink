@@ -50,7 +50,7 @@ type Link struct {
 	Name           string
 	ServiceCIDR    *net.IPNet
 	Egress         tcp.CIDRList
-	Ingress        tcp.CIDRList
+	Ingress        *IPRange
 	ClusterAddress *net.IPNet
 	Gateway        net.IP
 	Host           string
@@ -58,6 +58,51 @@ type Link struct {
 	Endpoint       string
 	PublicKey      *wgtypes.Key
 	LinkForeignData
+}
+
+type IPRange struct {
+	Allowed tcp.CIDRList
+	Denied  tcp.CIDRList
+}
+
+func ParseIPRange(list []string) (*IPRange, error) {
+	var r *IPRange
+	if len(list) > 0 {
+		r = &IPRange{}
+		for _, c := range list {
+			field := &r.Allowed
+			if len(c) > 0 {
+				if c[0] == '!' {
+					field = &r.Denied
+					c = c[1:]
+				}
+			}
+			cidr, err := tcp.ParseNet(c)
+			if err != nil {
+				return nil, fmt.Errorf("invalid cidr %q: %s", c, err)
+			}
+			field.Add(cidr)
+		}
+	}
+	return r, nil
+}
+
+func (this *IPRange) IsSet() bool {
+	return this != nil && (this.Allowed.IsSet() || this.Denied.IsSet())
+}
+
+func (this *IPRange) Contains(ip net.IP) bool {
+	if this == nil {
+		return true
+	}
+	if !this.Allowed.IsSet() || this.Allowed.Contains(ip) {
+		for _, c := range this.Denied {
+			if c.Contains(ip) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 type LinkAccessInfo struct {
@@ -103,7 +148,7 @@ func (this *Link) AllowIngress(ip net.IP) (granted bool, set bool) {
 	return this.Ingress.Contains(ip), true
 }
 
-func (this *Link) GetIngressChain() *iptables.Chain {
+func (this *Link) GetIngressChain() *iptables.ChainRequest {
 	if !this.Ingress.IsSet() {
 		return nil
 	}
@@ -112,7 +157,13 @@ func (this *Link) GetIngressChain() *iptables.Chain {
 			iptables.Opt("-m", "comment", "--comment", "firewall settings for link "+this.Name),
 		},
 	}
-	for _, i := range this.Ingress {
+	for _, i := range this.Ingress.Denied {
+		rules = append(rules, iptables.Rule{
+			iptables.Opt("-d", i.String()),
+			iptables.Opt("-j", MARK_DROP_CHAIN),
+		})
+	}
+	for _, i := range this.Ingress.Allowed {
 		rules = append(rules, iptables.Rule{
 			iptables.Opt("-d", i.String()),
 			iptables.Opt("-j", "RETURN"),
@@ -121,14 +172,12 @@ func (this *Link) GetIngressChain() *iptables.Chain {
 	rules = append(rules, iptables.Rule{
 		iptables.Opt("-j", MARK_DROP_CHAIN),
 	})
-	return &iptables.Chain{
-		Chain: FW_LINK_CHAIN_PREFIX + encodeName(this.Name),
-		Table: TABLE_LINK_CHAIN,
-		Rules: rules,
-	}
+	return iptables.NewChainRequest(
+		TABLE_LINK_CHAIN,
+		FW_LINK_CHAIN_PREFIX+encodeName(this.Name),
+		rules, true)
 }
 
-//-A KUBE-SERVICES -d 35.233.60.54/32 -p tcp -m comment --comment "kube-system/addons-nginx-ingress-controller:https loadbalancer IP" -m tcp --dport 443 -j KUBE-FW-ALFYCOAPSFNBERA2
 func (this *Link) IsWireguard() bool {
 	return this.PublicKey != nil && this.Endpoint != "none"
 }
@@ -138,7 +187,6 @@ func (this *Link) IsWireguard() bool {
 func (this *Links) LinkFor(link *v1alpha1.KubeLink) (*Link, error) {
 	var egress tcp.CIDRList
 	var serviceCIDR *net.IPNet
-
 	if !utils.Empty(link.Spec.CIDR) {
 		_, cidr, err := net.ParseCIDR(link.Spec.CIDR)
 		if err != nil {
@@ -148,20 +196,16 @@ func (this *Links) LinkFor(link *v1alpha1.KubeLink) (*Link, error) {
 		egress.Add(cidr)
 	}
 	for _, c := range link.Spec.Egress {
-		_, cidr, err := net.ParseCIDR(c)
+		cidr, err := tcp.ParseNet(c)
 		if err != nil {
 			return nil, fmt.Errorf("invalid routing cidr %q: %s", link.Spec.CIDR, err)
 		}
 		egress.Add(cidr)
 	}
-	var ingress tcp.CIDRList
 
-	for _, c := range link.Spec.Ingress {
-		_, cidr, err := net.ParseCIDR(c)
-		if err != nil {
-			return nil, fmt.Errorf("invalid routing cidr %q: %s", link.Spec.CIDR, err)
-		}
-		ingress.Add(cidr)
+	ingress, err := ParseIPRange(link.Spec.Ingress)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cluster ingress: %s", err)
 	}
 
 	ip, ccidr, err := net.ParseCIDR(link.Spec.ClusterAddress)
@@ -429,6 +473,17 @@ func (this *Links) Visit(visitor func(l *Link) bool) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+func (this *Links) IsGateway(ifce *NodeInterface) bool {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+	for _, l := range this.links {
+		if l.Gateway.Equal(ifce.IP) {
+			return true
+		}
+	}
+	return false
+}
+
 func (this *Links) GetMeshGatewaysFor(ip net.IP) (*net.IPNet, []net.IP) {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
@@ -472,28 +527,28 @@ func (this *Links) GetLinkForEndpoint(dnsname string) *Link {
 	return this.endpoints[dnsname]
 }
 
-func (this *Links) GetFirewallChains() []iptables.Chain {
+func (this *Links) GetFirewallChains() iptables.Requests {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 
 	var rules iptables.Rules
-	var linkchains []iptables.Chain
+	var linkchains iptables.Requests
 	for _, l := range this.links {
 		ing := l.GetIngressChain()
 		if ing != nil {
-			linkchains = append(linkchains, *ing)
+			linkchains = append(linkchains, ing)
 			rules = append(rules, iptables.Rule{
-				iptables.Opt("-s", l.ClusterAddress.String()),
-				iptables.Opt("-j", ing.Chain),
+				iptables.Opt("-s", tcp.IPtoCIDR(l.ClusterAddress.IP).String()),
+				iptables.Opt("-j", ing.Chain.Chain),
 			})
 		}
 	}
-	var chains []iptables.Chain
+	var chains iptables.Requests
 	if len(rules) > 0 {
-		chains = append(chains, iptables.Chain{
-			Table: TABLE_DROP_CHAIN,
-			Chain: DROP_CHAIN,
-			Rules: iptables.Rules{
+		chains = append(chains, iptables.NewChainRequest(
+			TABLE_DROP_CHAIN,
+			DROP_CHAIN,
+			iptables.Rules{
 				iptables.Rule{
 					iptables.Opt("-j", "MARK"),
 					iptables.Opt("--set-xmark", "0x0/0x2000"),
@@ -501,33 +556,34 @@ func (this *Links) GetFirewallChains() []iptables.Chain {
 				iptables.Rule{
 					iptables.Opt("-j", "DROP"),
 				},
-			},
-		})
-		chains = append(chains, iptables.Chain{
-			Table: TABLE_MARK_DROP_CHAIN,
-			Chain: MARK_DROP_CHAIN,
-			Rules: iptables.Rules{
+			}, true,
+		))
+		chains = append(chains, iptables.NewChainRequest(
+			TABLE_MARK_DROP_CHAIN,
+			MARK_DROP_CHAIN,
+			iptables.Rules{
 				iptables.Rule{
-					iptables.Opt("-j", "MARK", "--set-xmark", "0x2000/0x2000"),
+					iptables.Opt("-j", "MARK"),
+					iptables.Opt("--set-xmark", "0x2000/0x2000"),
 				},
-			},
-		})
+			}, true,
+		))
 		chains = append(chains, linkchains...)
-		chains = append(chains, iptables.Chain{
-			Table: TABLE_LINKS_CHAIN,
-			Chain: LINKS_CHAIN,
-			Rules: rules,
-		})
-		chains = append(chains, iptables.Chain{
-			Table: TABLE_FIREWALL_CHAIN,
-			Chain: FIREWALL_CHAIN,
-			Rules: iptables.Rules{
+		chains = append(chains, iptables.NewChainRequest(
+			TABLE_LINKS_CHAIN,
+			LINKS_CHAIN,
+			rules, true,
+		))
+		chains = append(chains, iptables.NewChainRequest(
+			TABLE_FIREWALL_CHAIN,
+			FIREWALL_CHAIN,
+			iptables.Rules{
 				iptables.Rule{
 					iptables.Opt("-m", "mark", "--mark", "0x2000/0x2000"),
 					iptables.Opt("-j", DROP_CHAIN),
 				},
-			},
-		})
+			}, true,
+		))
 
 	}
 	return chains

@@ -28,6 +28,7 @@ import (
 	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
 	"github.com/mandelsoft/kubelink/pkg/controllers/broker/config"
+	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 	"github.com/mandelsoft/kubelink/pkg/tasks"
 )
@@ -56,6 +57,7 @@ type RunMode interface {
 	HandleDNSPropagation(klink *api.KubeLink)
 	GetInterface() netlink.Link
 	GetErrorForMeshNode(ip net.IP) error
+	RequiredIPTablesChains() iptables.Requests
 	ReconcileInterface(logger logger.LogContext) error
 }
 
@@ -109,6 +111,10 @@ func (this *RunModeBase) GetInterface() netlink.Link {
 }
 
 func (this *RunModeBase) GetErrorForMeshNode(ip net.IP) error {
+	return nil
+}
+
+func (this *RunModeBase) RequiredIPTablesChains() iptables.Requests {
 	return nil
 }
 

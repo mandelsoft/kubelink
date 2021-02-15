@@ -46,7 +46,7 @@ type StatusUpdater func(obj *v1alpha1.KubeLink, err error) (bool, error)
 type ReconcilerImplementation interface {
 	IsManagedRoute(*netlink.Route, kubelink.Routes) bool
 	RequiredRoutes() kubelink.Routes
-	RequiredSNATRules() iptables.Requests
+	RequiredIPTablesChains() iptables.Requests
 	BaseConfig(config.OptionSource) *Config
 
 	Gateway(obj *v1alpha1.KubeLink) (net.IP, error)
@@ -157,7 +157,7 @@ func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resour
 	var uerr error
 	if err == nil {
 		ldata, invalid = this.links.UpdateLink(link)
-		if updater != nil {
+		if updater != nil && invalid==nil {
 			uerr, err = updater(logger, link, ldata)
 		}
 	}
@@ -251,21 +251,18 @@ func String(r netlink.Route) string {
 	return fmt.Sprintf("%s proto: %d", r, r.Protocol)
 }
 
-func (this *Reconciler) updateSNATRules(logger logger.LogContext) error {
-	reqs := this.impl.RequiredSNATRules()
+func (this *Reconciler) updateFirewall(logger logger.LogContext) error {
+	reqs := this.impl.RequiredIPTablesChains()
 
-	for _, r := range reqs {
-		err := this.tool.ChainRequest(logger, r)
-		if err != nil {
-			return err
-		}
+	if reqs == nil {
+		return nil
 	}
-	return nil
+	logger.Debug("update firewall")
+	return this.LinkTool().HandleFirewall(logger, reqs)
 }
 
 func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.Status {
-	logger.Debug("update rules")
-	err := this.updateSNATRules(logger)
+	err := this.updateFirewall(logger)
 	if err != nil {
 		logger.Errorf("cannot update iptables rules: %s", err)
 	}

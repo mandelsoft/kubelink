@@ -19,7 +19,6 @@
 package iptables
 
 import (
-	"fmt"
 	"regexp"
 
 	"github.com/coreos/go-iptables/iptables"
@@ -80,7 +79,7 @@ func (this *IPTables) ListChain(table, chain string) (*Chain, error) {
 		if !rule.HasOption("-N") {
 			rule.RemoveOption("-A")
 			rules.Add(rule)
-			fmt.Printf("found %s\n", rule)
+			//fmt.Printf("found %s\n", rule)
 		}
 	}
 	return &Chain{

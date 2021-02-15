@@ -120,8 +120,8 @@ func (this *reconciler) RequiredRoutes() kubelink.Routes {
 	return append(routes, netlink.Route{LinkIndex: link.Attrs().Index, Dst: this.config.ClusterCIDR})
 }
 
-func (this *reconciler) RequiredSNATRules() iptables.Requests {
-	return nil
+func (this *reconciler) RequiredIPTablesChains() iptables.Requests {
+	return this.runmode.RequiredIPTablesChains()
 }
 
 ///////////////////////////////////////////////////////////////////////////////

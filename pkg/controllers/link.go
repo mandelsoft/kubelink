@@ -79,10 +79,10 @@ func (this *LinkTool) DeleteChain(t string, c string) error {
 	return this.ipt.DeleteChain(t, c)
 }
 
-func (this *LinkTool) AssureChains(logger logger.LogContext, chains []iptables.Chain, cleanup ...string) error {
+func (this *LinkTool) AssureChains(logger logger.LogContext, chains iptables.Requests, cleanup ...string) error {
 	for _, c := range chains {
-		fmt.Printf("update chain %s{%s]\n", c.Chain, c.Table)
-		err := this.ChainRequest(logger, &iptables.ChainRequest{&c, true})
+		fmt.Printf("update chain %s{%s]\n", c.Chain.Chain, c.Table)
+		err := this.ChainRequest(logger, c)
 		if err != nil {
 			return err
 		}
@@ -116,11 +116,11 @@ func (this *LinkTool) AssureChains(logger logger.LogContext, chains []iptables.C
 	return nil
 }
 
-func (this *LinkTool) handle(logger logger.LogContext, cleanupPrefix string, table string, chains []iptables.Chain, found []string, f func(string, string) error) error {
+func (this *LinkTool) handle(logger logger.LogContext, cleanupPrefix string, table string, chains iptables.Requests, found []string, f func(string, string) error) error {
 next:
 	for _, l := range found {
 		for _, c := range chains {
-			if c.Chain == l && c.Table == table {
+			if c.Chain.Chain == l && c.Table == table {
 				continue next
 			}
 		}
@@ -207,7 +207,7 @@ func (this *LinkTool) SetLinkAddress(link netlink.Link, addr *net.IPNet) error {
 	return nil
 }
 
-func (this *LinkTool) HandleFirewall(logger logger.LogContext, chains []iptables.Chain) error {
+func (this *LinkTool) HandleFirewall(logger logger.LogContext, chains iptables.Requests) error {
 	for _, c := range chains {
 		logger.Infof("%s [%s]:", c.Chain, c.Table)
 		for _, r := range c.Rules {

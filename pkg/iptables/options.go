@@ -35,6 +35,7 @@ func init() {
 	RegisterArgType("-s", 1)
 	RegisterArgType("-o", 1)
 	RegisterArgType("-i", 1)
+	RegisterArgType("-g", 1)
 	RegisterArgType("-j", 1,
 		//	Trailing("RETURN", 0),
 		//	Trailing("DROP", 0),

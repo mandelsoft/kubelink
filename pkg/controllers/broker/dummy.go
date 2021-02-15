@@ -41,7 +41,7 @@ func (this *dummy) RequiredRoutes() kubelink.Routes {
 	return nil
 }
 
-func (this *dummy) RequiredSNATRules() iptables.Requests {
+func (this *dummy) RequiredIPTablesChains() iptables.Requests {
 	return nil
 }
 

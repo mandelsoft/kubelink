@@ -40,6 +40,7 @@ import (
 	"github.com/mandelsoft/kubelink/pkg/controllers"
 	"github.com/mandelsoft/kubelink/pkg/controllers/broker/config"
 	"github.com/mandelsoft/kubelink/pkg/controllers/broker/runmode"
+	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
@@ -171,6 +172,10 @@ func (this *mode) GetInterface() netlink.Link {
 
 func (this *mode) GetErrorForMeshNode(ip net.IP) error {
 	return this.mux.GetError(ip)
+}
+
+func (this *mode) RequiredIPTablesChains() iptables.Requests {
+	return nil
 }
 
 func (this *mode) ReconcileInterface(logger logger.LogContext) error {
