@@ -27,6 +27,8 @@ import (
 type KubelinkV1alpha1Interface interface {
 	RESTClient() rest.Interface
 	KubeLinksGetter
+	MeshesGetter
+	MeshMembersGetter
 }
 
 // KubelinkV1alpha1Client is used to interact with features provided by the kubelink.mandelsoft.org group.
@@ -36,6 +38,14 @@ type KubelinkV1alpha1Client struct {
 
 func (c *KubelinkV1alpha1Client) KubeLinks(namespace string) KubeLinkInterface {
 	return newKubeLinks(c, namespace)
+}
+
+func (c *KubelinkV1alpha1Client) Meshes(namespace string) MeshInterface {
+	return newMeshes(c, namespace)
+}
+
+func (c *KubelinkV1alpha1Client) MeshMembers(namespace string) MeshMemberInterface {
+	return newMeshMembers(c, namespace)
 }
 
 // NewForConfig creates a new KubelinkV1alpha1Client for the given config.

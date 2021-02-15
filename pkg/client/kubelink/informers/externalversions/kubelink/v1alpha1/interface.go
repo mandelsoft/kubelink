@@ -26,6 +26,10 @@ import (
 type Interface interface {
 	// KubeLinks returns a KubeLinkInformer.
 	KubeLinks() KubeLinkInformer
+	// Meshes returns a MeshInformer.
+	Meshes() MeshInformer
+	// MeshMembers returns a MeshMemberInformer.
+	MeshMembers() MeshMemberInformer
 }
 
 type version struct {
@@ -42,4 +46,14 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 // KubeLinks returns a KubeLinkInformer.
 func (v *version) KubeLinks() KubeLinkInformer {
 	return &kubeLinkInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// Meshes returns a MeshInformer.
+func (v *version) Meshes() MeshInformer {
+	return &meshInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// MeshMembers returns a MeshMemberInformer.
+func (v *version) MeshMembers() MeshMemberInformer {
+	return &meshMemberInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
