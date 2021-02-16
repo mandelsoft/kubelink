@@ -43,19 +43,15 @@ func (this Rule) Equals(r Rule) bool {
 	return true
 }
 
-func (this *Rule) HasOption(name string) bool {
-	for _, r := range *this {
-		if r[0] == name {
-			return true
-		}
-	}
-	return false
+func (this Rule) HasOption(name string) bool {
+	return Options(this).HasOption(name)
 }
 
 func (this *Rule) RemoveOption(name string) *Rule {
 	for i, r := range *this {
-		if r[0] == name {
+		if r.Index(name) == 0 {
 			*this = append((*this)[:i], (*this)[i+1:]...)
+			break
 		}
 	}
 	return this
@@ -71,7 +67,7 @@ func (this *Rule) Remove(o Option) *Rule {
 func (this Rule) AsList() []string {
 	l := []string{}
 	for _, o := range this {
-		l = append(l, o...)
+		l = append(l, o.AsArgs()...)
 	}
 	return l
 }

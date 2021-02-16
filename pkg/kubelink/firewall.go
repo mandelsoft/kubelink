@@ -25,7 +25,7 @@ import (
 const CHAIN_PREFIX = "KUBELINK-"
 
 const LINKS_CHAIN = CHAIN_PREFIX + "LINKS"
-const TABLE_LINKS_CHAIN = "nat"
+const TABLE_LINKS_CHAIN = "mangle"
 
 const FIREWALL_CHAIN = CHAIN_PREFIX + "FIREWALL"
 const TABLE_FIREWALL_CHAIN = "filter"
@@ -39,16 +39,30 @@ const TABLE_MARK_DROP_CHAIN = TABLE_LINKS_CHAIN
 const FW_LINK_CHAIN_PREFIX = CHAIN_PREFIX + "FW-"
 const TABLE_LINK_CHAIN = TABLE_MARK_DROP_CHAIN
 
+const DROP_ACTION = "DROP"
+
 type RuleDef struct {
-	Table string
-	Chain string
-	Rule  iptables.Rule
+	Table  string
+	Chain  string
+	Rule   iptables.Rule
+	Before string
 }
 
 func FirewallEmbedding() []RuleDef {
-	return []RuleDef{
-		RuleDef{TABLE_LINKS_CHAIN, "PREROUTING", iptables.Rule{iptables.Opt("-j", LINKS_CHAIN)}},
-		RuleDef{TABLE_FIREWALL_CHAIN, "FORWARD", iptables.Rule{iptables.Opt("-j", FIREWALL_CHAIN)}},
-		RuleDef{TABLE_FIREWALL_CHAIN, "OUTPUT", iptables.Rule{iptables.Opt("-j", FIREWALL_CHAIN)}},
+	opt := iptables.Opt("-m", "comment", "--comment", "kubelink firewall rules")
+	before := ""
+	if TABLE_LINKS_CHAIN != "mangle" {
+		before = "KUBE-SERVICES"
+	}
+	if DROP_ACTION == MARK_DROP_CHAIN {
+		return []RuleDef{
+			RuleDef{TABLE_LINKS_CHAIN, "PREROUTING", iptables.Rule{opt, iptables.Opt("-j", LINKS_CHAIN)}, before},
+			RuleDef{TABLE_FIREWALL_CHAIN, "FORWARD", iptables.Rule{opt, iptables.Opt("-j", FIREWALL_CHAIN)}, "KUBE-FORWARD"},
+			RuleDef{TABLE_FIREWALL_CHAIN, "OUTPUT", iptables.Rule{opt, iptables.Opt("-j", FIREWALL_CHAIN)}, ""},
+		}
+	} else {
+		return []RuleDef{
+			RuleDef{TABLE_LINKS_CHAIN, "PREROUTING", iptables.Rule{opt, iptables.Opt("-j", LINKS_CHAIN)}, before},
+		}
 	}
 }

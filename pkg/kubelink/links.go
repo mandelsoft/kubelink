@@ -160,18 +160,20 @@ func (this *Link) GetIngressChain() *iptables.ChainRequest {
 	for _, i := range this.Ingress.Denied {
 		rules = append(rules, iptables.Rule{
 			iptables.Opt("-d", i.String()),
-			iptables.Opt("-j", MARK_DROP_CHAIN),
+			iptables.Opt("-j", DROP_ACTION),
 		})
 	}
-	for _, i := range this.Ingress.Allowed {
+	if this.Ingress.Allowed.IsSet() {
+		for _, i := range this.Ingress.Allowed {
+			rules = append(rules, iptables.Rule{
+				iptables.Opt("-d", i.String()),
+				iptables.Opt("-j", "RETURN"),
+			})
+		}
 		rules = append(rules, iptables.Rule{
-			iptables.Opt("-d", i.String()),
-			iptables.Opt("-j", "RETURN"),
+			iptables.Opt("-j", DROP_ACTION),
 		})
 	}
-	rules = append(rules, iptables.Rule{
-		iptables.Opt("-j", MARK_DROP_CHAIN),
-	})
 	return iptables.NewChainRequest(
 		TABLE_LINK_CHAIN,
 		FW_LINK_CHAIN_PREFIX+encodeName(this.Name),
@@ -545,46 +547,47 @@ func (this *Links) GetFirewallChains() iptables.Requests {
 	}
 	var chains iptables.Requests
 	if len(rules) > 0 {
-		chains = append(chains, iptables.NewChainRequest(
-			TABLE_DROP_CHAIN,
-			DROP_CHAIN,
-			iptables.Rules{
-				iptables.Rule{
-					iptables.Opt("-j", "MARK"),
-					iptables.Opt("--set-xmark", "0x0/0x2000"),
-				},
-				iptables.Rule{
-					iptables.Opt("-j", "DROP"),
-				},
-			}, true,
-		))
-		chains = append(chains, iptables.NewChainRequest(
-			TABLE_MARK_DROP_CHAIN,
-			MARK_DROP_CHAIN,
-			iptables.Rules{
-				iptables.Rule{
-					iptables.Opt("-j", "MARK"),
-					iptables.Opt("--set-xmark", "0x2000/0x2000"),
-				},
-			}, true,
-		))
+		if DROP_ACTION == MARK_DROP_CHAIN {
+			chains = append(chains, iptables.NewChainRequest(
+				TABLE_DROP_CHAIN,
+				DROP_CHAIN,
+				iptables.Rules{
+					iptables.Rule{
+						iptables.ComposeOpt("-j", "MARK", iptables.Opt("--set-xmark", "0x0/0x2000")),
+					},
+					iptables.Rule{
+						iptables.Opt("-j", "DROP"),
+					},
+				}, true,
+			))
+			chains = append(chains, iptables.NewChainRequest(
+				TABLE_MARK_DROP_CHAIN,
+				MARK_DROP_CHAIN,
+				iptables.Rules{
+					iptables.Rule{
+						iptables.ComposeOpt("-j", "MARK", iptables.Opt("--set-xmark", "0x2000/0x2000")),
+					},
+				}, true,
+			))
+		}
 		chains = append(chains, linkchains...)
 		chains = append(chains, iptables.NewChainRequest(
 			TABLE_LINKS_CHAIN,
 			LINKS_CHAIN,
 			rules, true,
 		))
-		chains = append(chains, iptables.NewChainRequest(
-			TABLE_FIREWALL_CHAIN,
-			FIREWALL_CHAIN,
-			iptables.Rules{
-				iptables.Rule{
-					iptables.Opt("-m", "mark", "--mark", "0x2000/0x2000"),
-					iptables.Opt("-j", DROP_CHAIN),
-				},
-			}, true,
-		))
-
+		if DROP_ACTION == MARK_DROP_CHAIN {
+			chains = append(chains, iptables.NewChainRequest(
+				TABLE_FIREWALL_CHAIN,
+				FIREWALL_CHAIN,
+				iptables.Rules{
+					iptables.Rule{
+						iptables.Opt("-m", "mark", "--mark", "0x2000/0x2000"),
+						iptables.Opt("-j", DROP_CHAIN),
+					},
+				}, true,
+			))
+		}
 	}
 	return chains
 }

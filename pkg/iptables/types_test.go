@@ -19,16 +19,24 @@ func init() {
 	RegisterArgType("--all", 0, All)
 }
 
-func check(match bool, args ...string) {
-	opt := Opt(args...)
-	r := ParseRule(append(opt, "rest")...)
-	expected := Rule{opt, Opt("rest")}
-	if match {
-		Expect(r).To(Equal(expected))
-	} else {
-		Expect(r).To(Equal(Rule{Opt(append(opt, "rest")...)}))
-		ContainElements()
+const OPT = 1
+const ARG = 2
+const ADD = 3
+
+func checkOption(mode int, args ...interface{}) {
+	opt := ComposeOpt(args...)
+	r := ParseRule(append(opt.AsArgs(), "rest")...)
+	expected := Rule{opt}
+	switch mode {
+	case ADD:
+		expected.Add(Opt("rest"))
+	case ARG:
+		expected[0].Add(StringArg("rest"))
+	case OPT:
+		expected[0].Add(Opt("rest"))
 	}
+
+	Expect(r).To(Equal(expected))
 }
 
 func inter(r Options) []interface{} {
@@ -42,53 +50,58 @@ func inter(r Options) []interface{} {
 func checkOpts(opts ...Option) {
 	var args []string
 	for _, o := range opts {
-		args = append(args, o...)
+		args = append(args, o.AsArgs()...)
 	}
 	r := ParseRule(args...)
 	Expect(r).To(Equal(Rule(opts)))
 }
 
-func checkMulti(sep bool, opts ...Option) {
+func checkMulti(add bool, opts ...Option) {
 	var args []string
 	for _, o := range opts {
-		args = append(args, o...)
+		args = append(args, o.AsArgs()...)
 	}
 	r := ParseRule(append(args, "rest")...)
 	expected := opts
-	if sep {
-		expected = append(opts, Opt("rest"))
+	if add {
+		if y, ok := expected[len(expected)-1][len(expected[len(expected)-1])-1].(Option); ok {
+			y.Add(StringArg("rest"))
+			expected[len(expected)-1][len(expected[len(expected)-1])-1] = y
+		}
 	} else {
-		expected[len(expected)-1] = append(expected[len(expected)-1], "rest")
+		expected[len(expected)-1] = append(expected[len(expected)-1], Opt("rest"))
 	}
-	Expect(r).To(ConsistOf(inter(expected)...))
+	//Expect(append(inter(Options(r)), Opt("gomega"))).To(ConsistOf(append(inter(expected), Opt("gomega"))...))
+	Expect(r).To(ConsistOf([]interface{}{expected}...)) // gomega elimates one array level if size is one
+	ContainElements()
 }
 
 var _ = Describe("Types", func() {
 
 	Context("Arg Opt", func() {
 		It("should handle -d", func() {
-			check(true, "-d", "test")
+			checkOption(ADD, "-d", "test")
 		})
 		It("should handle plain -d", func() {
 			checkOpts(Opt("-d", "test"))
 		})
 		It("should handle incomplete -d at end", func() {
-			check(false, "-d")
+			checkOption(ARG, "-d")
 		})
 	})
 
 	Context("Not", func() {
 		It("should handle -m", func() {
-			check(true, "-m", "mark", "!", "--mark", "0x2000:0x200")
+			checkOption(ADD, "-m", "mark", "!", "--mark", "0x2000:0x200")
 		})
 	})
 
 	Context("Nested Options", func() {
 		It("should handle -m", func() {
-			check(true, "-m", "comment", "--comment", "test")
+			checkOption(ADD, "-m", "comment", "--comment", "test")
 		})
 		It("should handle wrong -m at end", func() {
-			check(false, "-m", "comment", "--comment")
+			checkOption(ARG, "-m", "comment", "--comment")
 		})
 		It("should handle plain simple -j", func() {
 			checkOpts(Opt("-j", "RETURN"))
@@ -97,27 +110,26 @@ var _ = Describe("Types", func() {
 
 	Context("Mixed", func() {
 		It("should handle simple -j", func() {
-			check(true, "-j", "RETURN")
-			checkOpts(Opt("-j", "RETURN"))
+			checkOption(OPT, "-j", "RETURN")
 		})
 		It("should handle complex -j", func() {
-			checkMulti(true, Opt("-j", "MARK"), Opt("--set-xmark", "test"))
+			checkMulti(false, ComposeOpt("-j", "MARK", Opt("--set-xmark", "test")))
 		})
 	})
 
 	Context("Multi", func() {
 		It("should handle simple", func() {
-			checkMulti(true, Opt("-d", "test"), Opt("-j", "RETURN"))
+			checkMulti(false, Opt("-d", "test"), Opt("-j", "RETURN"))
 		})
 		It("should handle complex -j", func() {
-			checkMulti(true, Opt("-m", "comment", "--comment", "test"), Opt("-j", "MARK"), Opt("--set-xmark", "test"))
+			checkMulti(false, Opt("-m", "comment", "--comment", "test"), ComposeOpt("-j", "MARK", Opt("--set-xmark", "test")))
 		})
 
 	})
 
 	Context("Special", func() {
 		It("should handle all", func() {
-			checkMulti(false, Opt("--all"), Opt("-x", "addr"))
+			checkMulti(true, ComposeOpt("--all", Opt("-x", "addr")))
 		})
 	})
 })

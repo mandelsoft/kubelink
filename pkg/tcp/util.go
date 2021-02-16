@@ -127,7 +127,6 @@ func ParseIPNet(s string) (*net.IPNet, error) {
 	return CIDRIP(cidr, ip), nil
 }
 
-
 // ParseIPCIDR parses an ip or cidr and returns
 // the specified ip/netmask as single IPNet
 func ParseIPCIDR(s string) (*net.IPNet, error) {
@@ -141,7 +140,6 @@ func ParseIPCIDR(s string) (*net.IPNet, error) {
 	}
 	return IPtoCIDR(ip), nil
 }
-
 
 // ParseNet parses an ip or cidr and returns
 // the result as cidr describing the netmask/network, only

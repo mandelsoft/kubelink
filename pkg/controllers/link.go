@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/gardener/controller-manager-library/pkg/logger"
+	"github.com/gardener/controller-manager-library/pkg/utils"
 	"github.com/vishvananda/netlink"
 
 	"github.com/mandelsoft/kubelink/pkg/iptables"
@@ -48,12 +49,39 @@ func NewLinkTool() (*LinkTool, error) {
 	}, nil
 }
 
-func (this *LinkTool) AssureRule(t string, c string, r iptables.Rule) error {
+func (this *LinkTool) AssureRule(logger logger.LogContext, t string, c string, r iptables.Rule, before string) error {
 	ok, err := this.ipt.Exists(t, c, r.AsList()...)
 	if err != nil {
 		return err
 	}
-	if !ok {
+	if ok {
+		if before == "" {
+			return nil
+		}
+		logger.Infof("checking position before %q: %s", before, r)
+		chain, err := this.ipt.ListChain(t, c)
+		if err != nil {
+			return err
+		}
+		for _, f := range chain.Rules {
+			if f.Equals(r) {
+				logger.Infof("found %s before %q", r, before)
+				return nil
+			}
+			if r.Index(iptables.Opt(".j", before)) >= 0 {
+				logger.Infof("found %q before %s", before, r)
+				err = this.ipt.DeleteRule(t, c, r)
+				if err != nil {
+					return err
+				}
+				break
+			}
+		}
+
+	}
+	if before != "" {
+		return this.ipt.InsertRule(t, c, 1, r)
+	} else {
 		return this.ipt.AppendRule(t, c, r)
 	}
 	return nil
@@ -75,13 +103,18 @@ func (this *LinkTool) ListChains(t string) ([]string, error) {
 	return this.ipt.ListChains(t)
 }
 
-func (this *LinkTool) DeleteChain(t string, c string) error {
+func (this *LinkTool) DeleteChain(logger logger.LogContext, t string, c string) error {
+	logger.Infof("deleting chain %s/%s", t, c)
 	return this.ipt.DeleteChain(t, c)
+}
+
+func (this *LinkTool) ClearChain(logger logger.LogContext, t string, c string) error {
+	logger.Infof("clearing chain %s/%s", t, c)
+	return this.ipt.ClearChain(t, c)
 }
 
 func (this *LinkTool) AssureChains(logger logger.LogContext, chains iptables.Requests, cleanup ...string) error {
 	for _, c := range chains {
-		fmt.Printf("update chain %s{%s]\n", c.Chain.Chain, c.Table)
 		err := this.ChainRequest(logger, c)
 		if err != nil {
 			return err
@@ -90,7 +123,7 @@ func (this *LinkTool) AssureChains(logger logger.LogContext, chains iptables.Req
 	if len(cleanup) > 0 {
 		cleanupPrefix := cleanup[0]
 		if len(cleanup) == 1 {
-			cleanup = []string{"nat", "filter"}
+			cleanup = []string{"mangle", "filter"}
 		} else {
 			cleanup = cleanup[1:]
 		}
@@ -101,12 +134,12 @@ func (this *LinkTool) AssureChains(logger logger.LogContext, chains iptables.Req
 				if err != nil {
 					return err
 				}
-				err = this.handle(logger, cleanupPrefix, t, chains, list, this.ipt.ClearChain)
+				err = this.handle(logger, cleanupPrefix, t, chains, list, this.ClearChain)
 				if err != nil {
 					return err
 				}
 
-				err = this.handle(logger, cleanupPrefix, t, chains, list, this.ipt.DeleteChain)
+				err = this.handle(logger, cleanupPrefix, t, chains, list, this.DeleteChain)
 				if err != nil {
 					return err
 				}
@@ -116,7 +149,8 @@ func (this *LinkTool) AssureChains(logger logger.LogContext, chains iptables.Req
 	return nil
 }
 
-func (this *LinkTool) handle(logger logger.LogContext, cleanupPrefix string, table string, chains iptables.Requests, found []string, f func(string, string) error) error {
+func (this *LinkTool) handle(logger logger.LogContext, cleanupPrefix string, table string, chains iptables.Requests,
+	found []string, f func(logger.LogContext, string, string) error) error {
 next:
 	for _, l := range found {
 		for _, c := range chains {
@@ -125,7 +159,7 @@ next:
 			}
 		}
 		if strings.HasPrefix(l, cleanupPrefix) {
-			err := f(table, l)
+			err := f(logger, table, l)
 			if err != nil {
 				return err
 			}
@@ -209,9 +243,9 @@ func (this *LinkTool) SetLinkAddress(link netlink.Link, addr *net.IPNet) error {
 
 func (this *LinkTool) HandleFirewall(logger logger.LogContext, chains iptables.Requests) error {
 	for _, c := range chains {
-		logger.Infof("%s [%s]:", c.Chain, c.Table)
+		logger.Debugf("%s [%s]:", c.Chain.Chain, c.Table)
 		for _, r := range c.Rules {
-			logger.Infof("  %s", r)
+			logger.Debugf("  %s", r)
 		}
 	}
 	embedding := kubelink.FirewallEmbedding()
@@ -222,14 +256,18 @@ func (this *LinkTool) HandleFirewall(logger logger.LogContext, chains iptables.R
 		}
 	}
 	logger.Infof("handle chains")
-	err := this.AssureChains(logger, chains, kubelink.CHAIN_PREFIX, "nat", "filter")
+	set := utils.NewStringSet(kubelink.TABLE_LINK_CHAIN)
+	if kubelink.DROP_ACTION == kubelink.DROP_CHAIN {
+		set.Add(kubelink.TABLE_FIREWALL_CHAIN)
+	}
+	err := this.AssureChains(logger, chains, append([]string{kubelink.CHAIN_PREFIX}, set.AsArray()...)...)
 	if err != nil {
 		return err
 	}
 	if len(chains) > 0 {
 		logger.Infof("add embedding")
 		for _, e := range embedding {
-			err = this.AssureRule(e.Table, e.Chain, e.Rule)
+			err = this.AssureRule(logger, e.Table, e.Chain, e.Rule, e.Before)
 			if err != nil {
 				return err
 			}

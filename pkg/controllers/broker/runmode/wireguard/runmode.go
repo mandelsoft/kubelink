@@ -117,9 +117,9 @@ func (this *mode) GetErrorForMeshNode(ip net.IP) error {
 }
 
 func (this *mode) RequiredIPTablesChains() iptables.Requests {
-	chains:= this.Links().GetFirewallChains()
-	if chains==nil {
-		chains=iptables.Requests{}
+	chains := this.Links().GetFirewallChains()
+	if chains == nil {
+		chains = iptables.Requests{}
 	}
 	return chains
 }

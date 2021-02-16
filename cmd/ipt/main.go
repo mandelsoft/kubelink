@@ -68,9 +68,12 @@ func main() {
 	chains := iptables.Requests{}
 	if name != "clear" {
 		chains = links.GetFirewallChains()
+
 	}
+	logger.SetLevel("debug")
 	logger := logger.New()
 
-	tool.HandleFirewall(logger, chains)
+	err = tool.HandleFirewall(logger, chains)
+	CheckErr(err)
 	_ = tool
 }

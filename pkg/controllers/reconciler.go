@@ -157,7 +157,7 @@ func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resour
 	var uerr error
 	if err == nil {
 		ldata, invalid = this.links.UpdateLink(link)
-		if updater != nil && invalid==nil {
+		if updater != nil && invalid == nil {
 			uerr, err = updater(logger, link, ldata)
 		}
 	}
