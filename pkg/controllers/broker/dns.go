@@ -519,13 +519,25 @@ func (this *configureCorednsTask) Execute(logger logger.LogContext) reconcile.St
 		return reconcile.Delay(logger, fmt.Errorf("no coredns custom config found")).RescheduleAfter(10 * time.Minute)
 	}
 
+	meshforward := ""
+	if this.config.MeshDNSServiceIP != nil {
+		meshforward = fmt.Sprintf(`
+svc.global.%s:8053 {
+	errors
+	cache 30
+	forward . %s
+}
+`, this.config.MeshDomain, this.config.MeshDNSServiceIP)
+	}
+
 	config := fmt.Sprintf(`
+%s
 %s:8053 {
 	errors
 	cache 30
 	forward . %s
 }
-`, this.config.MeshDomain, ip)
+`, meshforward, this.config.MeshDomain, ip)
 
 	_, mod, err := this.Controller().GetMainCluster().Resources().ModifyObject(cm, func(data resources.ObjectData) (bool, error) {
 		cm := data.(*_core.ConfigMap)

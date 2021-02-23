@@ -553,7 +553,7 @@ func (this *Links) GetFirewallChains() iptables.Requests {
 				DROP_CHAIN,
 				iptables.Rules{
 					iptables.Rule{
-						iptables.ComposeOpt("-j", "MARK", iptables.Opt("--set-xmark", "0x0/0x2000")),
+						iptables.ComposeOpt("-j", "MARK", iptables.Opt("--set-xmark", fmt.Sprintf("0x0/%s", MARK_BIT))),
 					},
 					iptables.Rule{
 						iptables.Opt("-j", "DROP"),
@@ -565,7 +565,7 @@ func (this *Links) GetFirewallChains() iptables.Requests {
 				MARK_DROP_CHAIN,
 				iptables.Rules{
 					iptables.Rule{
-						iptables.ComposeOpt("-j", "MARK", iptables.Opt("--set-xmark", "0x2000/0x2000")),
+						iptables.ComposeOpt("-j", "MARK", iptables.Opt("--set-xmark", fmt.Sprintf("%s/%s", MARK_BIT, MARK_BIT))),
 					},
 				}, true,
 			))
@@ -582,7 +582,7 @@ func (this *Links) GetFirewallChains() iptables.Requests {
 				FIREWALL_CHAIN,
 				iptables.Rules{
 					iptables.Rule{
-						iptables.Opt("-m", "mark", "--mark", "0x2000/0x2000"),
+						iptables.Opt("-m", "mark", "--mark", fmt.Sprintf("%s/%s", MARK_BIT, MARK_BIT)),
 						iptables.Opt("-j", DROP_CHAIN),
 					},
 				}, true,

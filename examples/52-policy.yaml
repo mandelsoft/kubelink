@@ -7,9 +7,15 @@ metadata:
       running on port 8053
   labels:
     shoot.gardener.cloud/no-cleanup: "true"
-  name: mandelsoft.de--allow-kubelinkdns
+  name: mandelsoft.org--allow-kubelinkdns
   namespace: kube-system
 spec:
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 10.250.0.0/16  # node ip range for wireguard gateways nodes
+    - ipBlock:
+        cidr: 192.168.0.0/24 # mesh ip range for wireguard gateways
   egress:
   - ports:
     - port: 8053
@@ -25,3 +31,4 @@ spec:
       - coredns
   policyTypes:
   - Egress
+  - Ingress

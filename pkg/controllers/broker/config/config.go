@@ -90,6 +90,9 @@ type Config struct {
 	CoreDNSSecret     string
 	CoreDNSConfigure  bool
 
+	meshDNSServiceIP string
+	MeshDNSServiceIP net.IP
+
 	dnsServiceIP  string
 	DNSServiceIP  net.IP
 	ClusterDomain string
@@ -116,6 +119,7 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.Service, "service", "", "", "Service name for wireguard or managed certificate")
 	set.AddStringOption(&this.Interface, "ifce-name", "", "", "Name of the tun interface")
 	set.AddStringOption(&this.MeshDomain, "mesh-domain", "", "kubelink", "Base domain for cluster mesh services")
+	set.AddStringOption(&this.meshDNSServiceIP, "meshdns-service-ip", "", "", "Service IP of global mesh service DNS service")
 
 	set.AddStringOption(&this.serviceAccount, "service-account", "", "", "Service Account for API Access propagation")
 
@@ -211,6 +215,13 @@ func (this *Config) Prepare() error {
 		this.CoreDNSServiceIP = net.ParseIP(this.coreDNSServiceIP)
 		if this.CoreDNSServiceIP == nil {
 			return fmt.Errorf("invalid ip of coredns service: %s", this.coreDNSServiceIP)
+		}
+	}
+
+	if this.meshDNSServiceIP != "" {
+		this.MeshDNSServiceIP = net.ParseIP(this.meshDNSServiceIP)
+		if this.MeshDNSServiceIP == nil {
+			return fmt.Errorf("invalid ip of global mesh DNS service: %s", this.meshDNSServiceIP)
 		}
 	}
 
