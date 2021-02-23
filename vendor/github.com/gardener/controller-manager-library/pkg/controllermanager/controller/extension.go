@@ -284,11 +284,7 @@ func (this *Extension) checkController(cntr *controller) error {
 	return cntr.check()
 }
 
-// startController finally starts the controller
-// all error conditions MUST also be checked
-// in checkController, so after a successful checkController
-// startController MUST not return an error.
-func (this *Extension) startController(cntr *controller) error {
+func (this *Extension) setupController(cntr *controller) error {
 	for i, a := range this.after[cntr.GetName()] {
 		if i == 0 {
 			cntr.Infof("observing initialization requirements: %s", utils.Strings(this.after[cntr.GetName()]...))
@@ -296,7 +292,7 @@ func (this *Extension) startController(cntr *controller) error {
 		after := this.prepared[a]
 		if after != nil {
 			if !after.IsReached() {
-				cntr.Infof("  startup of %q waiting for %q", cntr.GetName(), a)
+				cntr.Infof("  setup of %q waiting for %q", cntr.GetName(), a)
 				if !after.Sync(this.GetContext()) {
 					return fmt.Errorf("setup aborted")
 				}
@@ -308,6 +304,20 @@ func (this *Extension) startController(cntr *controller) error {
 			cntr.Infof("  omittimg unused controller %q", a)
 		}
 	}
+	cntr.Infof("setup controller")
+	err := cntr.setup()
+	if err != nil {
+		return err
+	}
+	this.prepared[cntr.GetName()].Reach()
+	return nil
+}
+
+// startController finally starts the controller
+// all error conditions MUST also be checked
+// in checkController, so after a successful checkController
+// startController MUST not return an error.
+func (this *Extension) startController(cntr *controller) error {
 	cntr.Infof("starting controller")
 	err := cntr.prepare()
 	if err != nil {

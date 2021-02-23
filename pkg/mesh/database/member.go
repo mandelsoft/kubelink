@@ -20,33 +20,106 @@ package database
 
 import (
 	"net"
+	"time"
 
+	"github.com/gardener/controller-manager-library/pkg/resources"
+	"github.com/gardener/controller-manager-library/pkg/utils"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
+const EP_PUBLIC = "public"
+
 type Member interface {
 	GetId() string
+	GetName() resources.ClusterObjectKey
+	GetAddress() *net.IPNet
+	GetPublicKey() *wgtypes.Key
+
+	GetEndpoints() map[string]string
+	GetGateway() resources.ObjectName
+	GetRoutes() []Route
+	GetServedMembers() utils.StringSet
+
+	GetCreationTimestamp() time.Time
 }
 
 type member struct {
+	name    resources.ClusterObjectKey
 	id      string
 	address *net.IPNet
+	routes  []Route
+	gateway resources.ObjectName
+	endpoints map[string]string
 
-	publicKey wgtypes.Key
+	gatewayFor utils.StringSet
+	publicKey  *wgtypes.Key
+	created time.Time
 }
 
 var _ Member = &member{}
+
+func NewMember(name resources.ClusterObjectKey, id string) *member {
+	return &member{
+		name:       name,
+		id:         id,
+		endpoints: map[string]string{},
+		gatewayFor: utils.StringSet{},
+	}
+}
+
+func ToMember(m *member) Member {
+	if m == nil {
+		return nil
+	}
+	return m
+}
+
+func (this *member) GetName() resources.ClusterObjectKey {
+	return this.name
+}
 
 func (this *member) GetId() string {
 	return this.id
 }
 
 func (this *member) GetAddress() *net.IPNet {
+	if this.address == nil {
+		return nil
+	}
 	r := *this.address
 	return &r
 }
 
-func (this *member) GetPublicKey() wgtypes.Key {
-	k, _ := wgtypes.NewKey(this.publicKey[:])
-	return k
+func (this *member) GetRoutes() []Route {
+	return this.routes
 }
+
+func (this *member) GetCreationTimestamp() time.Time {
+	return this.created
+}
+
+func (this *member) GetEndpoints() map[string]string {
+  r:=map[string]string{}
+  for k, v := range this.endpoints {
+  	r[k]=v
+  }
+  return r
+}
+
+func (this *member) GetGateway() resources.ObjectName {
+	return this.gateway
+}
+
+func (this *member) GetServedMembers() utils.StringSet {
+	return this.gatewayFor.Copy()
+}
+
+func (this *member) GetPublicKey() *wgtypes.Key {
+	if this.publicKey == nil {
+		return nil
+	}
+	k, _ := wgtypes.NewKey(this.publicKey[:])
+	return &k
+}
+
+

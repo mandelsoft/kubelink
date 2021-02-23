@@ -553,6 +553,17 @@ func (this *controller) registerWatch(h *ClusterHandler, r WatchResource, p stri
 	return h.register(r, ns, optionsFunc, this.getPool(p))
 }
 
+func (this *controller) setup() error {
+	this.Infof("setup reconcilers...")
+	for n, r := range this.reconcilers {
+		err := reconcile.SetupReconciler(r)
+		if err != nil {
+			return fmt.Errorf("setup of reconciler %s of controller %s failed: %s", n, this.GetName(), err)
+		}
+	}
+	return nil
+}
+
 // Prepare finally prepares the controller to run
 // all error conditions MUST also be checked
 // in Check, so after a successful checkController
@@ -561,14 +572,6 @@ func (this *controller) prepare() error {
 	h, err := this.getClusterHandler(CLUSTER_MAIN)
 	if err != nil {
 		return err
-	}
-
-	this.Infof("setup reconcilers...")
-	for n, r := range this.reconcilers {
-		err = reconcile.SetupReconciler(r)
-		if err != nil {
-			return fmt.Errorf("setup of reconciler %s of controller %s failed: %s", n, this.GetName(), err)
-		}
 	}
 
 	this.Infof("setup watches....")

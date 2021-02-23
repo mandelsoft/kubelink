@@ -22,17 +22,18 @@ spec:
     - jsonPath: .spec.identity
       name: Identity
       type: string
-    - jsonPath: .spec.clusterAddress
-      name: Address
-      type: string
-    - jsonPath: .spec.cidr
-      name: CIDR
-      type: string
     - jsonPath: .spec.endpoint
       name: Endpoint
       type: string
+    - jsonPath: .status.address
+      name: Address
+      type: string
     - jsonPath: .status.state
       name: State
+      type: string
+    - jsonPath: .spec.routes
+      name: Routes
+      priority: 2000
       type: string
     name: v1alpha1
     schema:
@@ -48,19 +49,7 @@ spec:
             type: object
           spec:
             properties:
-              apiAccess:
-                description: SecretReference represents a Secret Reference. It has enough information to retrieve secret in any namespace
-                properties:
-                  name:
-                    description: Name is unique within a namespace to reference a secret resource.
-                    type: string
-                  namespace:
-                    description: Namespace defines the space within which the secret name must be unique.
-                    type: string
-                type: object
-              cidr:
-                type: string
-              clusterAddress:
+              address:
                 type: string
               dns:
                 properties:
@@ -71,25 +60,43 @@ spec:
                   omitDNSPropagation:
                     type: boolean
                 type: object
-              egress:
-                items:
-                  type: string
-                type: array
               endpoint:
-                type: string
-              ingress:
-                items:
+                additionalProperties:
                   type: string
-                type: array
+                type: object
+              gateway:
+                description: ObjectReference is is plain reference to an object of an implicitly determined type
+                properties:
+                  clusterId:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                type: object
+              identity:
+                type: string
               publicKey:
                 description: public key for wireguard
                 type: string
+              routes:
+                items:
+                  properties:
+                    cidr:
+                      type: string
+                  required:
+                  - cidr
+                  type: object
+                type: array
             required:
-            - clusterAddress
-            - endpoint
+            - identity
             type: object
           status:
             properties:
+              address:
+                type: string
               message:
                 type: string
               state:

@@ -20,13 +20,22 @@ package database
 
 import (
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller"
+	"github.com/gardener/controller-manager-library/pkg/controllermanager/server"
 	"github.com/gardener/controller-manager-library/pkg/ctxutil"
 )
 
 var meshKey = ctxutil.SimpleKey("mesh")
 
-func GetTaskClient(controller controller.Interface) Meshs {
-	return controller.GetEnvironment().GetOrCreateSharedValue(meshKey, func() interface{} {
-		return NewMeshs()
-	}).(Meshs)
+func GetDatabase(src interface{}) Meshes {
+	switch e := src.(type) {
+	case controller.Interface:
+		return e.GetEnvironment().ControllerManager().GetOrCreateSharedValue(meshKey, func() interface{} {
+			return NewMeshs()
+		}).(Meshes)
+	case server.Interface:
+		return e.GetEnvironment().ControllerManager().GetOrCreateSharedValue(meshKey, func() interface{} {
+			return NewMeshs()
+		}).(Meshes)
+	}
+	return nil
 }

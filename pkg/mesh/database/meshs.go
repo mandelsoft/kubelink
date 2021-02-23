@@ -19,36 +19,115 @@
 package database
 
 import (
+	"crypto/x509"
 	"net"
 	"sync"
+
+	"github.com/gardener/controller-manager-library/pkg/resources"
+
+	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 )
 
-type Meshs interface {
+type Meshes interface {
+	IsReady() bool
+	SetReady()
+
+	GetMeshByName(name resources.ObjectName) Mesh
+	GetMeshByNamespace(name string) Mesh
 	GetMeshById(id string) Mesh
-	GetMeshByCidr(cidr *net.IPNet) Mesh
+
+	UpdateMesh(mesh resources.Object, ipam *resources.ClusterObjectKey, pool *x509.CertPool)
+	DeleteByName(name resources.ObjectName)
 }
 
-func NewMeshs() Meshs {
-	return &meshs{
-		meshById:   map[string]*mesh{},
-		meshByCidr: map[string]*mesh{},
+func NewMeshs() Meshes {
+	return &meshes{
+		meshByName:      map[resources.ObjectName]*mesh{},
+		meshByNamespace: map[string]*mesh{},
+		meshById:        map[string]*mesh{},
 	}
 }
 
-type meshs struct {
-	lock       sync.Mutex
-	meshById   map[string]*mesh
-	meshByCidr map[string]*mesh
+type meshes struct {
+	lock            sync.Mutex
+	ready           bool
+	meshByName      map[resources.ObjectName]*mesh
+	meshByNamespace map[string]*mesh
+	meshById        map[string]*mesh
 }
 
-func (this *meshs) GetMeshById(id string) Mesh {
+func (this *meshes) IsReady() bool {
 	this.lock.Lock()
 	defer this.lock.Unlock()
-	return this.meshById[id]
+	return this.ready
 }
 
-func (this *meshs) GetMeshByCidr(cidr *net.IPNet) Mesh {
+func (this *meshes) SetReady() {
 	this.lock.Lock()
 	defer this.lock.Unlock()
-	return this.meshByCidr[cidr.String()]
+	this.ready = true
+}
+
+func (this *meshes) GetMeshByName(name resources.ObjectName) Mesh {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	return ToMesh(this.meshByName[name])
+}
+
+func (this *meshes) GetMeshById(id string) Mesh {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	return ToMesh(this.meshById[id])
+}
+
+func (this *meshes) GetMeshByNamespace(name string) Mesh {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	return ToMesh(this.meshByNamespace[name])
+}
+
+func (this *meshes) UpdateMesh(obj resources.Object, ipam *resources.ClusterObjectKey, pool *x509.CertPool) {
+	mesh := obj.Data().(*api.Mesh)
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	name := resources.NewObjectName(mesh.Namespace, mesh.Name)
+	old := this.meshByName[name]
+
+	_, cidr, _ := net.ParseCIDR(mesh.Spec.Network.CIDR)
+	if old == nil {
+		old = NewMesh(obj.ClusterKey(), mesh.Spec.Identity, mesh.Spec.Namespace, mesh.Spec.Domain, cidr)
+		this.meshByName[name] = old
+	} else {
+		delete(this.meshById, mesh.Spec.Identity)
+		delete(this.meshByNamespace, mesh.Spec.Namespace)
+	}
+
+	old.namespace = mesh.Spec.Namespace
+	old.domain = mesh.Spec.Domain
+	old.cidr = cidr
+	old.id = mesh.Spec.Identity
+	old.state = mesh.Status.State
+	old.message = mesh.Status.Message
+	old.ipam = ipam
+	old.SetPool(pool)
+	if mesh.Spec.Namespace != "" {
+		this.meshByNamespace[mesh.Spec.Namespace] = old
+	}
+	this.meshById[old.id] = old
+}
+
+func (this *meshes) DeleteByName(name resources.ObjectName) {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+
+	old := this.meshByName[name]
+	if old != nil {
+		delete(this.meshByName, name)
+		if this.meshById[old.id] == old {
+			delete(this.meshById, old.id)
+		}
+		if this.meshByNamespace[old.namespace] == old {
+			delete(this.meshByNamespace, old.namespace)
+		}
+	}
 }

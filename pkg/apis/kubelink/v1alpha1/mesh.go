@@ -22,6 +22,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const STATE_PENDING = "Pending"
+
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 type MeshList struct {
@@ -34,10 +36,11 @@ type MeshList struct {
 
 // +kubebuilder:storageversion
 // +kubebuilder:object:root=true
-// +kubebuilder:resource:scope=Namespaced,path=meshmembers,shortName=mmembers,singular=mmember
+// +kubebuilder:resource:scope=Namespaced,path=meshes,shortName=mesh,singular=mesh
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name=Identity,JSONPath=".spec.identity",type=string
-// +kubebuilder:printcolumn:name=CIDR,JSONPath=".spec.cidr",type=string
+// +kubebuilder:printcolumn:name=CIDR,JSONPath=".spec.network.cidr",type=string
+// +kubebuilder:printcolumn:name=MeshNamespace,JSONPath=".spec.namespace",type=string
 // +kubebuilder:printcolumn:name=Domain,JSONPath=".spec.domain",type=string
 // +kubebuilder:printcolumn:name=State,JSONPath=".status.state",type=string
 // +genclient
@@ -46,16 +49,29 @@ type MeshList struct {
 type Mesh struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              KubeLinkSpec `json:"spec"`
+	Spec              MeshSpec `json:"spec"`
 	// +optional
-	Status KubeLinkStatus `json:"status,omitempty"`
+	Status MeshStatus `json:"status,omitempty"`
 }
 
 type MeshSpec struct {
-	Identity  string `json:"identity"`
-	Namespace string `json:"namespace"`
-	CIDR      string `json:"cidr"`
-	Domain    string `json:"domain"`
+	Identity string `json:"identity"`
+	Network  IPNet  `json:"network"`
+	Domain   string `json:"domain"`
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+	// +optional
+	Secret string `json:"secret,omitempty"`
+}
+
+type IPNet struct {
+	CIDR string `json:"cidr"`
+	IPAM *IPAM  `json:"ipam,omitempty"`
+}
+
+type IPAM struct {
+	// +optional
+	Ranges []string `json:"ranges,omitempty"`
 }
 
 type MeshStatus struct {

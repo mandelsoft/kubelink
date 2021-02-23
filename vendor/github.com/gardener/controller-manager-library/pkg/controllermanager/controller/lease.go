@@ -38,6 +38,9 @@ func (this *leasestartupgroup) Startup() error {
 	runit := func() {
 		this.extension.Infof("Acquired leadership, starting controllers for %s.", msg)
 		for _, c := range this.controllers {
+			this.extension.setupController(c)
+		}
+		for _, c := range this.controllers {
 			this.extension.startController(c)
 		}
 	}

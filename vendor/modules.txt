@@ -7,8 +7,6 @@ github.com/PuerkitoBio/urlesc
 # github.com/ahmetb/gen-crd-api-reference-docs v0.2.0
 ## explicit
 github.com/ahmetb/gen-crd-api-reference-docs
-# github.com/coreos/etcd v3.3.15+incompatible
-## explicit
 # github.com/coreos/go-iptables v0.4.5
 ## explicit
 github.com/coreos/go-iptables/iptables
@@ -23,7 +21,7 @@ github.com/evanphx/json-patch
 github.com/fatih/color
 # github.com/fsnotify/fsnotify v1.4.9
 github.com/fsnotify/fsnotify
-# github.com/gardener/controller-manager-library v0.2.1-0.20210209103923-f406f00d415c
+# github.com/gardener/controller-manager-library v0.2.1-0.20210303142856-b0163328fbbd
 ## explicit
 github.com/gardener/controller-manager-library/hack
 github.com/gardener/controller-manager-library/pkg/certmgmt
@@ -34,6 +32,7 @@ github.com/gardener/controller-manager-library/pkg/certs/file
 github.com/gardener/controller-manager-library/pkg/config
 github.com/gardener/controller-manager-library/pkg/configmain
 github.com/gardener/controller-manager-library/pkg/controllermanager
+github.com/gardener/controller-manager-library/pkg/controllermanager/cert
 github.com/gardener/controller-manager-library/pkg/controllermanager/cluster
 github.com/gardener/controller-manager-library/pkg/controllermanager/config
 github.com/gardener/controller-manager-library/pkg/controllermanager/controller
@@ -42,9 +41,17 @@ github.com/gardener/controller-manager-library/pkg/controllermanager/controller/
 github.com/gardener/controller-manager-library/pkg/controllermanager/controller/lease
 github.com/gardener/controller-manager-library/pkg/controllermanager/controller/mappings
 github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile
+github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile/reconcilers
 github.com/gardener/controller-manager-library/pkg/controllermanager/extension
 github.com/gardener/controller-manager-library/pkg/controllermanager/extension/groups
 github.com/gardener/controller-manager-library/pkg/controllermanager/extension/mappings
+github.com/gardener/controller-manager-library/pkg/controllermanager/server
+github.com/gardener/controller-manager-library/pkg/controllermanager/server/config
+github.com/gardener/controller-manager-library/pkg/controllermanager/server/groups
+github.com/gardener/controller-manager-library/pkg/controllermanager/server/handler
+github.com/gardener/controller-manager-library/pkg/controllermanager/server/mappings
+github.com/gardener/controller-manager-library/pkg/controllermanager/server/ready
+github.com/gardener/controller-manager-library/pkg/convert
 github.com/gardener/controller-manager-library/pkg/ctxutil
 github.com/gardener/controller-manager-library/pkg/errors
 github.com/gardener/controller-manager-library/pkg/fieldpath
@@ -58,12 +65,16 @@ github.com/gardener/controller-manager-library/pkg/resources/apiextensions
 github.com/gardener/controller-manager-library/pkg/resources/conditions
 github.com/gardener/controller-manager-library/pkg/resources/defaultscheme/v1.16
 github.com/gardener/controller-manager-library/pkg/resources/errors
+github.com/gardener/controller-manager-library/pkg/resources/filter
 github.com/gardener/controller-manager-library/pkg/resources/minimal
 github.com/gardener/controller-manager-library/pkg/resources/plain
 github.com/gardener/controller-manager-library/pkg/run
 github.com/gardener/controller-manager-library/pkg/server
 github.com/gardener/controller-manager-library/pkg/server/healthz
 github.com/gardener/controller-manager-library/pkg/sync
+github.com/gardener/controller-manager-library/pkg/types
+github.com/gardener/controller-manager-library/pkg/types/infodata
+github.com/gardener/controller-manager-library/pkg/types/infodata/simple
 github.com/gardener/controller-manager-library/pkg/utils
 github.com/gardener/controller-manager-library/pkg/utils/pkiutil
 # github.com/ghodss/yaml v1.0.0
@@ -118,6 +129,11 @@ github.com/konsorten/go-windows-terminal-sequences
 github.com/mailru/easyjson/buffer
 github.com/mailru/easyjson/jlexer
 github.com/mailru/easyjson/jwriter
+# github.com/mandelsoft/kubipam v0.0.0-20200702084454-32aad3c69d22
+## explicit
+github.com/mandelsoft/kubipam/pkg/apis/ipam
+github.com/mandelsoft/kubipam/pkg/apis/ipam/v1alpha1
+github.com/mandelsoft/kubipam/pkg/ipam
 # github.com/mattn/go-colorable v0.1.2
 github.com/mattn/go-colorable
 # github.com/mattn/go-isatty v0.0.8

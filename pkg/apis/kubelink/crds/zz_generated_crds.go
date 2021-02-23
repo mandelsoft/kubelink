@@ -149,30 +149,30 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.2.9
   creationTimestamp: null
-  name: meshmembers.kubelink.mandelsoft.org
+  name: meshes.kubelink.mandelsoft.org
 spec:
   group: kubelink.mandelsoft.org
   names:
-    kind: MeshMember
-    listKind: MeshMemberList
-    plural: meshmembers
+    kind: Mesh
+    listKind: MeshList
+    plural: meshes
     shortNames:
-    - mmembers
-    singular: mmember
+    - mesh
+    singular: mesh
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.identity
       name: Identity
       type: string
-    - jsonPath: .spec.clusterAddress
-      name: Address
-      type: string
-    - jsonPath: .spec.cidr
+    - jsonPath: .spec.network.cidr
       name: CIDR
       type: string
-    - jsonPath: .spec.endpoint
-      name: Endpoint
+    - jsonPath: .spec.namespace
+      name: MeshNamespace
+      type: string
+    - jsonPath: .spec.domain
+      name: Domain
       type: string
     - jsonPath: .status.state
       name: State
@@ -191,19 +191,108 @@ spec:
             type: object
           spec:
             properties:
-              apiAccess:
-                description: SecretReference represents a Secret Reference. It has enough information to retrieve secret in any namespace
-                properties:
-                  name:
-                    description: Name is unique within a namespace to reference a secret resource.
-                    type: string
-                  namespace:
-                    description: Namespace defines the space within which the secret name must be unique.
-                    type: string
-                type: object
-              cidr:
+              domain:
                 type: string
-              clusterAddress:
+              identity:
+                type: string
+              namespace:
+                type: string
+              network:
+                properties:
+                  cidr:
+                    type: string
+                  ipam:
+                    properties:
+                      ranges:
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                required:
+                - cidr
+                type: object
+              secret:
+                type: string
+            required:
+            - domain
+            - identity
+            - network
+            type: object
+          status:
+            properties:
+              message:
+                type: string
+              state:
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []
+  `
+	utils.Must(registry.RegisterCRD(data))
+	data = `
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.2.9
+  creationTimestamp: null
+  name: meshmembers.kubelink.mandelsoft.org
+spec:
+  group: kubelink.mandelsoft.org
+  names:
+    kind: MeshMember
+    listKind: MeshMemberList
+    plural: meshmembers
+    shortNames:
+    - mmembers
+    singular: mmember
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.identity
+      name: Identity
+      type: string
+    - jsonPath: .spec.endpoint
+      name: Endpoint
+      type: string
+    - jsonPath: .status.address
+      name: Address
+      type: string
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .spec.routes
+      name: Routes
+      priority: 2000
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              address:
                 type: string
               dns:
                 properties:
@@ -214,25 +303,43 @@ spec:
                   omitDNSPropagation:
                     type: boolean
                 type: object
-              egress:
-                items:
-                  type: string
-                type: array
               endpoint:
-                type: string
-              ingress:
-                items:
+                additionalProperties:
                   type: string
-                type: array
+                type: object
+              gateway:
+                description: ObjectReference is is plain reference to an object of an implicitly determined type
+                properties:
+                  clusterId:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                type: object
+              identity:
+                type: string
               publicKey:
                 description: public key for wireguard
                 type: string
+              routes:
+                items:
+                  properties:
+                    cidr:
+                      type: string
+                  required:
+                  - cidr
+                  type: object
+                type: array
             required:
-            - clusterAddress
-            - endpoint
+            - identity
             type: object
           status:
             properties:
+              address:
+                type: string
               message:
                 type: string
               state:

@@ -19,6 +19,7 @@
 package v1alpha1
 
 import (
+	"github.com/gardener/controller-manager-library/pkg/types"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -39,28 +40,32 @@ type MeshMemberList struct {
 // +kubebuilder:resource:scope=Namespaced,path=meshmembers,shortName=mmembers,singular=mmember
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name=Identity,JSONPath=".spec.identity",type=string
-// +kubebuilder:printcolumn:name=Address,JSONPath=".spec.clusterAddress",type=string
-// +kubebuilder:printcolumn:name=CIDR,JSONPath=".spec.cidr",type=string
 // +kubebuilder:printcolumn:name=Endpoint,JSONPath=".spec.endpoint",type=string
+// +kubebuilder:printcolumn:name=Address,JSONPath=".status.address",type=string
 // +kubebuilder:printcolumn:name=State,JSONPath=".status.state",type=string
+// +kubebuilder:printcolumn:name=Routes,JSONPath=".spec.routes",priority=2000,type=string
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 type MeshMember struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              KubeLinkSpec `json:"spec"`
+	Spec              MeshMemberSpec `json:"spec"`
 	// +optional
 	Status MeshMemberStatus `json:"status,omitempty"`
 }
 
 type MeshMemberSpec struct {
-	Identity       string `json:"identity"`
-	ClusterAddress string `json:"clusterAddress"`
+	Identity string `json:"identity"`
 	// +optional
-	Endpoint string `json:"endpoint"`
+	Address string `json:"address,omitempty"`
 	// +optional
-	CIDR string `json:"cidr"`
+	Endpoint map[string]string `json:"endpoint,omitempty"`
+	// +optional
+	Routes []MeshMemberRoute `json:"routes,omitempty"`
+
+	// +optional
+	Gateway *types.ObjectReference `json:"gateway,omitempty"`
 
 	// public key for wireguard
 	// +optional
@@ -70,9 +75,26 @@ type MeshMemberSpec struct {
 	DNS *KubeLinkDNS `json:"dns,omitempty"`
 }
 
+type MeshMemberRoute struct {
+	CIDR string `json:"cidr"`
+}
+
 type MeshMemberStatus struct {
 	// +optional
 	State string `json:"state,omitempty"`
 	// +optional
 	Message string `json:"message,omitempty"`
+	// +optional
+	Address string `json:"address,omitempty"`
+}
+
+
+func (this *MeshMemberRoute) Equal(r *MeshMemberRoute) bool {
+	if this==r {
+		return true
+	}
+	if this==nil || r == nil {
+		return false
+	}
+	return this.CIDR==r.CIDR
 }
