@@ -146,6 +146,7 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 		return fmt.Errorf("error providing wireguard interface %q: %s", this.config.Interface, err)
 	}
 	this.link = link
+	this.config.Interface = link.Attrs().Name
 
 	wg, err := wgctrl.New()
 	if err != nil {
@@ -161,13 +162,13 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 		return fmt.Errorf("no private key available")
 	}
 
-	dev, err := wg.Device(this.config.Interface)
+	dev, err := wg.Device(this.link.Attrs().Name)
 	if err != nil {
 		return err
 	}
 	update := false
 	if dev.PrivateKey.String() != this.key.String() || dev.ListenPort != this.port {
-		logger.Infof("update interface %q with key %s and port %d", this.config.Interface, this.key.PublicKey(), this.port)
+		logger.Infof("update interface %q with key %s and port %d", this.link.Attrs().Name, this.key.PublicKey(), this.port)
 		update = true
 	}
 	port := this.port
@@ -245,7 +246,7 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 
 	if update {
 		logger.Infof("update interface with %d peer updates and %d removals", len(config.Peers)-remove, remove)
-		err = wg.ConfigureDevice(this.config.Interface, config)
+		err = wg.ConfigureDevice(this.link.Attrs().Name, config)
 		this.propagateError(nil, err, nil)
 	}
 	return err

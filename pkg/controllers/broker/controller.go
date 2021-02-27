@@ -143,9 +143,9 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 		controller.Infof("using TLS secret %q with management mode %s", this.config.Secret, this.config.ManageMode)
 	}
 	if this.config.Interface == "" {
-		controller.Infof("using dynamic tun interface name")
+		controller.Infof("using dynamic interface name")
 	} else {
-		controller.Infof("using tun interface name: %s", this.config.Interface)
+		controller.Infof("using interface name: %s", this.config.Interface)
 	}
 
 	return this, nil

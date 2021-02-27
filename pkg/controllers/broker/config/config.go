@@ -117,7 +117,7 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.ManageMode, "secret-manage-mode", "", MANAGE_MODE_NONE, "Manage mode for TLS secret")
 	set.AddStringOption(&this.DNSName, "dns-name", "", "", "DNS Name for managed certificate")
 	set.AddStringOption(&this.Service, "service", "", "", "Service name for wireguard or managed certificate")
-	set.AddStringOption(&this.Interface, "ifce-name", "", "", "Name of the tun interface")
+	set.AddStringOption(&this.Interface, "ifce-name", "", "", "Name of the tun/wireguard interface")
 	set.AddStringOption(&this.MeshDomain, "mesh-domain", "", "kubelink", "Base domain for cluster mesh services")
 	set.AddStringOption(&this.meshDNSServiceIP, "meshdns-service-ip", "", "", "Service IP of global mesh service DNS service")
 
