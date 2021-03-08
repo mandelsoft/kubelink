@@ -314,14 +314,20 @@ func (this *Mux) HandleTun() error {
 		}
 		working = true
 		packet := bytes[:n]
-		t := this.FindConnection(log, packet)
-		if t != nil {
-			err = t.WritePacket(PACKET_TYPE_DATA, packet)
-			if err != nil {
-				return err
-			}
+		this.Send(log,packet)
+	}
+}
+
+func (this *Mux) Send(log logger.LogContext, packet []byte) error {
+	var err error
+	t := this.FindConnection(log, packet)
+	if t != nil {
+		err = t.Send(packet)
+		if err!=nil {
+			log.Warnf("%s", err)
 		}
 	}
+	return err
 }
 
 func (this *Mux) ServeConnection(ctx context.Context, conn net.Conn) {

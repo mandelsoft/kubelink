@@ -132,6 +132,13 @@ func (this *mode) Setup() error {
 	return nil
 }
 
+func (this *mode) Cleanup() error {
+	if this.mux!=nil && this.mux.tun!=nil {
+		this.mux.tun.Close()
+	}
+	return nil
+}
+
 func (this *mode) Start() error {
 	NewServer("broker", this.mux).Start(this.certInfo, "", this.config.Port)
 	go func() {

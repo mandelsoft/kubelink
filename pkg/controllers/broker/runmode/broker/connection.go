@@ -62,8 +62,9 @@ type TunnelConnection struct {
 	remoteAddress string
 	handlers      []ConnectionFailHandler
 
-	wlock sync.Mutex
-	rlock sync.Mutex
+	channel chan []byte
+	wlock   sync.Mutex
+	rlock   sync.Mutex
 }
 
 func NewTunnelConnection(mux *Mux, conn net.Conn, link *kubelink.Link, handlers ...ConnectionFailHandler) (*TunnelConnection, *ConnectionHello, error) {
@@ -74,6 +75,7 @@ func NewTunnelConnection(mux *Mux, conn net.Conn, link *kubelink.Link, handlers 
 		conn:          conn,
 		remoteAddress: remote,
 		handlers:      append(handlers[:0:0], handlers...),
+		channel:       make(chan []byte, 10),
 	}
 	if link != nil {
 		t.clusterCIDR = link.ClusterAddress
@@ -151,7 +153,20 @@ func printConnState(log logger.LogContext, state tls.ConnectionState) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+func (this *TunnelConnection) Send(packet []byte) error {
+	select {
+	case this.channel <- packet:
+	default:
+		return fmt.Errorf("packet dropped because of busy connection")
+	}
+	return nil
+}
+
 func (this *TunnelConnection) Close() error {
+	if this.channel != nil {
+		close(this.channel)
+		this.channel = nil
+	}
 	return this.conn.Close()
 }
 
@@ -226,9 +241,23 @@ func (this *TunnelConnection) handshake() (*ConnectionHello, error) {
 }
 
 func (this *TunnelConnection) Serve() error {
+	go this.sender(this.channel)
 	err := this.serve()
 	this.notify(err)
+	if this.channel!=nil {
+		close(this.channel)
+	}
 	return err
+}
+
+func (this *TunnelConnection) sender(channel <-chan []byte) {
+	for {
+		packet, ok := <-channel
+		if !ok {
+			return
+		}
+		this.WritePacket(PACKET_TYPE_DATA, packet)
+	}
 }
 
 func (this *TunnelConnection) serve() error {
@@ -263,6 +292,13 @@ func (this *TunnelConnection) serve() error {
 					l := this.mux.links.GetLinkForClusterAddress(header.Src)
 					if l == nil {
 						this.Warnf("  dropping packet because of unknown cluster source address [%s]", header.Src)
+						continue
+					}
+					dest := this.mux.links.GetLinkForIP(header.Dst)
+					if dest != nil {
+						// routing in tunnel
+						this.Infof("route packet to link %s", dest.Name)
+						this.mux.Send(this, packet)
 						continue
 					}
 					granted, set := l.AllowIngress(header.Dst)
