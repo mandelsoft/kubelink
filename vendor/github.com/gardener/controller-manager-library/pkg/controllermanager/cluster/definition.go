@@ -127,7 +127,7 @@ func (this *_Definitions) create(ctx context.Context, logger logger.LogContext, 
 	if req.Scheme() == nil {
 		req = req.Configure().Scheme(this.scheme).Definition()
 	}
-	cluster, err := CreateCluster(ctx, logger, req, id, cfg.KubeConfig)
+	cluster, err := CreateCluster(ctx, logger, req, id, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +229,6 @@ func (this *_Definitions) ExtendConfig(cfg *areacfg.Config) {
 
 	for _, req := range this.definitions {
 		clusterCfg := NewConfig(req)
-		callExtensions(func(e Extension) error { e.ExtendConfig(req, clusterCfg); return nil })
 		cfg.AddSource(configTargetKey(req), clusterCfg)
 	}
 }

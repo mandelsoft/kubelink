@@ -8,7 +8,7 @@ require (
 	github.com/ahmetb/gen-crd-api-reference-docs v0.2.0
 	github.com/coreos/etcd v3.3.15+incompatible // indirect
 	github.com/coreos/go-iptables v0.4.5
-	github.com/gardener/controller-manager-library v0.2.1-0.20210209103923-f406f00d415c
+	github.com/gardener/controller-manager-library v0.2.1-0.20210311120503-cd9da8e3f6ac
 	github.com/mdlayher/ethernet v0.0.0-20190606142754-0394541c37b7
 	github.com/onsi/ginkgo v1.14.0
 	github.com/onsi/gomega v1.10.1

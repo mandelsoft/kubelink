@@ -29,19 +29,30 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
+	"github.com/gardener/controller-manager-library/pkg/utils"
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 	"github.com/mandelsoft/kubelink/pkg/tcp"
-	"github.com/mandelsoft/kubelink/pkg/utils"
 )
 
-type StatusUpdater func(obj *v1alpha1.KubeLink, err error) (bool, error)
+func init() {
+	if api.EP_INBOUND != kubelink.EP_INBOUND {
+		panic("EP_INBOUND constant mismatch")
+	}
+}
+
+type StatusUpdater func(obj *api.KubeLink, err error) (bool, error)
+
+type LocalGatewayInfo struct {
+	Gateway   net.IP
+	PublicKey string
+}
 
 type ReconcilerImplementation interface {
 	IsManagedRoute(*netlink.Route, kubelink.Routes) bool
@@ -49,8 +60,8 @@ type ReconcilerImplementation interface {
 	RequiredIPTablesChains() iptables.Requests
 	BaseConfig(config.OptionSource) *Config
 
-	Gateway(obj *v1alpha1.KubeLink) (net.IP, error)
-	UpdateGateway(link *v1alpha1.KubeLink) *string
+	Gateway(obj *api.KubeLink) (*LocalGatewayInfo, error)
+	UpdateGateway(link *api.KubeLink) *string
 }
 
 type Common struct {
@@ -77,7 +88,7 @@ func (this *Common) TriggerLink(name string) {
 	this.controller.Infof("trigger link %s", name)
 	this.Controller().EnqueueKey(resources.NewClusterKey(
 		this.controller.GetMainCluster().GetId(),
-		v1alpha1.KUBELINK, "", name),
+		api.KUBELINK, "", name),
 	)
 }
 
@@ -128,28 +139,37 @@ func (this *Reconciler) Start() {
 }
 
 func (this *Reconciler) Reconcile(logger logger.LogContext, obj resources.Object) reconcile.Status {
-	return this.ReconcileLink(logger, obj, nil)
+	if obj.GroupKind() == api.KUBELINK {
+		return this.ReconcileLink(logger, obj, nil)
+	}
+	return reconcile.Failed(logger, fmt.Errorf("unknown object type %q", obj.GroupKind()))
 }
 
 func (this *Reconciler) ReconcileLink(logger logger.LogContext, obj resources.Object,
-	updater func(logger logger.LogContext, link *v1alpha1.KubeLink, entry *kubelink.Link) (error, error)) reconcile.Status {
+	updater func(logger logger.LogContext, link *api.KubeLink, entry *kubelink.Link) (error, error)) reconcile.Status {
 	_, status := this.ReconcileAndGetLink(logger, obj, updater)
 	return status
 }
 
 func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resources.Object,
-	updater func(logger logger.LogContext, link *v1alpha1.KubeLink, entry *kubelink.Link) (error, error)) (*kubelink.Link, reconcile.Status) {
-	orig := obj.Data().(*v1alpha1.KubeLink)
+	updater func(logger logger.LogContext, link *api.KubeLink, entry *kubelink.Link) (error, error)) (*kubelink.Link, reconcile.Status) {
+	orig := obj.Data().(*api.KubeLink)
 	link := orig
 	logger.Infof("reconcile cidr %s[gateway %s]", link.Spec.CIDR, link.Status.Gateway)
 
 	gateway, err := this.impl.Gateway(link)
 	if gateway != nil {
-		s := gateway.String()
-		if link.Status.Gateway != s {
+		s := gateway.Gateway.String()
+		if link.Status.Gateway != s || (link.Spec.Endpoint == kubelink.EP_LOCAL && link.Status.PublicKey != gateway.PublicKey) {
 			link = link.DeepCopy()
 			link.Status.Gateway = s
+			if link.Spec.Endpoint == kubelink.EP_LOCAL {
+				link.Status.PublicKey = gateway.PublicKey
+			}
 		}
+	}
+	if err != nil {
+		logger.Infof("  link error: %s", err)
 	}
 
 	var invalid error
@@ -157,13 +177,29 @@ func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resour
 	var uerr error
 	if err == nil {
 		ldata, invalid = this.links.UpdateLink(link)
-		if updater != nil && invalid == nil {
-			uerr, err = updater(logger, link, ldata)
+		if ldata != nil {
+			if len(ldata.GatewayFor) != 0 {
+				logger.Info("used as gateway for %s", ldata.GatewayFor)
+			}
+			if ldata.GatewayLink != "" {
+				logger.Info("using gateway link %s", ldata.GatewayLink)
+			}
+		}
+		if invalid != nil {
+			logger.Warnf("invalid link: %s", err)
+		} else {
+			if updater != nil {
+				uerr, err = updater(logger, link, ldata)
+			}
+		}
+		for u := range this.Links().GetUsersOf(link.Name) {
+			// reconcile all using objects
+			this.Controller().EnqueueKey(resources.NewClusterKey(this.Controller().GetMainCluster().GetId(), api.KUBELINK, "", u))
 		}
 	}
 	if this.updateLink(logger, orig, err, invalid, false) {
 		_, err2 := obj.ModifyStatus(func(data resources.ObjectData) (bool, error) {
-			return this.updateLink(logger, data.(*v1alpha1.KubeLink), err, invalid, true), nil
+			return this.updateLink(logger, data.(*api.KubeLink), err, invalid, true), nil
 		})
 
 		if err2 != nil {
@@ -180,7 +216,7 @@ func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resour
 	return ldata, reconcile.Succeeded(logger)
 }
 
-func (this *Reconciler) updateLink(logger logger.LogContext, klink *v1alpha1.KubeLink, err, invalid error, update bool) bool {
+func (this *Reconciler) updateLink(logger logger.LogContext, klink *api.KubeLink, err, invalid error, update bool) bool {
 
 	mod := false
 	msg := klink.Status.Message
@@ -190,15 +226,15 @@ func (this *Reconciler) updateLink(logger logger.LogContext, klink *v1alpha1.Kub
 
 	if err != nil || invalid != nil {
 		if invalid != nil {
-			state = v1alpha1.STATE_INVALID
+			state = api.STATE_INVALID
 			msg = invalid.Error()
 		} else {
-			state = v1alpha1.STATE_ERROR
+			state = api.STATE_ERROR
 			msg = err.Error()
 		}
 	} else {
 		if gw != nil && *gw != "" {
-			state = v1alpha1.STATE_UP
+			state = api.STATE_UP
 			msg = ""
 		}
 	}
@@ -234,17 +270,23 @@ func (this *Reconciler) updateLink(logger logger.LogContext, klink *v1alpha1.Kub
 }
 
 func (this *Reconciler) Delete(logger logger.LogContext, obj resources.Object) reconcile.Status {
-	logger.Infof("delete")
-	this.links.RemoveLink(obj.GetName())
-	this.TriggerUpdate()
-	return reconcile.Succeeded(logger)
+	if obj.GroupKind() == api.KUBELINK {
+		logger.Infof("delete")
+		this.links.RemoveLink(obj.GetName())
+		this.TriggerUpdate()
+		return reconcile.Succeeded(logger)
+	}
+	return reconcile.Failed(logger, fmt.Errorf("unknown object type %q", obj.GroupKind()))
 }
 
 func (this *Reconciler) Deleted(logger logger.LogContext, key resources.ClusterObjectKey) reconcile.Status {
-	logger.Infof("deleted")
-	this.links.RemoveLink(key.Name())
-	this.TriggerUpdate()
-	return reconcile.Succeeded(logger)
+	if key.GroupKind() == api.KUBELINK {
+		logger.Infof("deleted")
+		this.links.RemoveLink(key.Name())
+		this.TriggerUpdate()
+		return reconcile.Succeeded(logger)
+	}
+	return reconcile.Failed(logger, fmt.Errorf("unknown object type %q", key.GroupKind()))
 }
 
 func String(r netlink.Route) string {
@@ -266,7 +308,6 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 	if err != nil {
 		logger.Errorf("cannot update iptables rules: %s", err)
 	}
-	logger.Debug("update routes")
 	routes, err := kubelink.ListRoutes()
 	if err != nil {
 		return reconcile.Delay(logger, err)
@@ -276,7 +317,7 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 	dcnt := 0
 	ocnt := 0
 	ccnt := 0
-	n := &utils.Notifier{LogContext: logger}
+	n := utils.NewNotifier(logger, "update routes")
 	for i, r := range routes {
 		if this.impl.IsManagedRoute(&r, required) {
 			mcnt++
@@ -308,7 +349,7 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 		}
 	}
 
-	logger.Infof("found %d managed (%d deleted) and %d created routes (%d other)", mcnt, dcnt, ccnt, ocnt)
+	n.Add(false, "found %d managed (%d deleted) and %d created routes (%d other)", mcnt, dcnt, ccnt, ocnt)
 
 	wg, err := wgctrl.New()
 	if err == nil {
@@ -329,7 +370,7 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 					continue
 				}
 				for _, a := range addrs {
-					cidr, gateways := this.Links().GetMeshGatewaysFor(a.IP)
+					cidr, gateways := this.Links().LookupMeshGatewaysFor(a.IP)
 					if cidr != nil {
 						if tcp.IPList(gateways).Contains(this.ifce.IP) {
 							match = true

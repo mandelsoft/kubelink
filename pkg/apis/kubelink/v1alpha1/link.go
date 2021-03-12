@@ -27,6 +27,8 @@ const STATE_ERROR = "Error"
 const STATE_INVALID = "Invalid"
 const STATE_UP = "Up"
 
+const EP_INBOUND = "Inbound"
+
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 type KubeLinkList struct {
@@ -65,7 +67,11 @@ type KubeLinkSpec struct {
 	// +optional
 	Egress         []string `json:"egress,omitempty"`
 	ClusterAddress string   `json:"clusterAddress"`
-	Endpoint       string   `json:"endpoint"`
+
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+	// +optional
+	GatewayLink string `json:"gatewayLink,omitempty"`
 
 	// public key for wireguard
 	// +optional
@@ -93,4 +99,6 @@ type KubeLinkStatus struct {
 	Message string `json:"message,omitempty"`
 	// +optional
 	Gateway string `json:"gateway,omitempty"`
+	// +optional
+	PublicKey string `json:"publicKey,omitempty"`
 }

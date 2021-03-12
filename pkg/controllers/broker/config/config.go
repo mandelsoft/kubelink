@@ -30,6 +30,8 @@ import (
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
+
+	//"github.com/mandelsoft/kubelink/pkg/kubelink"
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 	kutils "github.com/mandelsoft/kubelink/pkg/utils"
 )
@@ -45,9 +47,9 @@ const RUN_MODE_WIREGUARD = "wireguard"
 const CLUSTER_DNS_IP = 10
 const KUBELINK_DNS_IP = 11
 
-const DNSMODE_NONE = "none"
-const DNSMODE_KUBERNETES = "kubernetes"
-const DNSMODE_DNS = "dns"
+const DNSMODE_NONE = kubelink.DNSMODE_NONE
+const DNSMODE_KUBERNETES = kubelink.DNSMODE_KUBERNETES
+const DNSMODE_DNS = kubelink.DNSMODE_DNS
 
 var valid_modes = utils.NewStringSet(MANAGE_MODE_NONE, MANAGE_MODE_SELF, MANAGE_MODE_CERT)
 
@@ -105,7 +107,6 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	this.Config.AddOptionsToSet(set)
 	set.AddStringOption(&this.service, "service-cidr", "", "", "CIDR of local service network")
 	set.AddStringOption(&this.address, "link-address", "", "", "CIDR of cluster in cluster network")
-	set.AddStringOption(&this.ClusterName, "cluster-name", "", "", "Name of local cluster in cluster mesh")
 	set.AddStringOption(&this.responsible, "served-links", "", "all", "Comma separated list of links to serve")
 	set.AddIntOption(&this.Port, "broker-port", "", 0, "Port for bridge/wrireguard")
 	set.AddIntOption(&this.AdvertisedPort, "advertised-port", "", kubelink.DEFAULT_PORT, "Advertised broker port for auto-connect")
@@ -118,8 +119,10 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.DNSName, "dns-name", "", "", "DNS Name for managed certificate")
 	set.AddStringOption(&this.Service, "service", "", "", "Service name for wireguard or managed certificate")
 	set.AddStringOption(&this.Interface, "ifce-name", "", "", "Name of the tun/wireguard interface")
-	set.AddStringOption(&this.MeshDomain, "mesh-domain", "", "kubelink", "Base domain for cluster mesh services")
-	set.AddStringOption(&this.meshDNSServiceIP, "meshdns-service-ip", "", "", "Service IP of global mesh service DNS service")
+
+	set.AddStringOption(&this.MeshDomain, "mesh-domain", "", "kubelink", "Default Base domain for cluster mesh services")
+	set.AddStringOption(&this.meshDNSServiceIP, "meshdns-service-ip", "", "", "Default Service IP of global mesh service DNS service")
+	set.AddStringOption(&this.ClusterName, "cluster-name", "", "", "Default Name of local cluster in cluster mesh")
 
 	set.AddStringOption(&this.serviceAccount, "service-account", "", "", "Service Account for API Access propagation")
 
@@ -255,11 +258,11 @@ func (this *Config) Prepare() error {
 }
 
 func (this *Config) MatchLink(obj *v1alpha1.KubeLink) (bool, net.IP) {
-	ip, _, err := net.ParseCIDR(obj.Spec.ClusterAddress)
+	ip, cidr, err := net.ParseCIDR(obj.Spec.ClusterAddress)
 	if err != nil {
 		return false, nil
 	}
-	if !this.Responsible.Contains("all") && !this.Responsible.Contains(obj.Name) {
+	if !this.Responsible.Contains("all") && !this.Responsible.Contains(cidr.String()) {
 		return false, nil
 	}
 	return this.ClusterCIDR.Contains(ip), ip

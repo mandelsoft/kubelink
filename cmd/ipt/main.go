@@ -20,6 +20,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 
 	"github.com/gardener/controller-manager-library/pkg/logger"
@@ -30,9 +31,6 @@ import (
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
-func test() {
-}
-
 func CheckErr(err error) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
@@ -41,39 +39,71 @@ func CheckErr(err error) {
 }
 
 func main() {
-	test()
-	fmt.Println("Hello iptables")
+	nat := false
+	clear := false
+	args := []string{}
+
+	for _, arg := range os.Args[1:] {
+		switch arg {
+		case "-nat":
+			nat = true
+		case "-fw":
+			nat = false
+		case "-clear", "clear":
+			clear = true
+		default:
+			args = append(args, arg)
+		}
+	}
+	if clear {
+		fmt.Print("Clearing ")
+	} else {
+		fmt.Print("Configuring ")
+	}
+	if nat {
+		fmt.Println("NAT")
+	} else {
+		fmt.Println("Firewall")
+	}
 
 	name := "test"
-	if len(os.Args) > 1 {
-		name = os.Args[1]
+	if len(args) > 0 {
+		name = args[0]
 	}
 	tool, err := controllers.NewLinkTool()
 	CheckErr(err)
 
 	links := kubelink.NewLinks(nil, 8777)
 
-	ingress, err := kubelink.ParseIPRange([]string{"192.168.5.0/28", "!192.168.5.5/32"})
+	ingress, err := kubelink.ParseFirewallRule([]string{"192.168.5.0/28", "!192.168.5.5/32"})
 	CheckErr(err)
 
+	addr, _ := tcp.ParseIPNet("192.168.0.1/24")
 	cidr, _ := tcp.ParseIPNet("192.168.0.13/24")
+	egress, _ := tcp.ParseIPNet("100.64.16.0/22")
 
 	link := &kubelink.Link{
 		Name:           name,
 		Ingress:        ingress,
 		ClusterAddress: cidr,
+		Egress:         []*net.IPNet{egress},
 	}
 	links.ReplaceLink(link)
 
-	chains := iptables.Requests{}
-	if name != "clear" {
-		chains = links.GetFirewallChains()
-
+	fwChains := iptables.Requests{}
+	natChains := iptables.Requests{}
+	if !clear {
+		fwChains = links.GetFirewallChains()
+		natChains = links.GetNatChains(tcp.CIDRList{addr})
 	}
+
 	logger.SetLevel("debug")
 	logger := logger.New()
 
-	err = tool.HandleFirewall(logger, chains)
+	if nat {
+		err = tool.HandleNat(logger, "kubelink", natChains)
+	} else {
+		err = tool.HandleFirewall(logger, fwChains)
+	}
 	CheckErr(err)
-	_ = tool
 }

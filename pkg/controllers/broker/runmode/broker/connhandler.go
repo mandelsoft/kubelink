@@ -72,6 +72,6 @@ func (this *DefaultConnectionHandler) UpdateAccess(hello *ConnectionHello) {
 	}
 
 	if infoAPI != nil || infoDNS != nil {
-		this.runmode.UpdateLink(this.runmode.mux, link.Name, infoAPI, infoDNS)
+		this.runmode.UpdateLinkInfo(this.runmode.mux, link.Name, infoAPI, infoDNS)
 	}
 }

@@ -70,28 +70,19 @@ func NewTun(logger logger.LogContext, tool *controllers.LinkTool, name string, c
 		return nil, fmt.Errorf("cannot get link for %q: %s", tun, err)
 	}
 
-	rule := []string{"-o", tun.String(), "-j", "SNAT", "--to-source", clusterAddress.IP.String()}
-	ok, err := tool.NatRulesExists(rule...)
+	finalizer, err := tool.SetNATRule(link, clusterAddress)
 	if err != nil {
 		tun.Close()
-		return nil, fmt.Errorf("cannot check nat: %s", err)
+		return nil, err
 	}
 
-	if ok {
-		logger.Infof("nat rule %v already exists", rule)
-	} else {
-		err = tool.NatRulesAppend(rule...)
-		if err != nil {
-			tun.Close()
-			return nil, fmt.Errorf("cannot add nat rule %v: %s", rule, err)
-		}
-		logger.Infof("added nat rule %v", rule)
-	}
 	result := &Tun{
 		tun,
 		link,
 		func() {
-			tool.NatRulesDelete(rule...)
+			if finalizer != nil {
+				finalizer()
+			}
 			tun.Close()
 		},
 	}

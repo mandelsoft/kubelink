@@ -192,6 +192,15 @@ func (this *CIDRList) Contains(ip net.IP) bool {
 	return false
 }
 
+func (this *CIDRList) Lookup(ip net.IP) *net.IPNet {
+	for _, c := range *this {
+		if c.Contains(ip) {
+			return c
+		}
+	}
+	return nil
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 type IPList []net.IP

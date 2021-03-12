@@ -34,8 +34,14 @@ var tasksKey = ctxutil.SimpleKey("tasks")
 
 const CMD_TASK_PREFIX = "task:"
 
+type SchedulingMode byte
+
+const MODE_REPLACE = MODE_OVERIDE | MODE_RESET // replace task and reset task schedule
+const MODE_OVERIDE = SchedulingMode(0x01)      // replace task if already scheduled
+const MODE_RESET = SchedulingMode(0x02)        // reset actual delay if already scheduled
+
 type Tasks interface {
-	ScheduleTask(task Task, override bool)
+	ScheduleTask(Task, SchedulingMode)
 }
 
 func GetTaskClient(controller controller.Interface) Tasks {
@@ -85,30 +91,34 @@ func (this *tasks) done(task Task, keep bool) {
 	}
 }
 
-func (this *tasks) ScheduleTask(task Task, override bool) {
+func (this *tasks) ScheduleTask(task Task, mode SchedulingMode) {
 	id := task.Id()
 
 	this.lock.Lock()
 	defer this.lock.Unlock()
 
-	if old := this.tasks[id]; old == nil || override {
+	old := this.tasks[id]
+	if old == nil || (mode&MODE_OVERIDE) != 0 {
 		this.tasks[id] = task
 	}
-	this.logger.Infof("SCHEDULE TASK %s", id)
+	if old != nil && (mode&MODE_RESET) == 0 {
+		return
+	}
+	this.logger.Debugf("SCHEDULE TASK %s", id)
 	this.EnqueueCommand(CMD_TASK_PREFIX + task.Id())
 }
 
 func (this *tasks) execute(logger logger.LogContext, id string) reconcile.Status {
-	this.logger.Infof("EXECUTE TASK %s", id)
+	this.logger.Debugf("EXECUTE TASK %s", id)
 	task := this.activate(id)
 	result := task.Execute(logger)
 	if (!result.IsSucceeded() && !result.IsFailed() && result.Interval != 0) || result.Interval > 0 {
 		this.done(task, true)
-		this.logger.Infof("TASK %s will be rescheduled RESULT: %v", id, result)
+		this.logger.Debugf("TASK %s will be rescheduled RESULT: %v", id, result)
 	} else {
 		this.done(task, false)
 		result.Interval = 0
-		this.logger.Infof("TASK %s DONE RESULT: %v", id, result)
+		this.logger.Debugf("TASK %s DONE RESULT: %v", id, result)
 	}
 	return result
 }

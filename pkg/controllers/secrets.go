@@ -31,7 +31,7 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/utils"
 )
 
-var SecretResource = resources.NewGroupKind("", "Secret")
+var SECRET = resources.NewGroupKind("", "Secret")
 
 type NotificationHandler interface {
 	NotifyChange(name resources.ObjectName, object resources.Object)
@@ -59,7 +59,7 @@ var _ reconcile.Interface = &secretReconciler{}
 func SecretCacheReconciler(config controller.Configuration) controller.Configuration {
 	return config.WorkerPool("secrets", 1, 0).
 		Reconciler(createSecrets, "secrets").
-		ReconcilerWatchByGK("secrets", SecretResource)
+		ReconcilerWatchByGK("secrets", SECRET)
 }
 
 func createSecrets(controller controller.Interface) (reconcile.Interface, error) {
@@ -112,7 +112,7 @@ type SecretCache struct {
 }
 
 func NewSecretCache(r resources.ResourcesSource) *SecretCache {
-	resc, err := r.Resources().Get(SecretResource)
+	resc, err := r.Resources().Get(SECRET)
 	if err != nil {
 		return nil
 	}

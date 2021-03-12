@@ -19,8 +19,6 @@
 package broker
 
 import (
-	"net"
-
 	"github.com/gardener/controller-manager-library/pkg/config"
 	"github.com/vishvananda/netlink"
 
@@ -49,7 +47,7 @@ func (this *dummy) BaseConfig(cfg config.OptionSource) *controllers.Config {
 	return &cfg.(*ctrlcfg.Config).Config
 }
 
-func (this *dummy) Gateway(obj *v1alpha1.KubeLink) (net.IP, error) {
+func (this *dummy) Gateway(obj *v1alpha1.KubeLink) (*controllers.LocalGatewayInfo, error) {
 	return nil, nil
 }
 

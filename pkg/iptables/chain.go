@@ -19,9 +19,7 @@
 package iptables
 
 import (
-	"github.com/gardener/controller-manager-library/pkg/logger"
-
-	"github.com/mandelsoft/kubelink/pkg/utils"
+	utils "github.com/gardener/controller-manager-library/pkg/utils"
 )
 
 type Chain struct {
@@ -39,7 +37,7 @@ func (this *Chain) Add(r Rule) *Chain {
 	return this
 }
 
-func (this *Chain) update(logger logger.LogContext, ipt *IPTables, cleanup bool) error {
+func (this *Chain) update(logger utils.NotificationLogger, ipt *IPTables, cleanup bool) error {
 	if this == nil {
 		return nil
 	}
@@ -69,7 +67,7 @@ func (this *Chain) update(logger logger.LogContext, ipt *IPTables, cleanup bool)
 	found := Rules{}
 	ccnt := 0
 	dcnt := 0
-	n := &utils.Notifier{LogContext: logger}
+	n := utils.NewNotifier(logger)
 	for _, e := range cur.Rules {
 		if this.Rules.Index(e) < 0 {
 			if cleanup {
@@ -95,8 +93,9 @@ func (this *Chain) update(logger logger.LogContext, ipt *IPTables, cleanup bool)
 			if err != nil {
 				return err
 			}
+			ccnt++
 		}
 	}
-	logger.Infof("chain %s/%s: %d managed (%d deleted) and %d created rules", this.Table, this.Chain, len(this.Rules), dcnt, ccnt)
+	n.Add(false, "chain %s/%s: %d managed (%d deleted, %d created, %d kept) rules", this.Table, this.Chain, len(this.Rules), dcnt, ccnt, len(found))
 	return nil
 }

@@ -244,7 +244,7 @@ func (this *TunnelConnection) Serve() error {
 	go this.sender(this.channel)
 	err := this.serve()
 	this.notify(err)
-	if this.channel!=nil {
+	if this.channel != nil {
 		close(this.channel)
 	}
 	return err

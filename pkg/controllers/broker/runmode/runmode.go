@@ -45,7 +45,7 @@ type RunModeEnv interface {
 	GetDNSInfo() kubelink.LinkDNSInfo
 
 	TriggerUpdate()
-	UpdateLink(logger logger.LogContext, name string, access *kubelink.LinkAccessInfo, dns *kubelink.LinkDNSInfo)
+	UpdateLinkInfo(logger logger.LogContext, name string, access *kubelink.LinkAccessInfo, dns *kubelink.LinkDNSInfo)
 }
 
 type RunMode interface {
@@ -56,9 +56,11 @@ type RunMode interface {
 	Setup() error
 	HandleDNSPropagation(klink *api.KubeLink)
 	GetInterface() netlink.Link
+	UpdateLocalGatewayInfo(*controllers.LocalGatewayInfo)
 	GetErrorForMeshNode(ip net.IP) error
 	RequiredIPTablesChains() iptables.Requests
 	ReconcileInterface(logger logger.LogContext) error
+	Cleanup() error
 }
 
 type RunModeBase struct {
@@ -99,6 +101,10 @@ func (this *RunModeBase) Setup() error {
 	return nil
 }
 
+func (this *RunModeBase) Cleanup() error {
+	return nil
+}
+
 func (this *RunModeBase) Start() error {
 	return nil
 }
@@ -108,6 +114,9 @@ func (this *RunModeBase) HandleDNSPropagation(klink *api.KubeLink) {
 
 func (this *RunModeBase) GetInterface() netlink.Link {
 	return nil
+}
+
+func (this *RunModeBase) UpdateLocalGatewayInfo(*controllers.LocalGatewayInfo) {
 }
 
 func (this *RunModeBase) GetErrorForMeshNode(ip net.IP) error {

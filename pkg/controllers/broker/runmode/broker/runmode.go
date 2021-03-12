@@ -133,7 +133,7 @@ func (this *mode) Setup() error {
 }
 
 func (this *mode) Cleanup() error {
-	if this.mux!=nil && this.mux.tun!=nil {
+	if this.mux != nil && this.mux.tun != nil {
 		this.mux.tun.Close()
 	}
 	return nil
@@ -169,12 +169,15 @@ func (this *mode) Start() error {
 
 func (this *mode) HandleDNSPropagation(klink *api.KubeLink) {
 	if this.config.DNSPropagation != config.DNSMODE_NONE {
-		this.Tasks().ScheduleTask(NewConnectTask(klink.Name, this), false)
+		this.Tasks().ScheduleTask(NewConnectTask(klink.Name, this), 0)
 	}
 }
 
 func (this *mode) GetInterface() netlink.Link {
 	return this.mux.tun.link
+}
+
+func (this *mode) UpdateLocalGatewayInfo(*controllers.LocalGatewayInfo) {
 }
 
 func (this *mode) GetErrorForMeshNode(ip net.IP) error {

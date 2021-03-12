@@ -22,7 +22,7 @@ import (
 	"regexp"
 
 	"github.com/coreos/go-iptables/iptables"
-	"github.com/gardener/controller-manager-library/pkg/logger"
+	"github.com/gardener/controller-manager-library/pkg/utils"
 )
 
 type IPTables struct {
@@ -89,15 +89,15 @@ func (this *IPTables) ListChain(table, chain string) (*Chain, error) {
 	}, nil
 }
 
-func (this *IPTables) Execute(logger logger.LogContext, req *ChainRequest) error {
+func (this *IPTables) Execute(logger utils.NotificationLogger, req *ChainRequest) error {
 	return req.update(logger, this, req.Cleanup)
 }
 
-func (this *IPTables) UpdateChain(logger logger.LogContext, chain *Chain) error {
+func (this *IPTables) UpdateChain(logger utils.NotificationLogger, chain *Chain) error {
 	return chain.update(logger, this, true)
 }
 
-func (this *IPTables) AssureChain(logger logger.LogContext, chain *Chain) error {
+func (this *IPTables) AssureChain(logger utils.NotificationLogger, chain *Chain) error {
 	return chain.update(logger, this, false)
 }
 

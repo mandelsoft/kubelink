@@ -608,6 +608,12 @@ func ParseObjectName(name string) (GenericObjectName, error) {
 }
 
 func EqualsObjectName(a, b ObjectName) bool {
+	if a == b {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
 	return a.Name() == b.Name() && a.Namespace() == b.Namespace()
 }
 

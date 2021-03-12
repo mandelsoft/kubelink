@@ -117,7 +117,6 @@ func coreEntry(first *bool, name, basedomain string, dnsIP, clusterDomain string
     reload
     loadbalance round_robin
 }
-
 `
 	plugin := ""
 	if dnsIP != "" {
@@ -190,6 +189,7 @@ func (this *reconciler) updateLinkFromObject(logger logger.LogContext, klink *ap
 	var err error
 	var terr error
 
+	logger.Infof("update link from object")
 	// API Access
 	name := this.getSecretName(klink)
 	if name != nil {
@@ -217,13 +217,17 @@ func (this *reconciler) updateLinkFromObject(logger logger.LogContext, klink *ap
 		}
 	}
 
-	// DNS Propagation
 	if err == nil && klink.Spec.DNS != nil {
+		// DNS Propagation
 		dnsInfo = &kubelink.LinkDNSInfo{
-			ClusterDomain: klink.Spec.DNS.BaseDomain,
+			DNSPropagation: this.config.DNSPropagation != config.DNSMODE_NONE,
+			ClusterDomain:  "cluster.local",
 		}
-		if dnsInfo.ClusterDomain == "" {
-			dnsInfo.ClusterDomain = "cluster.local"
+		if klink.Spec.DNS.OmitDNSPropagation != nil {
+			dnsInfo.DNSPropagation = !*klink.Spec.DNS.OmitDNSPropagation
+		}
+		if klink.Spec.DNS.BaseDomain != "" {
+			dnsInfo.ClusterDomain = klink.Spec.DNS.BaseDomain
 		}
 		if klink.Spec.DNS.DNSIP != "" {
 			ip := net.ParseIP(klink.Spec.DNS.DNSIP)
@@ -238,6 +242,17 @@ func (this *reconciler) updateLinkFromObject(logger logger.LogContext, klink *ap
 			}
 		}
 	}
+	if klink.Spec.Endpoint == kubelink.EP_LOCAL && dnsInfo == nil {
+		dnsInfo = &kubelink.LinkDNSInfo{
+			DNSPropagation: this.config.DNSPropagation != config.DNSMODE_NONE,
+			ClusterDomain:  this.config.MeshDomain,
+			DnsIP:          this.config.MeshDNSServiceIP,
+		}
+	}
+	if dnsInfo != nil {
+		logger.Infof("found dns info %s", dnsInfo)
+	}
+
 	this.Links().UpdateLinkInfo(logger, klink.Name, access, dnsInfo, false)
 	return nil, err
 }
@@ -369,31 +384,47 @@ func (this *reconciler) updateObjectFromLink(logger logger.LogContext, klink *ap
 }
 
 func (this *reconciler) updateCorefile(logger logger.LogContext) {
+
 	if this.config.DNSPropagation == config.DNSMODE_NONE {
+		logger.Debugf("dns propagation disabled")
 		return
 	}
-	logger.Debug("update corefile")
+	log := utils.NewNotifier(logger)
+	log.Debugf("update corefile")
 	data := map[string][]byte{}
 
 	first := true
+	meshDomains := map[string]string{}
 	keys := []string{}
 
 	kubeconfig := NewKubeconfig()
-	if this.config.DNSPropagation == config.DNSMODE_KUBERNETES {
 
-		this.Links().Visit(func(l *kubelink.Link) bool {
-			if l.Token != "" {
-				ip := tcp.SubIP(l.ServiceCIDR, 1)
-				kubeconfig.AddCluster(l.Name, fmt.Sprintf("https://%s", ip), l.CACert, l.Token)
-				keys = append(keys, l.Name)
-			}
-			return true
-		})
-	} else {
-		this.Links().Visit(func(l *kubelink.Link) bool {
-			keys = append(keys, l.Name)
-			return true
-		})
+	meshes := this.Links().GetMeshInfos()
+	log.Debugf("found mesh domains: %s", utils.StringKeySet(meshes))
+
+	for n, m := range meshes {
+		if m.DNSInfo.DNSPropagation {
+			log.Debugf("  handle mesh %q", n)
+			this.Links().Visit(func(l *kubelink.Link) bool {
+				if l.MatchMesh(m.CIDR) {
+					log.Debugf("  found matching link %s", l.Name)
+					if this.config.DNSPropagation == config.DNSMODE_KUBERNETES {
+						if l.Token != "" {
+							ip := tcp.SubIP(l.ServiceCIDR, 1)
+							kubeconfig.AddCluster(l.Name, fmt.Sprintf("https://%s", ip), l.CACert, l.Token)
+							meshDomains[l.Name] = m.DNSInfo.ClusterDomain
+							keys = append(keys, l.Name)
+						}
+					} else {
+						meshDomains[l.Name] = m.DNSInfo.ClusterDomain
+						keys = append(keys, l.Name)
+					}
+				}
+				return true
+			})
+		} else {
+			log.Debugf("  dns progation disabled for mesh %q", n)
+		}
 	}
 	b, err := yaml.Marshal(kubeconfig)
 	if err != nil {
@@ -405,35 +436,43 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 
 	corefile := ""
 	ip := ""
-	if this.config.ClusterName != "" {
-		clusterDomain := "cluster.local"
-		if this.config.DNSPropagation == config.DNSMODE_DNS {
-			if this.dnsInfo.DnsIP != nil {
-				ip = this.dnsInfo.DnsIP.String()
-			} else {
-				ip = tcp.SubIP(this.config.ServiceCIDR, config.CLUSTER_DNS_IP).String()
-			}
-			if this.dnsInfo.ClusterDomain != "" {
-				clusterDomain = this.dnsInfo.ClusterDomain
-			}
+	if this.config.DNSPropagation == config.DNSMODE_DNS {
+		if this.dnsInfo.DnsIP != nil {
+			ip = this.dnsInfo.DnsIP.String()
+		} else {
+			ip = tcp.SubIP(this.config.ServiceCIDR, config.CLUSTER_DNS_IP).String()
 		}
-		corefile += coreEntry(&first, this.config.ClusterName, this.config.MeshDomain, ip, clusterDomain, true)
+		log.Debugf("using local dns servide %s", ip)
 	}
+
+	// handle local cluster for all meshes
+	for n, m := range meshes {
+		if m.PropagateDNS() {
+			log.Debugf("creating local core entry for %s[%s]", n, m.ClusterName)
+			corefile += coreEntry(&first, m.ClusterName, m.DNSInfo.ClusterDomain, ip, this.dnsInfo.ClusterDomain, true)
+		} else {
+			log.Debugf("no local core entry for %s[%s]", n, m.ClusterName)
+		}
+	}
+
+	// handle links for meshes
+	log.Debugf("using dns propagation for %d links", len(keys))
 	for _, k := range keys {
-		clusterDomain := "cluster.local"
+		ip := ""
 		l := this.Links().GetLink(k)
+		clusterDomain := "cluster.local"
+		if l.ClusterDomain != "" {
+			clusterDomain = l.ClusterDomain
+		}
 		if this.config.DNSPropagation == config.DNSMODE_DNS {
 			if l.DnsIP != nil {
 				ip = l.DnsIP.String()
 			} else {
 				ip = tcp.SubIP(l.ServiceCIDR, config.CLUSTER_DNS_IP).String()
 			}
-			if l.ClusterDomain != "" {
-				clusterDomain = l.ClusterDomain
-			}
-
 		}
-		corefile += coreEntry(&first, k, this.config.MeshDomain, ip, clusterDomain, false)
+		log.Debugf("create core entry for link %s mapping domain %s to %s [%s]", l.Name, clusterDomain, meshDomains[k], ip)
+		corefile += coreEntry(&first, k, meshDomains[k], ip, clusterDomain, false)
 	}
 	data["Corefile"] = []byte(corefile)
 
@@ -453,7 +492,7 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 		return
 	}
 	if mod {
-		logger.Infof("coredns secret %s updated", name)
+		log.Infof("coredns secret %s updated", name)
 		this.RestartDeployment(logger,
 			resources.NewObjectName(this.Controller().GetEnvironment().Namespace(), this.config.CoreDNSDeployment))
 	}
@@ -479,9 +518,14 @@ func Base64Encode(data []byte, max int) string {
 	}
 }
 
-func (this *reconciler) ConnectCoredns() {
-	this.tasks.ScheduleTask(newConfigureCorednsTask(this), true)
+func (this *reconciler) ConfigureCoredns() {
+
 }
+func (this *reconciler) ConnectCoredns() {
+	this.tasks.ScheduleTask(newConfigureCorednsTask(this), 0)
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 type configureCorednsTask struct {
 	tasks.BaseTask
@@ -496,7 +540,8 @@ func newConfigureCorednsTask(reconciler *reconciler) tasks.Task {
 }
 
 func (this *configureCorednsTask) Execute(logger logger.LogContext) reconcile.Status {
-	logger.Infof("configuring local cluster coredns setup to connect to mesh DNS")
+	log := utils.NewNotifier(logger, "configuring local cluster coredns setup to connect to mesh DNS")
+
 	cm := &_core.ConfigMap{}
 	name := resources.NewObjectName("kube-system", "coredns-custom")
 
@@ -510,6 +555,7 @@ func (this *configureCorednsTask) Execute(logger logger.LogContext) reconcile.St
 	} else {
 		ip = this.config.CoreDNSServiceIP
 	}
+	log.Debugf("  using local mesh dns service %s", ip)
 
 	_, err := this.Controller().GetMainCluster().Resources().GetObjectInto(name, cm)
 	if err != nil {
@@ -519,25 +565,38 @@ func (this *configureCorednsTask) Execute(logger logger.LogContext) reconcile.St
 		return reconcile.Delay(logger, fmt.Errorf("no coredns custom config found")).RescheduleAfter(10 * time.Minute)
 	}
 
-	meshforward := ""
-	if this.config.MeshDNSServiceIP != nil {
-		meshforward = fmt.Sprintf(`
+	config := ""
+	meshes := this.Links().GetMeshInfos()
+	keys := utils.StringKeySet(meshes).AsArray()
+	sort.Strings(keys)
+	log.Debugf("  found meshes %s", utils.StringKeySet(meshes))
+	for _, n := range keys {
+		m:= meshes[n]
+		if !m.DNSInfo.DNSPropagation {
+			log.Debugf("  dns propagation disabled for %s", n)
+			continue
+		}
+		meshforward := ""
+		if m.DNSInfo.DnsIP != nil {
+			log.Debugf("  propagate global mesh domain %s for %s to %s", m.DNSInfo.ClusterDomain, n, m.DNSInfo.DnsIP)
+			meshforward = fmt.Sprintf(`
 svc.global.%s:8053 {
 	errors
 	cache 30
 	forward . %s
 }
-`, this.config.MeshDomain, this.config.MeshDNSServiceIP)
-	}
-
-	config := fmt.Sprintf(`
+`, m.DNSInfo.ClusterDomain, m.DNSInfo.DnsIP)
+		}
+		log.Debugf("  propagate mesh domain %s for %s to local mesh dns %s", m.DNSInfo.ClusterDomain, n, ip)
+		config += fmt.Sprintf(`
 %s
 %s:8053 {
 	errors
 	cache 30
 	forward . %s
 }
-`, meshforward, this.config.MeshDomain, ip)
+`, meshforward, m.DNSInfo.ClusterDomain, ip)
+	}
 
 	_, mod, err := this.Controller().GetMainCluster().Resources().ModifyObject(cm, func(data resources.ObjectData) (bool, error) {
 		cm := data.(*_core.ConfigMap)
@@ -550,6 +609,7 @@ svc.global.%s:8053 {
 	})
 
 	if mod {
+		log.Infof("local cluster dns config updated")
 		this.reconciler.RestartDeployment(logger, resources.NewObjectName("kube-system", "coredns"))
 	}
 	return reconcile.Succeeded(logger)

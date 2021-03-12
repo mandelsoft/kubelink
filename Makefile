@@ -11,7 +11,10 @@ IMAGE_PREFIX                := $(REGISTRY)$(IMAGEORG)
 REPO_ROOT                   := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 HACK_DIR                    := $(REPO_ROOT)/hack
 VERSION                     := $(shell cat "$(REPO_ROOT)/VERSION")
-COMMIT                      := $(shell git rev-parse HEAD)
+GITVERVS                    ?= $(shell git describe --exact-match 2> /dev/null || \
+                                 git describe --match=$(git rev-parse --short=8 HEAD) --always --dirty --abbrev=8)
+
+COMMIT                      := $(shell git describe --match=$(git rev-parse HEAD) --always --dirty --abbrev=8)
 ifeq ($(RELEASE),true)
 IMAGE_TAG                   := $(VERSION)
 else
@@ -42,7 +45,7 @@ dev:
 	@echo target: release
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go install \
         -mod=vendor \
-	    -ldflags "-X $(VERSION_VAR)=$(VERSION)-dev-$(COMMIT)" \
+	    -ldflags "-X $(VERSION_VAR)=$(VERSION)-$(COMMIT)" \
 	    ./cmd/$(NAME)
 
 .PHONY: build-local
@@ -81,7 +84,7 @@ docker-login:
 
 .PHONY: images-dev
 images-dev:
-	@docker build -t $(IMAGE_PREFIX)/$(NAME):$(VERSION)-dev-$(COMMIT) -t $(IMAGE_PREFIX)/$(NAME):latest -f Dockerfile -m 6g --build-arg TARGETS=dev --target $(NAME) .
+	@docker build -t $(IMAGE_PREFIX)/$(NAME):$(VERSION)-$(COMMIT) -t $(IMAGE_PREFIX)/$(NAME):latest -f Dockerfile -m 6g --build-arg TARGETS=dev --target $(NAME) .
 	@docker push $(IMAGE_PREFIX)/$(NAME):latest
 
 .PHONY: images-release

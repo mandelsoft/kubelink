@@ -26,9 +26,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+var SERVICE = resources.NewGroupKind("", "Service")
+
 func GetServicePort(cntr controller.Interface, name string, kind string, proto corev1.Protocol) (int, error) {
 	// analyse and validate service
-	resc, err := cntr.GetMainCluster().GetResource(resources.NewGroupKind("", "Service"))
+	resc, err := cntr.GetMainCluster().GetResource(SERVICE)
 	if err != nil {
 		return 0, err
 	}

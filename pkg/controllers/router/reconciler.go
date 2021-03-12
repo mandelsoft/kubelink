@@ -19,10 +19,11 @@
 package router
 
 import (
-	"net"
-
 	"github.com/gardener/controller-manager-library/pkg/config"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
+	"github.com/gardener/controller-manager-library/pkg/logger"
+	"github.com/gardener/controller-manager-library/pkg/resources"
+	"github.com/gardener/controller-manager-library/pkg/utils"
 	"github.com/vishvananda/netlink"
 
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
@@ -34,7 +35,8 @@ import (
 
 type reconciler struct {
 	*controllers.Reconciler
-	config *Config
+	config   *Config
+	endpoint resources.ObjectName
 }
 
 var _ reconcile.Interface = &reconciler{}
@@ -46,7 +48,7 @@ func (this *reconciler) BaseConfig(cfg config.OptionSource) *controllers.Config 
 	return &cfg.(*Config).Config
 }
 
-func (this *reconciler) Gateway(obj *v1alpha1.KubeLink) (net.IP, error) {
+func (this *reconciler) Gateway(obj *v1alpha1.KubeLink) (*controllers.LocalGatewayInfo, error) {
 	return nil, nil
 }
 
@@ -77,11 +79,17 @@ func (this *reconciler) RequiredRoutes() kubelink.Routes {
 
 func (this *reconciler) RequiredIPTablesChains() iptables.Requests {
 
-	if this.Links().HasWireguard() && !this.Links().IsGateway(this.NodeInterface()) {
+	if this.Links().HasWireguard() && !this.isGateway() {
 		return iptables.Requests{} // no firewall settings on non-gateway nodes
 	}
 	return nil // no iptables update
 }
+
+func (this *reconciler) isGateway() bool {
+	return this.Links().IsGateway(this.NodeInterface())
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 func (this *reconciler) Setup() {
 	switch this.config.IPIP {
@@ -94,4 +102,32 @@ func (this *reconciler) Setup() {
 		}
 	}
 	this.Reconciler.Setup()
+}
+
+func (this *reconciler) Reconcile(logger logger.LogContext, obj resources.Object) reconcile.Status {
+	if obj.GroupKind() == controllers.ENDPOINTS {
+		return this.ReconcileEndpoint(logger, obj)
+	}
+	return this.Reconciler.Reconcile(logger, obj)
+}
+
+func (this *reconciler) ReconcileEndpoint(logger logger.LogContext, obj resources.Object) reconcile.Status {
+	if resources.EqualsObjectName(obj.ObjectName(), this.endpoint) {
+		n := utils.NewNotifier(logger)
+		eps := controllers.GetEndpoints(n, obj)
+		switch len(eps) {
+		case 0:
+			n.Activate()
+			logger.Warnf("no endpoint for broker service %q found", this.config.Service)
+			this.Links().SetGateway(nil)
+		case 1:
+			if !this.Links().GetGateway().Equal(eps[0]) {
+				n.Infof("found endpoint %s for broker service %q found", eps[0], this.config.Service)
+				this.Links().SetGateway(eps[0])
+			}
+		default:
+			n.Infof("invalid service definition for broker service: multiple endpoints found: %v", eps)
+		}
+	}
+	return reconcile.Succeeded(logger)
 }

@@ -20,12 +20,18 @@ package main
 
 import (
 	"github.com/gardener/controller-manager-library/pkg/controllermanager"
+	"github.com/gardener/controller-manager-library/pkg/controllermanager/cluster"
 
 	_ "github.com/gardener/controller-manager-library/pkg/resources/defaultscheme/v1.16"
 
 	_ "github.com/mandelsoft/kubelink/pkg/controllers/broker"
 	_ "github.com/mandelsoft/kubelink/pkg/controllers/router"
 )
+
+func init() {
+	// enable api server override
+	cluster.RegisterExtension(&cluster.APIServerOverride{})
+}
 
 func main() {
 	controllermanager.Start("kubelink", "Launch KubeLink Controller Manager", "Kubelink manages network links among kubernetes clusters")

@@ -34,14 +34,9 @@ func NamespaceSelection(namespace string) WatchSelectionFunction {
 	}
 }
 
-func NamespaceByOptionSelection(opt string) WatchSelectionFunction {
+func NamespaceByOptionSelection(opt string, srcnames ...string) WatchSelectionFunction {
 	return func(c Interface) (string, resources.TweakListOptionsFunc) {
-		namespace, err := c.GetStringOption(opt)
-		if err != nil {
-			panic(fmt.Errorf("option %q not found for namespace selection in controller resource for %s: %s",
-				opt, c.GetName(), err))
-		}
-		return namespace, nil
+		return getStringOptionValue(c, opt, srcnames...), nil
 	}
 }
 
@@ -58,6 +53,43 @@ func ObjectSelection(sel ObjectSelectorFunction) WatchSelectionFunction {
 			options.FieldSelector = fields.OneTermEqualSelector("metadata.name", name.Name()).String()
 		}
 	}
+}
+
+func LocalObjectByName(name string) ObjectSelectorFunction {
+	return func(c Interface) resources.ObjectName {
+		return resources.NewObjectName(c.GetEnvironment().Namespace(), name)
+	}
+}
+
+func ObjectByNameOption(opt string, srcnames ...string) ObjectSelectorFunction {
+	return func(c Interface) resources.ObjectName {
+		return resources.NewObjectName(c.GetEnvironment().Namespace(), getStringOptionValue(c, opt, srcnames...))
+	}
+}
+
+func getStringOptionValue(c Interface, name string, srcnames ...string) string {
+	for _, sn := range srcnames {
+		src, err := c.GetOptionSource(sn)
+		if err != nil {
+			panic(fmt.Errorf("option source %q not found for option selection in controller resource for %s: %s",
+				src, c.GetName(), err))
+		}
+		if opts, ok := src.(config.Options); ok {
+			opt := opts.GetOption(name)
+			if opt != nil {
+				return opt.StringValue()
+			}
+		} else {
+			panic(fmt.Errorf("option source %q for option selection in controller resource for %s has no option access: %s",
+				src, c.GetName(), err))
+		}
+	}
+	value, err := c.GetStringOption(name)
+	if err != nil {
+		panic(fmt.Errorf("option %q not found for option selection in controller resource for %s: %s",
+			name, c.GetName(), err))
+	}
+	return value
 }
 
 ////////////////////////////////////////////////////////////////////////////////

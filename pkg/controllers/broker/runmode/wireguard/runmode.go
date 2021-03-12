@@ -35,6 +35,7 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	corev1 "k8s.io/api/core/v1"
 
+	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
 	"github.com/mandelsoft/kubelink/pkg/controllers/broker/config"
 	"github.com/mandelsoft/kubelink/pkg/controllers/broker/runmode"
@@ -58,6 +59,8 @@ type mode struct {
 	lock   sync.Mutex
 	err    error            // error configuring wireguard device
 	errors map[string]error // error for a dedicated cluster address
+
+	finalizer func()
 }
 
 var _ runmode.RunMode = &mode{}
@@ -95,6 +98,13 @@ func (this *mode) Setup() error {
 	return nil
 }
 
+func (this *mode) Cleanup() error {
+	if this.finalizer != nil {
+		this.finalizer()
+	}
+	return nil
+}
+
 func (this *mode) Start() error {
 	name := resources.NewObjectName(this.Controller().GetEnvironment().ControllerManager().GetNamespace(), this.config.Secret)
 	// catch secret updates for private key secret
@@ -104,6 +114,12 @@ func (this *mode) Start() error {
 
 func (this *mode) GetInterface() netlink.Link {
 	return this.link
+}
+
+func (this *mode) UpdateLocalGatewayInfo(info *controllers.LocalGatewayInfo) {
+	if this.key != nil {
+		info.PublicKey = this.key.PublicKey().String()
+	}
 }
 
 func (this *mode) GetErrorForMeshNode(ip net.IP) error {
@@ -154,7 +170,13 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 	}
 	defer wg.Close()
 
-	err = this.Env().LinkTool().PrepareLink(link, this.config.ClusterAddress)
+	meshes := this.Links().GetMeshLinks()
+	addrs := tcp.CIDRList{}
+	for _, m := range meshes {
+		addrs.Add(m.ClusterAddress)
+	}
+	natchains := this.Links().GetNatChains(addrs)
+	this.finalizer, err = this.Env().LinkTool().PrepareLink(logger, link, addrs, natchains)
 	if err != nil {
 		return err
 	}
@@ -180,29 +202,32 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 	keep := 21 * time.Second
 	found := utils.StringSet{}
 	this.Links().Visit(func(l *kubelink.Link) bool {
-		if l.PublicKey != nil {
-			ip := net.ParseIP(l.Host)
-			if ip == nil {
-				ips, err := net.LookupIP(l.Host)
-				if err != nil {
-					this.propagateError(nil, err, l.ClusterAddress)
-					return true
+		if l.PublicKey != nil && l.Endpoint != "" {
+			var endpoint *net.UDPAddr
+			if l.Endpoint != api.EP_INBOUND {
+				ip := net.ParseIP(l.Host)
+				if ip == nil {
+					ips, err := net.LookupIP(l.Host)
+					if err != nil {
+						this.propagateError(nil, err, l.ClusterAddress)
+						return true
+					}
+					sort.Slice(ips, func(a, b int) bool { return strings.Compare(ips[a].String(), ips[b].String()) < 0 })
+					ip = ips[0]
 				}
-				sort.Slice(ips, func(a, b int) bool { return strings.Compare(ips[a].String(), ips[b].String()) < 0 })
-				ip = ips[0]
-			}
-			allowed := []net.IPNet{
-				*tcp.IPtoCIDR(l.ClusterAddress.IP),
-			}
-			for _, e := range l.Egress {
-				allowed = append(allowed, *e)
-			}
-			peer := wgtypes.PeerConfig{
-				PublicKey: *l.PublicKey,
-				Endpoint: &net.UDPAddr{
+				endpoint = &net.UDPAddr{
 					Port: l.Port,
 					IP:   ip,
-				},
+				}
+			}
+			allowed := []net.IPNet{}
+			addAllowed(&allowed, l)
+			for r := range l.GatewayFor {
+				addAllowed(&allowed, this.Links().GetLink(r))
+			}
+			peer := wgtypes.PeerConfig{
+				PublicKey:                   *l.PublicKey,
+				Endpoint:                    endpoint,
 				PersistentKeepaliveInterval: &keep,
 				AllowedIPs:                  allowed,
 			}
@@ -250,6 +275,13 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 		this.propagateError(nil, err, nil)
 	}
 	return err
+}
+
+func addAllowed(allowed *[]net.IPNet, l *kubelink.Link) {
+	*allowed = append(*allowed, *tcp.IPtoCIDR(l.ClusterAddress.IP))
+	for _, e := range l.Egress {
+		*allowed = append(*allowed, *e)
+	}
 }
 
 func list(this []net.IPNet) string {

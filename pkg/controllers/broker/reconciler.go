@@ -20,7 +20,6 @@ package broker
 
 import (
 	"fmt"
-	"net"
 	"sync"
 	"time"
 
@@ -72,13 +71,15 @@ func (this *reconciler) BaseConfig(cfg config.OptionSource) *controllers.Config 
 	return &cfg.(*ctrlcfg.Config).Config
 }
 
-func (this *reconciler) Gateway(obj *api.KubeLink) (net.IP, error) {
+func (this *reconciler) Gateway(obj *api.KubeLink) (*controllers.LocalGatewayInfo, error) {
 	gateway := this.NodeInterface().IP
 	match, ip := this.config.MatchLink(obj)
 	if !match {
 		return nil, nil
 	}
-	return gateway, this.runmode.GetErrorForMeshNode(ip)
+	info := &controllers.LocalGatewayInfo{Gateway: gateway}
+	this.runmode.UpdateLocalGatewayInfo(info)
+	return info, this.runmode.GetErrorForMeshNode(ip)
 }
 
 func (this *reconciler) UpdateGateway(link *api.KubeLink) *string {
@@ -159,6 +160,13 @@ func (this *reconciler) Setup() error {
 	return this.runmode.Setup()
 }
 
+func (this *reconciler) Cleanup() error {
+	if this.runmode != nil {
+		return this.runmode.Cleanup()
+	}
+	return nil
+}
+
 func (this *reconciler) Start() {
 	this.runmode.Start()
 	if this.config.CoreDNSConfigure {
@@ -185,6 +193,7 @@ func (this *reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 		}
 	}
 	this.updateCorefile(logger)
+	this.ConnectCoredns()
 	return this.Reconciler.Command(logger, cmd)
 }
 
@@ -247,7 +256,7 @@ func (this *reconciler) RestartDeployment(logger logger.LogContext, name resourc
 	return err
 }
 
-func (this *reconciler) UpdateLink(logger logger.LogContext, name string, access *kubelink.LinkAccessInfo, dns *kubelink.LinkDNSInfo) {
+func (this *reconciler) UpdateLinkInfo(logger logger.LogContext, name string, access *kubelink.LinkAccessInfo, dns *kubelink.LinkDNSInfo) {
 	_, err := this.linkResource.GetCached(resources.NewObjectName(name))
 	if err != nil {
 		logger.Infof("cannot get link %s: %s", name, err)

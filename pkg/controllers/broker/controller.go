@@ -30,6 +30,7 @@ import (
 	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
 	"github.com/mandelsoft/kubelink/pkg/controllers/broker/config"
+	"github.com/mandelsoft/kubelink/pkg/kubelink"
 	"github.com/mandelsoft/kubelink/pkg/tasks"
 	kutils "github.com/mandelsoft/kubelink/pkg/utils"
 )
@@ -117,14 +118,20 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 
 	this.dnsInfo.ClusterDomain = this.config.ClusterDomain
 	this.dnsInfo.DnsIP = this.config.DNSServiceIP
+	this.dnsInfo.DNSPropagation = this.config.DNSPropagation != config.DNSMODE_NONE
 	if this.config.DNSAdvertisement {
 		controller.Infof("advertise dns access with with dns IP %s and cluster domain %s", this.dnsInfo.DnsIP, this.dnsInfo.ClusterDomain)
 	} else {
 		controller.Infof("dns access advertisement disabled")
 	}
 
-	if this.config.DNSPropagation != config.DNSMODE_NONE {
+	if this.dnsInfo.DNSPropagation {
 		controller.Infof("enable dns propagation (%s)", this.config.DNSPropagation)
+		controller.Infof("  default mesh domain %q", this.config.MeshDomain)
+		controller.Infof("  local cluster domain %q", this.dnsInfo.ClusterDomain)
+		if this.dnsInfo.DnsIP != nil {
+			controller.Infof("  local dns ip %q", this.dnsInfo.DnsIP)
+		}
 		controller.Infof("  handle coredns deployment %q", this.config.CoreDNSDeployment)
 		controller.Infof("  using coredns secret %q", this.config.CoreDNSSecret)
 		if this.config.CoreDNSConfigure {
@@ -138,6 +145,12 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 	}
 
 	controller.Infof("using cluster address: %s", this.config.ClusterAddress)
+	meshDNS := kubelink.LinkDNSInfo{
+		ClusterDomain:  this.config.MeshDomain,
+		DnsIP:          this.config.MeshDNSServiceIP,
+		DNSPropagation: this.dnsInfo.DNSPropagation,
+	}
+	this.Links().SetDefaultMesh(this.config.ClusterName, this.config.ClusterAddress, meshDNS)
 	controller.Infof("serving links: %s", this.config.Responsible)
 	if !kutils.Empty(this.config.Secret) {
 		controller.Infof("using TLS secret %q with management mode %s", this.config.Secret, this.config.ManageMode)

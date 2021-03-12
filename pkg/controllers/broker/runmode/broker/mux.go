@@ -314,7 +314,7 @@ func (this *Mux) HandleTun() error {
 		}
 		working = true
 		packet := bytes[:n]
-		this.Send(log,packet)
+		this.Send(log, packet)
 	}
 }
 
@@ -323,7 +323,7 @@ func (this *Mux) Send(log logger.LogContext, packet []byte) error {
 	t := this.FindConnection(log, packet)
 	if t != nil {
 		err = t.Send(packet)
-		if err!=nil {
+		if err != nil {
 			log.Warnf("%s", err)
 		}
 	}

@@ -105,6 +105,8 @@ spec:
                 type: array
               endpoint:
                 type: string
+              gatewayLink:
+                type: string
               ingress:
                 items:
                   type: string
@@ -114,13 +116,14 @@ spec:
                 type: string
             required:
             - clusterAddress
-            - endpoint
             type: object
           status:
             properties:
               gateway:
                 type: string
               message:
+                type: string
+              publicKey:
                 type: string
               state:
                 type: string

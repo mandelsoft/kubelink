@@ -21,6 +21,7 @@ package router
 import (
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
+	"github.com/gardener/controller-manager-library/pkg/resources"
 
 	"github.com/mandelsoft/kubelink/pkg/controllers"
 )
@@ -28,6 +29,8 @@ import (
 func init() {
 	controllers.BaseController("router", &Config{}).
 		Reconciler(Create).
+		//SelectedWatchByGK(controller.ObjectSelection(controller.ObjectByNameOption("service")), controllers.ENDPOINTS).
+		SelectedWatchByGK(controller.LocalNamespaceSelection, controllers.ENDPOINTS).
 		MustRegister()
 }
 
@@ -43,7 +46,14 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 		return nil, err
 	}
 	this.config = this.Reconciler.Config().(*Config)
+	this.endpoint = resources.NewObjectName(controller.GetEnvironment().Namespace(), this.config.Service)
 
+	res, _ := controller.GetMainCluster().Resources().Get(controllers.SECRET)
+	_, err = res.Get(this.endpoint)
+	if err != nil {
+		controller.Infof("broker service %q not found in namespace %s: %s", this.endpoint.Name(), this.endpoint.Namespace(), err)
+	}
+	controller.Infof("using endpoint from service %q in namespace %s", this.endpoint.Name(), this.endpoint.Namespace())
 	controller.Infof("using cidr for pods:  %s", this.config.PodCIDR)
 	return this, nil
 }

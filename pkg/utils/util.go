@@ -19,10 +19,7 @@
 package utils
 
 import (
-	"fmt"
 	"strings"
-
-	"github.com/gardener/controller-manager-library/pkg/logger"
 )
 
 func Empty(s string) bool {
@@ -37,25 +34,4 @@ func ShortenString(s string, n int) string {
 		l = l / 2
 	}
 	return s[:l]
-}
-
-type Notifier struct {
-	logger.LogContext
-	pending []string
-	active  bool
-}
-
-func (this *Notifier) Add(print bool, msg string, args ...interface{}) {
-	if print || this.active {
-		if len(this.pending) > 0 {
-			for _, p := range this.pending {
-				this.Info(p)
-			}
-			this.pending = nil
-		}
-		this.Infof(msg, args...)
-		this.active = true
-	} else {
-		this.pending = append(this.pending, fmt.Sprintf(msg, args...))
-	}
 }

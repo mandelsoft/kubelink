@@ -23,12 +23,20 @@ import (
 	"os"
 	"reflect"
 
+	"github.com/gardener/controller-manager-library/pkg/logger"
+	"github.com/gardener/controller-manager-library/pkg/utils"
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 const NAME = "wireguard"
+
+func other() {
+	log:=utils.NewNotifier(logger.New(), "start")
+	log.Debugf("any step")
+	log.Infof("done")
+}
 
 func CheckErr(err error) {
 	if err != nil {

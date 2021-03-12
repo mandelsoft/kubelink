@@ -47,6 +47,9 @@ func init() {
 			ArgType("--to-destination", 1),
 			ArgType("---to-source", 1),
 		),
+		Trailing("SNAT", 0,
+			ArgType("---to-source", 1),
+		),
 		AllArg,
 	)
 }
