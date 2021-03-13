@@ -39,9 +39,9 @@ func (this *DefaultConnectionHandler) GetDNSInfo() kubelink.LinkDNSInfo {
 }
 
 func (this *DefaultConnectionHandler) UpdateAccess(hello *ConnectionHello) {
-	link := this.runmode.Links().GetLinkForClusterAddress(hello.GetClusterAddress())
+	link := this.runmode.Links().GetLinkForClusterAddress(hello.GetClusterIP())
 	if link == nil {
-		this.runmode.Controller().Infof("local link not found for cluster address %s", hello.GetClusterAddress())
+		this.runmode.Controller().Infof("local link not found for cluster address %s", hello.GetClusterIP())
 		return
 	}
 

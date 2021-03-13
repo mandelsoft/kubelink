@@ -91,6 +91,7 @@ func (this *Links) GetEgressChain(mesh *net.IPNet) *iptables.ChainRequest {
 			iptables.Opt("-m", "comment", "--comment", "firewall egress for link gateway "+mesh.String()),
 		},
 	}
+	// allow all traffic forwarded to other links
 	for _, e := range this.GetGatewayEgress(nil, mesh) {
 		rules = append(rules, iptables.Rule{
 			iptables.Opt("-d", e.String()),

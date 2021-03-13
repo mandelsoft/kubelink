@@ -571,7 +571,7 @@ func (this *configureCorednsTask) Execute(logger logger.LogContext) reconcile.St
 	sort.Strings(keys)
 	log.Debugf("  found meshes %s", utils.StringKeySet(meshes))
 	for _, n := range keys {
-		m:= meshes[n]
+		m := meshes[n]
 		if !m.DNSInfo.DNSPropagation {
 			log.Debugf("  dns propagation disabled for %s", n)
 			continue

@@ -58,18 +58,20 @@ type TunnelConnection struct {
 	lock          sync.RWMutex
 	mux           *Mux
 	conn          net.Conn
-	clusterCIDR   *net.IPNet
+	targetAddress *net.IPNet
+	localAddress  *net.IPNet
 	remoteAddress string
 	handlers      []ConnectionFailHandler
 
+	name    string
 	channel chan []byte
 	wlock   sync.Mutex
 	rlock   sync.Mutex
 }
 
-func NewTunnelConnection(mux *Mux, conn net.Conn, link *kubelink.Link, handlers ...ConnectionFailHandler) (*TunnelConnection, *ConnectionHello, error) {
+func NewTunnelConnection(mux *Mux, conn net.Conn, link *kubelink.Link, links *kubelink.Links, handlers ...ConnectionFailHandler) (*TunnelConnection, *ConnectionHello, error) {
 	remote := conn.RemoteAddr().String()
-	t := &TunnelConnection{
+	this := &TunnelConnection{
 		LogContext:    mux.NewContext("source", remote),
 		mux:           mux,
 		conn:          conn,
@@ -78,39 +80,44 @@ func NewTunnelConnection(mux *Mux, conn net.Conn, link *kubelink.Link, handlers 
 		channel:       make(chan []byte, 10),
 	}
 	if link != nil {
-		t.clusterCIDR = link.ClusterAddress
+		this.targetAddress = link.ClusterAddress
+		this.localAddress = links.GetLocalAddressForClusterAddress(this.targetAddress.IP)
+		if this.localAddress == nil {
+			return nil, nil, fmt.Errorf("unkown mesh for link %s[%q]", link.Name, this.targetAddress)
+		}
+		this.ApplyLink(link.Name)
 	}
 
-	hello, err := t.handshake()
+	hello, err := this.handshake(links)
 	if err != nil {
 		return nil, nil, err
 	}
 	if hello != nil {
-		cidr := hello.GetClusterCIDR()
+		cidr := hello.GetClusterAddress()
 		if !net.IPv6zero.Equal(cidr.IP) {
 			if link != nil {
 				if !link.ClusterAddress.IP.Equal(cidr.IP) {
 					return nil, hello, fmt.Errorf("cluster address mismatch: got %s but expected %s", cidr.IP, link.ClusterAddress.IP)
 				}
 			}
-			if !cidr.Contains(mux.clusterAddr.IP) {
+			if !cidr.Contains(this.localAddress.IP) {
 				// obsolete when we support unidirectional connections
-				return nil, hello, fmt.Errorf("cluster address mismatch: own address %s not in foreign range", mux.clusterAddr.IP, cidr)
+				return nil, hello, fmt.Errorf("cluster address mismatch: own address %s not in foreign range", this.localAddress.IP, cidr)
 			}
-			if !mux.clusterAddr.Contains(cidr.IP) {
-				return nil, hello, fmt.Errorf("cluster address mismatch: remote address %s not in local range", cidr.IP, mux.clusterAddr)
+			if !this.localAddress.Contains(cidr.IP) {
+				return nil, hello, fmt.Errorf("cluster address mismatch: remote address %s not in local range", cidr.IP, this.localAddress)
 			}
 		}
 		if mux.connectionHandler != nil {
-			t.Infof("start hello handling....")
+			this.Infof("start hello handling....")
 			go mux.connectionHandler.UpdateAccess(hello)
 		}
 	}
-	return t, hello, nil
+	return this, hello, nil
 }
 
 func (this *TunnelConnection) String() string {
-	return fmt.Sprintf("%s[%s]", this.clusterCIDR, this.remoteAddress)
+	return fmt.Sprintf("%s[%s]", this.targetAddress, this.remoteAddress)
 }
 
 func (this *TunnelConnection) RegisterStateHandler(handlers ...ConnectionFailHandler) {
@@ -154,6 +161,7 @@ func printConnState(log logger.LogContext, state tls.ConnectionState) {
 ////////////////////////////////////////////////////////////////////////////////
 
 func (this *TunnelConnection) Send(packet []byte) error {
+	this.Infof("buffering packet")
 	select {
 	case this.channel <- packet:
 	default:
@@ -163,11 +171,15 @@ func (this *TunnelConnection) Send(packet []byte) error {
 }
 
 func (this *TunnelConnection) Close() error {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	this.Info("closing tunnel")
 	if this.channel != nil {
 		close(this.channel)
 		this.channel = nil
+		return this.conn.Close()
 	}
-	return this.conn.Close()
+	return nil
 }
 
 func (this *TunnelConnection) writeHello(hello *ConnectionHello) error {
@@ -204,7 +216,7 @@ func (this *TunnelConnection) parseHelloPacket(data []byte) (*ConnectionHello, e
 
 func (this *TunnelConnection) createHello() *ConnectionHello {
 	hello := NewConnectionHello()
-	hello.SetClusterCIDR(this.mux.clusterAddr)
+	hello.SetClusterAddress(this.localAddress)
 	hello.SetPort(this.mux.port)
 	if len(this.mux.local) > 0 {
 		hello.SetCIDR(this.mux.local[0])
@@ -217,36 +229,61 @@ func (this *TunnelConnection) createHello() *ConnectionHello {
 	return hello
 }
 
-func (this *TunnelConnection) handshake() (*ConnectionHello, error) {
-	local := this.createHello()
+func (this *TunnelConnection) handshake(links *kubelink.Links) (*ConnectionHello, error) {
+	var werr, rerr error
+	var remote *ConnectionHello
 
-	var werr error
 	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		werr = this.writeHello(local)
-	}()
+	if this.targetAddress == nil {
+		// anonymous or unknown inbound request
+		// read hello first to identify peer
+		this.Infof("request hello first for unknown inbound request")
+		remote, rerr = this.readHello()
+		if rerr == nil {
+			cidr := remote.GetCIDR()
+			this.localAddress = links.GetLocalAddressForClusterAddress(cidr.IP)
+			if this.localAddress == nil {
+				return nil, fmt.Errorf("no link or mesh found for %s", cidr)
+			}
+			this.Infof("using local address %s for target %s", this.localAddress, cidr)
+		}
+	} else {
+		// send and read hello in parallel for known local link or outbound request
+		this.Infof("initiating parallel hello")
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			remote, rerr = this.readHello()
+		}()
 
-	remote, rerr := this.readHello()
+	}
+	werr = this.writeHello(this.createHello())
+	if werr != nil {
+		return nil, fmt.Errorf("cannot finish connection handshake: %s", werr)
+	}
+
 	wg.Wait()
 	if rerr != nil {
 		return nil, fmt.Errorf("cannot finish connection handshake: %s", rerr)
 	}
-	if werr != nil {
-		return nil, fmt.Errorf("cannot finish connection handshake: %s", werr)
-	}
-	this.Infof("REMOTE SIDE: cluster %s, net: %s port: %d", remote.GetClusterCIDR(), remote.GetCIDR(), remote.GetPort())
+	this.Infof("REMOTE SIDE: cluster %s, net: %s port: %d", remote.GetClusterAddress(), remote.GetCIDR(), remote.GetPort())
 	return remote, nil
 }
 
+func (this *TunnelConnection) ApplyLink(link string) {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	if this.name == "" {
+		this.name = link
+		this.LogContext = this.LogContext.NewContext("link", this.name)
+	}
+}
+
 func (this *TunnelConnection) Serve() error {
+	this.Infof("serving tunnel for %s[%s]", this.name, this.targetAddress)
 	go this.sender(this.channel)
 	err := this.serve()
 	this.notify(err)
-	if this.channel != nil {
-		close(this.channel)
-	}
 	return err
 }
 
@@ -254,8 +291,10 @@ func (this *TunnelConnection) sender(channel <-chan []byte) {
 	for {
 		packet, ok := <-channel
 		if !ok {
+			this.Infof("packet channel closed -> finishing sender")
 			return
 		}
+		this.Infof("writing packet len %d", len(packet))
 		this.WritePacket(PACKET_TYPE_DATA, packet)
 	}
 }
@@ -286,9 +325,9 @@ func (this *TunnelConnection) serve() error {
 				this.Errorf("err: %s", err)
 				continue
 			} else {
-				this.Infof("receiving ipv4[%d]: (%d) hdr: %d, total: %d, prot: %d,  %s->%s\n",
+				this.Infof("receiving ipv4[%d]: (%d) hdr: %d, total: %d, prot: %d,  %s->%s",
 					header.Version, len(packet), header.Len, header.TotalLen, header.Protocol, header.Src, header.Dst)
-				if this.mux.clusterAddr.Contains(header.Src) {
+				if this.localAddress.Contains(header.Src) {
 					l := this.mux.links.GetLinkForClusterAddress(header.Src)
 					if l == nil {
 						this.Warnf("  dropping packet because of unknown cluster source address [%s]", header.Src)
@@ -311,8 +350,8 @@ func (this *TunnelConnection) serve() error {
 						continue
 					}
 				} else {
-					if !header.Dst.Equal(this.mux.clusterAddr.IP) {
-						this.Warnf("  dropping packet because of non-matching destination address [%s<>%s]", this.mux.clusterAddr.IP, header.Dst)
+					if !header.Dst.Equal(this.localAddress.IP) {
+						this.Warnf("  dropping packet because of non-matching destination address [%s<>%s]", this.localAddress.IP, header.Dst)
 						continue
 					}
 				}

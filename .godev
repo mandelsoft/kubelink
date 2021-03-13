@@ -2,3 +2,13 @@
 
 echo "adding commands"
 export PATH="$PATH:$PWD/local"
+export RUNMODE=wireguard
+
+Runmode()
+{
+  if [ -z "$1" ]; then
+    echo "Rumode $RUNMODE"
+  else
+    export RUNMODE="$1"
+  fi
+}

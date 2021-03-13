@@ -314,7 +314,7 @@ func (this *LinkTool) ManageChains(logger logger.LogContext, area string, embed 
 			}
 		}
 	}
-	err := this.AssureChains(logger, fmt.Sprintf("handle %d %s chain(s)", area, len(chains)),
+	err := this.AssureChains(logger, fmt.Sprintf("handle %d %s chain(s)", len(chains), area),
 		chains, append([]string{kubelink.CHAIN_PREFIX}, tables.AsArray()...)...)
 	if err != nil {
 		return err

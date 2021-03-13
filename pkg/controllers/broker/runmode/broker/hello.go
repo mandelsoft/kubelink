@@ -168,19 +168,15 @@ func (this *ConnectionHelloHeader) GetPort() uint16 {
 	return tcp.NtoHs(this[net.IPv6len*4:])
 }
 
-func (this *ConnectionHelloHeader) SetClusterAddress(ip net.IP) {
-	this.setAddress(0, ip)
-}
-
-func (this *ConnectionHelloHeader) SetClusterCIDR(cidr *net.IPNet) {
+func (this *ConnectionHelloHeader) SetClusterAddress(cidr *net.IPNet) {
 	this.setCIDR(0, cidr)
 }
 
-func (this *ConnectionHelloHeader) GetClusterAddress() net.IP {
+func (this *ConnectionHelloHeader) GetClusterIP() net.IP {
 	return this.getAddress(0)
 }
 
-func (this *ConnectionHelloHeader) GetClusterCIDR() *net.IPNet {
+func (this *ConnectionHelloHeader) GetClusterAddress() *net.IPNet {
 	return this.getCIDR(0)
 }
 

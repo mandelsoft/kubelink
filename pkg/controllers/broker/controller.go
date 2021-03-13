@@ -41,7 +41,7 @@ func init() {
 	controllers.BaseController("broker", &config.Config{}).
 		RequireLease().
 		Reconciler(Create).With(controllers.SecretCacheReconciler).
-		With(tasks.TaskReconciler(10)).
+		With(tasks.TaskReconciler(3)).
 		MustRegister()
 }
 
@@ -127,13 +127,13 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 
 	if this.dnsInfo.DNSPropagation {
 		controller.Infof("enable dns propagation (%s)", this.config.DNSPropagation)
-		controller.Infof("  default mesh domain %q", this.config.MeshDomain)
 		controller.Infof("  local cluster domain %q", this.dnsInfo.ClusterDomain)
 		if this.dnsInfo.DnsIP != nil {
 			controller.Infof("  local dns ip %q", this.dnsInfo.DnsIP)
 		}
 		controller.Infof("  handle coredns deployment %q", this.config.CoreDNSDeployment)
 		controller.Infof("  using coredns secret %q", this.config.CoreDNSSecret)
+		controller.Infof("  default mesh domain %q", this.config.MeshDomain)
 		if this.config.CoreDNSConfigure {
 			controller.Infof("  automatic configuration of cluster local coredns setup")
 			if this.config.CoreDNSServiceIP != nil {
@@ -144,13 +144,23 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 		controller.Infof("dns propagation disabled")
 	}
 
-	controller.Infof("using cluster address: %s", this.config.ClusterAddress)
-	meshDNS := kubelink.LinkDNSInfo{
-		ClusterDomain:  this.config.MeshDomain,
-		DnsIP:          this.config.MeshDNSServiceIP,
-		DNSPropagation: this.dnsInfo.DNSPropagation,
+	if this.config.ClusterAddress != nil {
+		meshDNS := kubelink.LinkDNSInfo{
+			ClusterDomain:  this.config.MeshDomain,
+			DnsIP:          this.config.MeshDNSServiceIP,
+			DNSPropagation: this.dnsInfo.DNSPropagation,
+		}
+
+		controller.Infof("using default mesh settings")
+		controller.Infof("  cluster address: %s", this.config.ClusterAddress)
+		controller.Infof("  cluster name: %s", this.config.ClusterName)
+		controller.Infof("  mesh domain %q", this.config.MeshDomain)
+		if this.config.MeshDNSServiceIP != nil {
+			controller.Infof("  global mesh dns %s", this.config.MeshDNSServiceIP)
+		}
+
+		this.Links().SetDefaultMesh(this.config.ClusterName, this.config.ClusterAddress, meshDNS)
 	}
-	this.Links().SetDefaultMesh(this.config.ClusterName, this.config.ClusterAddress, meshDNS)
 	controller.Infof("serving links: %s", this.config.Responsible)
 	if !kutils.Empty(this.config.Secret) {
 		controller.Infof("using TLS secret %q with management mode %s", this.config.Secret, this.config.ManageMode)

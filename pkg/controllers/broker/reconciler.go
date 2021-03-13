@@ -20,6 +20,7 @@ package broker
 
 import (
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -73,7 +74,7 @@ func (this *reconciler) BaseConfig(cfg config.OptionSource) *controllers.Config 
 
 func (this *reconciler) Gateway(obj *api.KubeLink) (*controllers.LocalGatewayInfo, error) {
 	gateway := this.NodeInterface().IP
-	match, ip := this.config.MatchLink(obj)
+	match, ip := this.MatchLink(obj)
 	if !match {
 		return nil, nil
 	}
@@ -84,7 +85,7 @@ func (this *reconciler) Gateway(obj *api.KubeLink) (*controllers.LocalGatewayInf
 
 func (this *reconciler) UpdateGateway(link *api.KubeLink) *string {
 	gateway := this.NodeInterface().IP
-	match, _ := this.config.MatchLink(link)
+	match, _ := this.MatchLink(link)
 	if !match {
 		gateway = nil
 	}
@@ -117,12 +118,29 @@ func (this *reconciler) RequiredRoutes() kubelink.Routes {
 	if link == nil {
 		return nil
 	}
-	routes := this.Links().GetRoutesToLink(this.NodeInterface(), link)
-	return append(routes, netlink.Route{LinkIndex: link.Attrs().Index, Dst: this.config.ClusterCIDR})
+	return this.Links().GetRoutesToLink(this.NodeInterface(), link)
 }
 
 func (this *reconciler) RequiredIPTablesChains() iptables.Requests {
 	return this.runmode.RequiredIPTablesChains()
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+func (this *reconciler) MatchLink(obj *api.KubeLink) (bool, net.IP) {
+	ip, cidr, err := net.ParseCIDR(obj.Spec.ClusterAddress)
+	if err != nil {
+		return false, nil
+	}
+	if !this.config.Responsible.Contains("all") && !this.config.Responsible.Contains(cidr.String()) {
+		return false, nil
+	}
+	for _, m := range this.Links().GetMeshInfos() {
+		if m.CIDR.Contains(ip) {
+			return true, ip
+		}
+	}
+	return false, ip
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -192,8 +210,10 @@ func (this *reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 			this.access = kubelink.LinkAccessInfo{}
 		}
 	}
-	this.updateCorefile(logger)
-	this.ConnectCoredns()
+	if this.config.DNSPropagation != kubelink.DNSMODE_NONE {
+		this.updateCorefile(logger)
+		this.ConnectCoredns()
+	}
 	return this.Reconciler.Command(logger, cmd)
 }
 

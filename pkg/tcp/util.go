@@ -79,6 +79,16 @@ func SubIP(cidr *net.IPNet, n int) net.IP {
 	return ip
 }
 
+func ContainsCIDR(a, b *net.IPNet) bool {
+	if !a.Contains(b.IP) {
+		return false
+	}
+	a_ones, a_bits := b.Mask.Size()
+	b_ones, b_bits := b.Mask.Size()
+	return b_bits-b_ones <= a_bits-a_ones
+
+}
+
 func EqualCIDR(a, b *net.IPNet) bool {
 	if a == b {
 		return true

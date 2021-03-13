@@ -43,6 +43,15 @@ func NatEmbedding(linkName string) ([]RuleDef, utils.StringSet) {
 	}, tables
 }
 
+func (this *Links) GetGatewayAddrs() tcp.CIDRList {
+	meshes := this.GetMeshLinks()
+	addrs := tcp.CIDRList{}
+	for _, m := range meshes {
+		addrs.Add(m.ClusterAddress)
+	}
+	return addrs
+}
+
 func (this *Links) GetNatChains(clusterAddresses tcp.CIDRList) iptables.Requests {
 	this.lock.RLock()
 	defer this.lock.RUnlock()

@@ -241,28 +241,28 @@ func (this *Reconciler) updateLink(logger logger.LogContext, klink *api.KubeLink
 
 	if klink.Status.State != state {
 		mod = true
-		if logger != nil {
-			logger.Infof("update state %q -> %q", klink.Status.State, state)
-		}
 		if update {
+			if logger != nil {
+				logger.Infof("update state %q -> %q", klink.Status.State, state)
+			}
 			klink.Status.State = state
 		}
 	}
 	if klink.Status.Message != msg {
 		mod = true
-		if logger != nil {
-			logger.Infof("update message %q -> %q", klink.Status.Message, msg)
-		}
 		if update {
+			if logger != nil {
+				logger.Infof("update message %q -> %q", klink.Status.Message, msg)
+			}
 			klink.Status.Message = msg
 		}
 	}
 	if gw != nil && klink.Status.Gateway != *gw {
 		mod = true
-		if logger != nil {
-			logger.Infof("update gateway %q -> %q", klink.Status.Gateway, *gw)
-		}
 		if update {
+			if logger != nil {
+				logger.Infof("update gateway %s -> %s", klink.Status.Gateway, *gw)
+			}
 			klink.Status.Gateway = *gw
 		}
 	}

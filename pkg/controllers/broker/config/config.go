@@ -27,7 +27,6 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/resources"
 	"github.com/gardener/controller-manager-library/pkg/utils"
 
-	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 
@@ -60,9 +59,9 @@ type Config struct {
 	service     string
 	responsible string
 
-	ClusterAddress *net.IPNet
-	ClusterCIDR    *net.IPNet
 	ClusterName    string
+	ClusterAddress *net.IPNet
+	MeshCIDR       *net.IPNet
 
 	ServiceCIDR *net.IPNet
 
@@ -106,9 +105,8 @@ type Config struct {
 func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	this.Config.AddOptionsToSet(set)
 	set.AddStringOption(&this.service, "service-cidr", "", "", "CIDR of local service network")
-	set.AddStringOption(&this.address, "link-address", "", "", "CIDR of cluster in cluster network")
 	set.AddStringOption(&this.responsible, "served-links", "", "all", "Comma separated list of links to serve")
-	set.AddIntOption(&this.Port, "broker-port", "", 0, "Port for bridge/wrireguard")
+	set.AddIntOption(&this.Port, "broker-port", "", 0, "Port for bridge/wireguard")
 	set.AddIntOption(&this.AdvertisedPort, "advertised-port", "", kubelink.DEFAULT_PORT, "Advertised broker port for auto-connect")
 	set.AddStringOption(&this.CertFile, "certfile", "", "", "TLS certificate file")
 	set.AddStringOption(&this.KeyFile, "keyfile", "", "", "TLS certificate key file")
@@ -120,12 +118,12 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.Service, "service", "", "", "Service name for wireguard or managed certificate")
 	set.AddStringOption(&this.Interface, "ifce-name", "", "", "Name of the tun/wireguard interface")
 
+	set.AddStringOption(&this.address, "link-address", "", "", "Default address of cluster in cluster mesh network")
 	set.AddStringOption(&this.MeshDomain, "mesh-domain", "", "kubelink", "Default Base domain for cluster mesh services")
 	set.AddStringOption(&this.meshDNSServiceIP, "meshdns-service-ip", "", "", "Default Service IP of global mesh service DNS service")
 	set.AddStringOption(&this.ClusterName, "cluster-name", "", "", "Default Name of local cluster in cluster mesh")
 
 	set.AddStringOption(&this.serviceAccount, "service-account", "", "", "Service Account for API Access propagation")
-
 	set.AddBoolOption(&this.DNSAdvertisement, "dns-advertisement", "", false, "Enable automatic advertisement of DNS access info")
 	set.AddStringOption(&this.dnsServiceIP, "dns-service-ip", "", "", "IP of Cluster DNS Service (for DNS Info Propagation)")
 	set.AddStringOption(&this.ClusterDomain, "cluster-domain", "", "cluster.local", "Cluster Domain of Cluster DNS Service (for DNS Info Propagation)")
@@ -144,12 +142,24 @@ func (this *Config) Prepare() error {
 		return err
 	}
 
-	ip, cidr, err := this.RequireCIDR(this.address, "link-address")
+	ip, cidr, err := this.OptionalCIDR(this.address, "link-address")
 	if err != nil {
 		return err
 	}
-	this.ClusterCIDR = cidr
-	this.ClusterAddress = tcp.CIDRIP(cidr, ip)
+	this.MeshCIDR = cidr
+	if cidr != nil {
+		this.ClusterAddress = tcp.CIDRIP(cidr, ip)
+		if this.ClusterName == "" {
+			return fmt.Errorf("cluster name must be set for default cluster mesh")
+		}
+		if this.MeshDomain == "" {
+			return fmt.Errorf("mesh domain must be set for default cluster mesh")
+		}
+	} else {
+		if this.ClusterName != "" {
+			return fmt.Errorf("cluster name requires link address")
+		}
+	}
 
 	_, this.ServiceCIDR, err = this.OptionalCIDR(this.service, "service-cidr")
 	if err != nil {
@@ -251,19 +261,11 @@ func (this *Config) Prepare() error {
 	this.DNSPropagation = strings.ToLower(this.DNSPropagation)
 	switch this.DNSPropagation {
 	case DNSMODE_KUBERNETES, DNSMODE_DNS, DNSMODE_NONE:
+		if this.ServiceCIDR == nil && this.DNSServiceIP == nil {
+			return fmt.Errorf("dns propagation required service cidr or dns service ip")
+		}
 	default:
 		return fmt.Errorf("invalid dns mode: %s", this.DNSPropagation)
 	}
 	return nil
-}
-
-func (this *Config) MatchLink(obj *v1alpha1.KubeLink) (bool, net.IP) {
-	ip, cidr, err := net.ParseCIDR(obj.Spec.ClusterAddress)
-	if err != nil {
-		return false, nil
-	}
-	if !this.Responsible.Contains("all") && !this.Responsible.Contains(cidr.String()) {
-		return false, nil
-	}
-	return this.ClusterCIDR.Contains(ip), ip
 }

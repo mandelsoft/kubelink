@@ -170,11 +170,7 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 	}
 	defer wg.Close()
 
-	meshes := this.Links().GetMeshLinks()
-	addrs := tcp.CIDRList{}
-	for _, m := range meshes {
-		addrs.Add(m.ClusterAddress)
-	}
+	addrs := this.Links().GetGatewayAddrs()
 	natchains := this.Links().GetNatChains(addrs)
 	this.finalizer, err = this.Env().LinkTool().PrepareLink(logger, link, addrs, natchains)
 	if err != nil {

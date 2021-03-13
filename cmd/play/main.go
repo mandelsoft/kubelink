@@ -33,7 +33,7 @@ import (
 const NAME = "wireguard"
 
 func other() {
-	log:=utils.NewNotifier(logger.New(), "start")
+	log := utils.NewNotifier(logger.New(), "start")
 	log.Debugf("any step")
 	log.Infof("done")
 }

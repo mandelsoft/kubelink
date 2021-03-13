@@ -25,7 +25,6 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/vishvananda/netlink"
 
-	"github.com/mandelsoft/kubelink/pkg/controllers"
 	"github.com/mandelsoft/kubelink/pkg/taptun"
 )
 
@@ -56,7 +55,7 @@ func (this *Tun) Read(buf []byte) (int, error) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func NewTun(logger logger.LogContext, tool *controllers.LinkTool, name string, clusterAddress *net.IPNet) (*Tun, error) {
+func NewTun(logger logger.LogContext, name string) (*Tun, error) {
 
 	tun, err := taptun.NewTun(name)
 	if err != nil {
@@ -70,28 +69,12 @@ func NewTun(logger logger.LogContext, tool *controllers.LinkTool, name string, c
 		return nil, fmt.Errorf("cannot get link for %q: %s", tun, err)
 	}
 
-	finalizer, err := tool.SetNATRule(link, clusterAddress)
-	if err != nil {
-		tun.Close()
-		return nil, err
-	}
-
 	result := &Tun{
 		tun,
 		link,
 		func() {
-			if finalizer != nil {
-				finalizer()
-			}
 			tun.Close()
 		},
-	}
-
-	logger.Infof("adding address %s to %q", clusterAddress, link.Attrs().Name)
-	err = tool.SetLinkAddress(link, clusterAddress)
-	if err != nil {
-		result.Close()
-		return nil, err
 	}
 
 	ifce, err := net.InterfaceByName(tun.String())

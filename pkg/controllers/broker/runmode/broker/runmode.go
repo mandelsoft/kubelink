@@ -55,7 +55,7 @@ type mode struct {
 	certInfo *CertInfo
 	mux      *Mux
 
-	tool *controllers.LinkTool
+	finalizer func()
 }
 
 var _ runmode.RunMode = &mode{}
@@ -64,7 +64,6 @@ func NewBridgeMode(env runmode.RunModeEnv) (runmode.RunMode, error) {
 	this := &mode{
 		RunModeBase: runmode.NewRunModeBase(config.RUN_MODE_BRIDGE, env),
 		config:      env.Config(),
-		tool:        env.LinkTool(),
 	}
 	if this.config.Port == 0 {
 		this.config.Port = 8088
@@ -108,7 +107,7 @@ func (this *mode) Setup() error {
 		this.Infof("using bridge port %d from service %q", port, this.config.Service)
 	}
 
-	tun, err := NewTun(this.Controller(), this.tool, this.config.Interface, this.config.ClusterAddress)
+	tun, err := NewTun(this.Controller(), this.config.Interface)
 	if err != nil {
 		return fmt.Errorf("cannot setup tun device: %s", err)
 	}
@@ -117,17 +116,12 @@ func (this *mode) Setup() error {
 	if this.config.ServiceCIDR != nil {
 		local.Add(this.config.ServiceCIDR)
 	}
-	mux := NewMux(this.Controller().GetContext(), this.Controller(), this.certInfo, uint16(this.config.AdvertisedPort), this.config.ClusterAddress, local, tun, this.Links(), this)
+	mux := NewMux(this.Controller().GetContext(), this.Controller(), this.certInfo, uint16(this.config.AdvertisedPort), local, tun, this.Links(), this)
 
 	if this.config.DNSAdvertisement {
 		mux.connectionHandler = &DefaultConnectionHandler{this}
 	}
 
-	go func() {
-		<-this.Controller().GetContext().Done()
-		this.Controller().Infof("closing tun device %q", tun)
-		tun.Close()
-	}()
 	this.mux = mux
 	return nil
 }
@@ -135,6 +129,9 @@ func (this *mode) Setup() error {
 func (this *mode) Cleanup() error {
 	if this.mux != nil && this.mux.tun != nil {
 		this.mux.tun.Close()
+	}
+	if this.finalizer != nil {
+		this.finalizer()
 	}
 	return nil
 }
@@ -157,7 +154,7 @@ func (this *mode) Start() error {
 				this.mux.tun.Close()
 				time.Sleep(100 * time.Millisecond)
 				this.Controller().Infof("recreating tun device")
-				this.mux.tun, err = NewTun(this.Controller(), this.tool, this.config.Interface, this.config.ClusterAddress)
+				this.mux.tun, err = NewTun(this.Controller(), this.config.Interface)
 				if err != nil {
 					panic(fmt.Errorf("cannot setup tun device: %s", err))
 				}
@@ -168,7 +165,7 @@ func (this *mode) Start() error {
 }
 
 func (this *mode) HandleDNSPropagation(klink *api.KubeLink) {
-	if this.config.DNSPropagation != config.DNSMODE_NONE {
+	if this.config.DNSPropagation != config.DNSMODE_NONE && klink.Spec.Endpoint != kubelink.EP_LOCAL {
 		this.Tasks().ScheduleTask(NewConnectTask(klink.Name, this), 0)
 	}
 }
@@ -189,20 +186,14 @@ func (this *mode) RequiredIPTablesChains() iptables.Requests {
 }
 
 func (this *mode) ReconcileInterface(logger logger.LogContext) error {
+	var err error
+
 	logger.Debug("update tun")
 
-	tun := this.mux.tun
+	addrs := this.Links().GetGatewayAddrs()
+	natchains := this.Links().GetNatChains(addrs)
+	this.finalizer, err = this.Env().LinkTool().PrepareLink(logger, this.mux.tun.link, addrs, natchains)
 
-	addrs, err := netlink.AddrList(tun.link, netlink.FAMILY_V4)
-
-	for _, a := range addrs {
-		if a.IP.Equal(this.config.ClusterAddress.IP) {
-			logger.Debugf("address still set for %q", tun)
-			return nil
-		}
-	}
-
-	err = this.tool.SetLinkAddress(tun.link, this.config.ClusterAddress)
 	if err != nil {
 		logger.Errorf("%s", err)
 	}

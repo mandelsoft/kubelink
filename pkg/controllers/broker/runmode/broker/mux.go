@@ -53,18 +53,17 @@ type Mux struct {
 	byClusterIP map[string][]*TunnelConnection
 	errors      map[string]error
 
-	port        uint16
-	clusterAddr *net.IPNet
-	links       *kubelink.Links
-	local       tcp.CIDRList
-	tun         *Tun
-	handlers    []LinkStateHandler
+	port     uint16
+	links    *kubelink.Links
+	local    tcp.CIDRList
+	tun      *Tun
+	handlers []LinkStateHandler
 
 	connectionHandler ConnectionHandler
 	autoconnect       bool
 }
 
-func NewMux(ctx context.Context, logger logger.LogContext, certInfo *CertInfo, port uint16, addr *net.IPNet, localCIDRs tcp.CIDRList, tun *Tun, links *kubelink.Links, handlers ...LinkStateHandler) *Mux {
+func NewMux(ctx context.Context, logger logger.LogContext, certInfo *CertInfo, port uint16, localCIDRs tcp.CIDRList, tun *Tun, links *kubelink.Links, handlers ...LinkStateHandler) *Mux {
 	return &Mux{
 		LogContext:  logger,
 		ctx:         ctx,
@@ -74,7 +73,6 @@ func NewMux(ctx context.Context, logger logger.LogContext, certInfo *CertInfo, p
 		errors:      map[string]error{},
 		tun:         tun,
 		port:        port,
-		clusterAddr: addr,
 		local:       localCIDRs,
 		handlers:    append(handlers[:0:0], handlers...),
 	}
@@ -149,6 +147,7 @@ func (this *Mux) AssureTunnel(logger logger.LogContext, link *kubelink.Link) (*T
 		logger.Errorf("cannot initialize connection to %s: %s", link, err)
 		return nil, err
 	}
+	this.Infof("connection accepted by remote side")
 	this.addTunnel(t)
 	go func() {
 		defer t.mux.RemoveTunnel(t)
@@ -168,7 +167,7 @@ func (this *Mux) dialTunnelConnection(link *kubelink.Link) (*TunnelConnection, e
 	if err != nil {
 		return nil, fmt.Errorf("dialing failed: %s", err)
 	}
-	t, hello, err := NewTunnelConnection(this, conn, link)
+	t, hello, err := NewTunnelConnection(this, conn, link, this.links)
 	if err != nil {
 		conn.Close()
 		return nil, err
@@ -184,18 +183,20 @@ func (this *Mux) AddTunnel(t *TunnelConnection) {
 }
 
 func (this *Mux) addTunnel(t *TunnelConnection) {
-	if t.clusterCIDR != nil {
-		ips := t.clusterCIDR.IP.String()
+	if t.targetAddress != nil {
+		ips := t.targetAddress.IP.String()
 		delete(this.errors, ips)
 		list := this.byClusterIP[ips]
 		for _, c := range list {
 			if c == t {
+				this.Infof("tunnel for %s already registered", ips)
 				return
 			}
 		}
+		this.Infof("adding tunnel for %s", ips)
 		this.errors[ips] = nil
 		this.byClusterIP[ips] = append(list, t)
-		l := this.links.GetLinkForClusterAddress(t.clusterCIDR.IP)
+		l := this.links.GetLinkForClusterAddress(t.targetAddress.IP)
 		this.notify(l, nil)
 	}
 }
@@ -207,7 +208,8 @@ func (this *Mux) RemoveTunnel(t *TunnelConnection) {
 }
 
 func (this *Mux) removeTunnel(t *TunnelConnection) {
-	ips := t.clusterCIDR.IP.String()
+	this.Infof("removing tunnel")
+	ips := t.targetAddress.IP.String()
 	t.Close()
 	list := this.byClusterIP[ips]
 	if len(list) > 0 {
@@ -229,12 +231,12 @@ func (this *Mux) Notify(t *TunnelConnection, err error) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 
-	this.errors[t.clusterCIDR.IP.String()] = err
+	this.errors[t.targetAddress.IP.String()] = err
 	if err != nil {
 		this.Errorf("connection %s aborted: %s", t, err)
 		this.removeTunnel(t)
 	}
-	l := this.links.GetLinkForIP(t.clusterCIDR.IP)
+	l := this.links.GetLinkForIP(t.targetAddress.IP)
 	this.notify(l, err)
 }
 
@@ -339,6 +341,7 @@ func (this *Mux) ServeConnection(ctx context.Context, conn net.Conn) {
 	tlsConn, ok := conn.(*tls.Conn)
 	if ok {
 		state := tlsConn.ConnectionState()
+		this.Infof("handle inbound connection request")
 		printConnState(this, state)
 		if len(state.PeerCertificates) > 0 {
 			fqdn = state.PeerCertificates[0].Subject.CommonName
@@ -356,39 +359,55 @@ func (this *Mux) ServeConnection(ctx context.Context, conn net.Conn) {
 	} else {
 		this.Infof("tunnel connection requested from %s", remote)
 	}
-	t, hello, err := NewTunnelConnection(this, conn, link)
+	t, hello, err := NewTunnelConnection(this, conn, link, this.links)
 	if err != nil {
 		this.Errorf("initiating tunnel from %s failed: %s", remote, err)
 		return
 	}
-	cidr := hello.GetClusterCIDR()
-	if t.clusterCIDR != nil {
-		if !t.clusterCIDR.Contains(cidr.IP) {
-			this.Errorf("remote cluster (%s) not in local range %s", cidr.IP, t.clusterCIDR)
+	cidr := hello.GetClusterAddress()
+	if t.targetAddress != nil {
+		if !t.targetAddress.Contains(cidr.IP) {
+			this.Errorf("remote cluster (%s) not in local range %s", cidr.IP, t.targetAddress)
 			return
 		}
-		if !cidr.Contains(t.clusterCIDR.IP) {
-			this.Errorf("local cluster (%s) not in remote range %s", t.clusterCIDR.IP, cidr)
+		if !cidr.Contains(t.targetAddress.IP) {
+			this.Errorf("local cluster (%s) not in remote range %s", t.targetAddress.IP, cidr)
 			return
 		}
-		defer this.RemoveTunnel(t)
-		this.AddTunnel(t)
 	} else {
-		if this.autoconnect {
-			adjusted := *cidr
-			adjusted.Mask = this.clusterAddr.Mask
-			if hello.GetPort() > 0 {
-				fqdn = fmt.Sprintf("%s:%d", fqdn, hello.GetPort())
-			}
-			l, err := this.links.RegisterLink(DefaultLinkName(cidr.IP), &adjusted, fqdn, hello.GetCIDR())
-			if err != nil {
-				this.Errorf("cannot auto-connect cluster %s: %s", cidr.IP, err)
-				return
-			}
-			this.Infof("auto-connected %s", l)
-			t.clusterCIDR = t.clusterCIDR
+		if !this.autoconnect {
+			this.Errorf("no auto connect for unknown cluster %s", cidr)
+			return
 		}
+		adjusted := *cidr
+		m := this.links.GetMeshForClusterAddress(cidr.IP)
+		if m == nil {
+			this.Errorf("cannot auto-connect cluster %s for unknown mesh", cidr.IP, err)
+			return
+		}
+		adjusted.Mask = t.localAddress.Mask
+		if hello.GetPort() > 0 {
+			fqdn = fmt.Sprintf("%s:%d", fqdn, hello.GetPort())
+		}
+		l, err := this.links.RegisterLink(DefaultLinkName(cidr.IP), &adjusted, fqdn, hello.GetCIDR())
+		if err != nil {
+			this.Errorf("cannot auto-connect cluster %s: %s", cidr.IP, err)
+			return
+		}
+		this.Infof("auto-connected %s", l)
+		t.targetAddress = cidr
 	}
+	if t.name == "" {
+		link := this.links.GetLinkForClusterAddress(cidr.IP)
+		if link == nil {
+			this.Errorf("oops, finally for link found for %s", cidr.IP)
+			return
+		}
+		t.ApplyLink(link.Name)
+	}
+	t.Infof("connection request finally accepted")
+	defer this.RemoveTunnel(t)
+	this.AddTunnel(t)
 	t.Serve()
 }
 

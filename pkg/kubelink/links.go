@@ -35,7 +35,7 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"k8s.io/apimachinery/pkg/labels"
 
-	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	//"github.com/mandelsoft/kubelink/pkg/controllers/broker/config"
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 	"github.com/mandelsoft/kubelink/pkg/utils"
@@ -61,7 +61,7 @@ func (this *MeshInfo) PropagateDNS() bool {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (this *Links) linkFor(link *v1alpha1.KubeLink) (*Link, utils2.StringSet, error) {
+func (this *Links) linkFor(link *api.KubeLink) (*Link, utils2.StringSet, error) {
 	var egress tcp.CIDRList
 	var serviceCIDR *net.IPNet
 
@@ -177,7 +177,7 @@ var linksKey = ctxutil.SimpleKey("kubelinks")
 
 func GetSharedLinks(controller controller.Interface, defaultport int) *Links {
 	return controller.GetEnvironment().GetOrCreateSharedValue(linksKey, func() interface{} {
-		resc, err := controller.GetMainCluster().Resources().Get(&v1alpha1.KubeLink{})
+		resc, err := controller.GetMainCluster().Resources().Get(&api.KubeLink{})
 		if err != nil {
 			controller.Errorf("cannot get kubelink resource: %s", err)
 		}
@@ -217,6 +217,21 @@ func NewLinks(resc resources.Interface, defaultport int) *Links {
 	}
 }
 
+func (this *Links) setupLinks(kind string, list []resources.Object, cond func(*api.KubeLink) bool) {
+	for _, l := range list {
+		o := l.Data().(*api.KubeLink)
+		if cond != nil && cond(o) {
+			link, err := this.updateLink(o)
+			if link != nil {
+				logger.Infof("found %s %s", kind, link)
+			}
+			if err != nil {
+				logger.Infof("erroneous %s %s: %s", kind, l.GetName(), err)
+			}
+		}
+	}
+}
+
 func (this *Links) Setup(logger logger.LogContext, cluster cluster.Interface) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
@@ -228,18 +243,13 @@ func (this *Links) Setup(logger logger.LogContext, cluster cluster.Interface) {
 	if logger != nil {
 		logger.Infof("setup links")
 	}
-	res, _ := cluster.Resources().Get(v1alpha1.KUBELINK)
+	res, _ := cluster.Resources().Get(api.KUBELINK)
 	list, _ := res.ListCached(labels.Everything())
 
-	for _, l := range list {
-		link, err := this.updateLink(l.Data().(*v1alpha1.KubeLink))
-		if link != nil {
-			logger.Infof("found link %s", link)
-		}
-		if err != nil {
-			logger.Infof("errorneous link %s: %s", l.GetName(), err)
-		}
-	}
+	// first setup meshes (LocalLinks)
+	this.setupLinks("mesh", list, func(l *api.KubeLink) bool { return l.Spec.Endpoint == EP_LOCAL })
+	// the setup foreign links
+	this.setupLinks("mesh", list, func(l *api.KubeLink) bool { return l.Spec.Endpoint != EP_LOCAL })
 }
 
 func (this *Links) SetDefaultMesh(name string, clusterAddress *net.IPNet, meshDNS LinkDNSInfo) {
@@ -474,7 +484,7 @@ func (this *Links) replaceLink(link *Link) *Link {
 	return link
 }
 
-func (this *Links) UpdateLink(klink *v1alpha1.KubeLink) (*Link, error) {
+func (this *Links) UpdateLink(klink *api.KubeLink) (*Link, error) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 	return this.updateLink(klink)
@@ -492,7 +502,7 @@ func (this *Links) GetMeshLink(name string) *Link {
 	return this.meshesByLink[name]
 }
 
-func (this *Links) updateLink(klink *v1alpha1.KubeLink) (*Link, error) {
+func (this *Links) updateLink(klink *api.KubeLink) (*Link, error) {
 	name := klink.Name
 	l, wait, err := this.linkFor(klink)
 	this.updateUsesOf(name, wait)
@@ -620,6 +630,29 @@ func (this *Links) GetLinkForClusterAddress(ip net.IP) *Link {
 	return this.clusteraddr[ip.String()]
 }
 
+func (this *Links) GetLocalAddressForClusterAddress(ip net.IP) *net.IPNet {
+	m := this.GetMeshForClusterAddress(ip)
+	if m == nil {
+		return nil
+	}
+	return m.ClusterAddress
+}
+
+func (this *Links) GetMeshForClusterAddress(ip net.IP) *Link {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+	l := this.clusteraddr[ip.String()]
+	if l == nil {
+		return nil
+	}
+	for _, m := range this.meshesByLink {
+		if m.ClusterAddress.Contains(ip) {
+			return m
+		}
+	}
+	return nil
+}
+
 func (this *Links) GetLinkForEndpoint(dnsname string) *Link {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
@@ -715,11 +748,16 @@ func (this *Links) GetGatewayEgress(ifce *NodeInterface, mesh *net.IPNet) tcp.CI
 			}
 		}
 	}
+	for _, m := range this.meshesByLink {
+		if this.matchMesh(m, mesh) {
+			egress = append(egress, tcp.CIDRNet(m.ClusterAddress))
+		}
+	}
 	return egress
 }
 
 func (this *Links) RegisterLink(name string, clusterCIDR *net.IPNet, fqdn string, cidr *net.IPNet) (*Link, error) {
-	kl := &v1alpha1.KubeLink{}
+	kl := &api.KubeLink{}
 	kl.Name = name
 	kl.Spec.ClusterAddress = clusterCIDR.IP.String()
 	kl.Spec.Endpoint = fqdn
