@@ -77,7 +77,7 @@ func (this *MeshIndex) add(link *Link) {
 
 	if !link.IsLocalLink() {
 		set := this.meshlinks[link.Name.mesh]
-		if set != nil {
+		if set == nil {
 			set = LinkNameSet{}
 			this.meshlinks[link.Name.mesh] = set
 		}

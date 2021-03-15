@@ -167,6 +167,14 @@ func LinkForSpec(name LinkName, spec *LinkSpec, defaultPort int, gw net.IP) (*Li
 		}
 		publicKey = &key
 	}
+	var presharedKey *wgtypes.Key
+	if !utils.Empty(spec.PresharedKey) {
+		key, err := wgtypes.ParseKey(spec.PresharedKey)
+		if err != nil {
+			return nil, fmt.Errorf("invalid preshared wireguard key: %s", err)
+		}
+		presharedKey = &key
+	}
 
 	dnsInfo := LinkDNSInfo{}
 	if spec.DNS != nil {
@@ -179,13 +187,17 @@ func LinkForSpec(name LinkName, spec *LinkSpec, defaultPort int, gw net.IP) (*Li
 				}
 				dnsInfo.ClusterDomain = "cluster.local"
 			}
-			if dnsInfo.DnsIP != nil {
-
+			if spec.Endpoint == EP_LOCAL {
+				if dnsInfo.DnsIP != nil {
+					return nil, fmt.Errorf("no dns ip for local link")
+				}
 			} else {
-				if serviceCIDR != nil {
-					dnsInfo.DnsIP = tcp.SubIP(serviceCIDR, CLUSTER_DNS_IP)
-				} else {
-					return nil, fmt.Errorf("dns service ip required for dns propagation")
+				if dnsInfo.DnsIP == nil {
+					if serviceCIDR != nil {
+						dnsInfo.DnsIP = tcp.SubIP(serviceCIDR, CLUSTER_DNS_IP)
+					} else {
+						return nil, fmt.Errorf("dns service ip required for dns propagation")
+					}
 				}
 			}
 		}
@@ -201,6 +213,7 @@ func LinkForSpec(name LinkName, spec *LinkSpec, defaultPort int, gw net.IP) (*Li
 		Port:            port,
 		Endpoint:        endpoint,
 		PublicKey:       publicKey,
+		PresharedKey:    presharedKey,
 		Gateway:         gw,
 		LinkForeignData: LinkForeignData{LinkDNSInfo: dnsInfo},
 	}
@@ -266,6 +279,7 @@ type Link struct {
 	Port           int
 	Endpoint       string
 	PublicKey      *wgtypes.Key
+	PresharedKey   *wgtypes.Key
 	LinkForeignData
 }
 
@@ -305,7 +319,16 @@ type LinkForeignData struct {
 }
 
 func (this *Link) String() string {
-	return fmt.Sprintf("%s[%s,%s,%s]", this.Name, this.ClusterAddress, this.Egress, this.Endpoint)
+	t := "endpoint"
+	if this.IsLocalLink() {
+		t = "local"
+	} else {
+		if this.IsInbound() {
+			t = "inbound"
+		}
+	}
+	return fmt.Sprintf("%s(%s,%s)[%s,%s,%s,%d,%s]",
+		this.Name.name, this.Name.mesh, t, this.ClusterAddress, this.Egress, this.Host, this.Port, this.PublicKey)
 }
 
 func (this *Link) IsInbound() bool {

@@ -83,18 +83,24 @@ func (this *reconciler) Gateway(obj *api.KubeLink) (*controllers.LocalGatewayInf
 	return info, this.runmode.GetErrorForMeshNode(ip)
 }
 
-func (this *reconciler) UpdateGateway(link *api.KubeLink) *string {
+func (this *reconciler) GetLinkInfo(link *api.KubeLink) *controllers.LinkInfo {
 	gateway := this.NodeInterface().IP
 	match, _ := this.MatchLink(link)
 	if !match {
 		gateway = nil
 	}
 
-	if gateway != nil {
-		s := gateway.String()
-		return &s
+	var state runmode.LinkState
+	if link.Spec.Endpoint != kubelink.EP_LOCAL {
+		state = this.runmode.GetLinkState(link)
+	} else {
+		state.State = api.STATE_UP
 	}
-	return nil
+	return &controllers.LinkInfo{
+		Gateway: gateway,
+		State:   state.State,
+		Message: state.Message,
+	}
 }
 
 func (this *reconciler) IsManagedRoute(route *netlink.Route, routes kubelink.Routes) bool {
@@ -166,6 +172,7 @@ func (this *reconciler) GetDNSInfo() kubelink.LinkDNSInfo {
 }
 
 func (this *reconciler) Setup() error {
+	this.Reconciler.Setup()
 
 	if this.config.Mode == ctrlcfg.RUN_MODE_NONE {
 		return nil
@@ -277,7 +284,7 @@ func (this *reconciler) RestartDeployment(logger logger.LogContext, name resourc
 }
 
 func (this *reconciler) UpdateLinkInfo(logger logger.LogContext, name kubelink.LinkName, access *kubelink.LinkAccessInfo, dns *kubelink.LinkDNSInfo) {
-	_, err := this.linkResource.GetCached(resources.NewObjectName(name.String()))
+	_, err := this.linkResource.GetCached(controllers.ObjectName(name))
 	if err != nil {
 		logger.Infof("cannot get link %s: %s", name, err)
 		return

@@ -175,7 +175,21 @@ func (this *reconciler) getSecret(logger logger.LogContext, name resources.Objec
 }
 
 func (this *reconciler) handleLinkAccess(logger logger.LogContext, klink *api.KubeLink, entry *kubelink.Link) (error, error) {
-	this.runmode.HandleDNSPropagation(klink)
+	if entry != nil {
+		logger.Infof("%s", entry)
+		if entry.IsLocalLink() {
+			if entry.ServiceCIDR == nil && this.config.ServiceCIDR != nil {
+				if !tcp.EqualCIDR(this.config.ServiceCIDR, entry.ServiceCIDR) {
+					entry.ServiceCIDR = this.config.ServiceCIDR
+					entry.UpdatePending = true
+				}
+			}
+		}
+	}
+	if this.dnsInfo.DNSPropagation {
+		this.runmode.HandleDNSPropagation(klink)
+	}
+
 	if entry.UpdatePending {
 		return this.updateObjectFromLink(logger, klink, entry)
 	} else {
@@ -266,6 +280,10 @@ func (this *reconciler) updateObjectFromLink(logger logger.LogContext, klink *ap
 	_, _, err = this.linkResource.Modify(klink, func(data resources.ObjectData) (bool, error) {
 		klink := data.(*api.KubeLink)
 		mod := utils.ModificationState{}
+
+		if entry.IsLocalLink() && entry.ServiceCIDR != nil {
+			mod.AssureStringValue(&klink.Spec.CIDR, entry.ServiceCIDR.String())
+		}
 		if entry.DnsIP != nil || klink.Spec.DNS != nil {
 			if entry.DnsIP != nil {
 				if klink.Spec.DNS == nil {
@@ -579,15 +597,14 @@ func (this *configureCorednsTask) Execute(logger logger.LogContext) reconcile.St
 	sort.Strings(keys)
 	log.Debugf("  found meshes %s", utils.StringKeySet(meshes))
 	for _, k := range keys {
-		n := kubelink.DecodeLinkNameFromString(k)
-		m := meshes[n.Mesh()]
+		m := meshes[k]
 		if !m.PropagateDNS() {
-			log.Debugf("  dns propagation disabled for %s", n)
+			log.Debugf("  dns propagation disabled for %s", k)
 			continue
 		}
 		meshforward := ""
 		if m.DNSIP() != nil {
-			log.Debugf("  propagate global mesh domain %s for %s to %s", m.ClusterDomain(), n, m.DNSIP())
+			log.Debugf("  propagate global mesh domain %s for %s to %s", m.ClusterDomain(), k, m.DNSIP())
 			meshforward = fmt.Sprintf(`
 svc.global.%s:8053 {
 	errors
@@ -596,7 +613,7 @@ svc.global.%s:8053 {
 }
 `, m.ClusterDomain(), m.DNSIP())
 		}
-		log.Debugf("  propagate mesh domain %s for %s to local mesh dns %s", m.ClusterDomain(), n, ip)
+		log.Debugf("  propagate mesh domain %s for %s to local mesh dns %s", m.ClusterDomain(), k, ip)
 		config += fmt.Sprintf(`
 %s
 %s:8053 {

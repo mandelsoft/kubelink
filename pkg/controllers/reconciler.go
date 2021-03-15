@@ -55,6 +55,12 @@ type LocalGatewayInfo struct {
 	PublicKey string
 }
 
+type LinkInfo struct {
+	Gateway net.IP
+	State   string
+	Message string
+}
+
 type ReconcilerImplementation interface {
 	IsManagedRoute(*netlink.Route, kubelink.Routes) bool
 	RequiredRoutes() kubelink.Routes
@@ -62,7 +68,7 @@ type ReconcilerImplementation interface {
 	BaseConfig(config.OptionSource) *Config
 
 	Gateway(obj *api.KubeLink) (*LocalGatewayInfo, error)
-	UpdateGateway(link *api.KubeLink) *string
+	GetLinkInfo(link *api.KubeLink) *LinkInfo
 }
 
 type Common struct {
@@ -86,14 +92,11 @@ func (this *Common) TriggerUpdate() {
 }
 
 func (this *Common) TriggerLink(name kubelink.LinkName) {
-	this.controller.Infof("trigger link %s", name)
-	n := name.Name()
-	if name.Mesh() != kubelink.DEFAULT_MESH {
-		n = name.String()
-	}
+	this.controller.Infof("trigger link %s[%s]", name.Name(), name.Mesh())
+
 	this.Controller().EnqueueKey(resources.NewClusterKey(
 		this.controller.GetMainCluster().GetId(),
-		api.KUBELINK, "", n),
+		api.KUBELINK, "", ObjectName(name).Name()),
 	)
 }
 
@@ -246,19 +249,26 @@ func (this *Reconciler) updateLink(logger logger.LogContext, klink *api.KubeLink
 
 	mod := false
 	msg := klink.Status.Message
-	gw := this.impl.UpdateGateway(klink)
+
+	info := this.impl.GetLinkInfo(klink)
 
 	if err != nil {
 		msg = err.Error()
 	} else {
-		if gw != nil && *gw != "" {
-			if state != api.STATE_ERROR {
-				state = api.STATE_UP
-				msg = ""
+		if info != nil {
+			if info.Gateway != nil {
+				if info.State != "" {
+					state = info.State
+				} else {
+					if state != api.STATE_ERROR {
+						state = api.STATE_UP
+					}
+					msg = info.Message
+				}
+			} else {
+				state = api.STATE_STALE
+				msg = "no gateway"
 			}
-		} else {
-			state = api.STATE_STALE
-			msg = "no gateway"
 		}
 	}
 
@@ -280,13 +290,13 @@ func (this *Reconciler) updateLink(logger logger.LogContext, klink *api.KubeLink
 			klink.Status.Message = msg
 		}
 	}
-	if gw != nil && klink.Status.Gateway != *gw {
+	if info != nil && info.Gateway != nil && klink.Status.Gateway != info.Gateway.String() {
 		mod = true
 		if update {
 			if logger != nil {
-				logger.Infof("update gateway %s -> %s", klink.Status.Gateway, *gw)
+				logger.Infof("update gateway %s -> %s", klink.Status.Gateway, info.Gateway)
 			}
-			klink.Status.Gateway = *gw
+			klink.Status.Gateway = info.Gateway.String()
 		}
 	}
 	return mod

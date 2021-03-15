@@ -23,12 +23,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const STATE_ERROR = "Error"
-const STATE_INVALID = "Invalid"
-const STATE_STALE = "Stale"
-const STATE_ACTIVE = "Active"
-const STATE_UP = "Up"
-const STATE_DOWN = "Down"
+const STATE_INVALID = "Invalid" // Invalid because of erroneous link configuration
+const STATE_STALE = "Stale"     // Invalid because problem in mesh setup
+const STATE_UP = "Up"           // Link is up and connected
+const STATE_IDLE = "Idle"       // Link ready for connections, but not yet active
+const STATE_DOWN = "Down"       // Link is down because of unknown connectivity problem
+const STATE_ERROR = "Error"     // Known error on connection
 
 const EP_INBOUND = "Inbound"
 
@@ -79,6 +79,8 @@ type KubeLinkSpec struct {
 	// public key for wireguard
 	// +optional
 	PublicKey string `json:"publicKey,omitempty"`
+	// +optional
+	PresharedKey string `json:"presharedKey,omitempty"`
 
 	// +optional
 	APIAccess *core.SecretReference `json:"apiAccess,omitempty"`

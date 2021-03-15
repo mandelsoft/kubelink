@@ -61,6 +61,8 @@ type mode struct {
 	errors map[string]error // error for a dedicated cluster address
 
 	finalizer func()
+
+	peerstate map[string]runmode.LinkState
 }
 
 var _ runmode.RunMode = &mode{}
@@ -70,6 +72,7 @@ func NewWireguardMode(env runmode.RunModeEnv) (runmode.RunMode, error) {
 		RunModeBase: runmode.NewRunModeBase(config.RUN_MODE_WIREGUARD, env),
 		config:      env.Config(),
 		errors:      map[string]error{},
+		peerstate:   map[string]runmode.LinkState{},
 	}
 	if this.config.Port == 0 {
 		this.config.Port = DefaultPort
@@ -184,6 +187,7 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 	if err != nil {
 		return err
 	}
+
 	update := false
 	if dev.PrivateKey.String() != this.key.String() || dev.ListenPort != this.port {
 		logger.Infof("update interface %q with key %s and port %d", this.link.Attrs().Name, this.key.PublicKey(), this.port)
@@ -223,6 +227,7 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 			}
 			peer := wgtypes.PeerConfig{
 				PublicKey:                   *l.PublicKey,
+				PresharedKey:                l.PresharedKey,
 				Endpoint:                    endpoint,
 				PersistentKeepaliveInterval: &keep,
 				AllowedIPs:                  allowed,
@@ -252,8 +257,20 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 	})
 
 	remove := 0
+	offset := time.Now().Add(-3 * time.Minute)
 	for _, p := range dev.Peers {
-		if !found.Contains(p.PublicKey.String()) {
+		pub := p.PublicKey.String()
+		if p.LastHandshakeTime.Before(offset) {
+			this.peerstate[pub] = runmode.LinkState{
+				State:   api.STATE_DOWN,
+				Message: fmt.Sprintf("last handlshake %s", p.LastHandshakeTime.String()),
+			}
+		} else {
+			this.peerstate[pub] = runmode.LinkState{
+				State: api.STATE_UP,
+			}
+		}
+		if !found.Contains(pub) {
 			peer := wgtypes.PeerConfig{
 				PublicKey: p.PublicKey,
 				Remove:    true,
@@ -404,4 +421,20 @@ var lnf = reflect.TypeOf(&netlink.LinkNotFoundError{}).Elem()
 
 func IsLinkNotFound(err error) bool {
 	return err != nil && reflect.ValueOf(err).Type() == lnf
+}
+
+func (this *mode) GetLinkState(link *api.KubeLink) runmode.LinkState {
+	ip, _, _ := net.ParseCIDR(link.Spec.ClusterAddress)
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	if ip != nil {
+		err := this.errors[ip.String()]
+		if err != nil {
+			return runmode.LinkState{
+				State:   api.STATE_ERROR,
+				Message: err.Error(),
+			}
+		}
+	}
+	return this.peerstate[link.Spec.PublicKey]
 }

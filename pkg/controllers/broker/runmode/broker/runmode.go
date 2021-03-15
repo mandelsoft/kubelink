@@ -210,15 +210,33 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 	return err
 }
 
+func (this *mode) GetLinkState(link *api.KubeLink) runmode.LinkState {
+	state := runmode.LinkState{}
+	ip, _, _ := net.ParseCIDR(link.Spec.ClusterAddress)
+	if ip != nil {
+		t, _ := this.mux.QueryConnectionForIP(ip)
+		if t != nil {
+			state.State = api.STATE_UP
+		} else {
+			state.State = api.STATE_IDLE
+		}
+	}
+	return state
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 func (this *mode) Notify(l *kubelink.Link, err error) {
 	if err != nil {
-		this.Controller().Infof("requeue kubelink %q for failure handling: %s", l.Name, err)
+		if err == io.EOF {
+			this.Controller().Infof("requeue kubelink %q for closed connection", l.Name)
+		} else {
+			this.Controller().Infof("requeue kubelink %q for failure handling: %s", l.Name, err)
+		}
 	} else {
 		this.Controller().Infof("requeue kubelink %q for new connection", l.Name)
 	}
-	this.Controller().EnqueueKey(resources.NewClusterKey(this.Controller().GetMainCluster().GetId(), api.KUBELINK, "", l.Name.String()))
+	this.TriggerLink(l.Name)
 }
 
 func (this *mode) CreateSecretCertificateSource() (certs.CertificateSource, error) {

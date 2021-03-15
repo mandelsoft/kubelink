@@ -52,7 +52,7 @@ func (this *reconciler) Gateway(obj *v1alpha1.KubeLink) (*controllers.LocalGatew
 	return nil, nil
 }
 
-func (this *reconciler) UpdateGateway(link *v1alpha1.KubeLink) *string {
+func (this *reconciler) GetLinkInfo(link *v1alpha1.KubeLink) *controllers.LinkInfo {
 	return nil
 }
 

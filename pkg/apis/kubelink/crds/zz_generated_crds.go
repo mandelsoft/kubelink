@@ -111,6 +111,8 @@ spec:
                 items:
                   type: string
                 type: array
+              presharedKey:
+                type: string
               publicKey:
                 description: public key for wireguard
                 type: string

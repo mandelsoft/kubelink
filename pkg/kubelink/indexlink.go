@@ -159,7 +159,7 @@ func (this *LinkIndex) ByEndpointHost(name string) *Link {
 func (this *LinkIndex) ByClusterAddress(ip net.IP) *Link {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
-	return this.linksByHost[ip.String()]
+	return this.linksByClusterAddr[ip.String()]
 }
 
 func (this *LinkIndex) ByMesh(name string) LinkNameSet {

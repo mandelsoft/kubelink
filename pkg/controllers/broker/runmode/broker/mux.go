@@ -165,7 +165,9 @@ func (this *Mux) dialTunnelConnection(link *kubelink.Link) (*TunnelConnection, e
 	}
 	conn, err := this.certInfo.Dial(link.Endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("dialing failed: %s", err)
+		err := fmt.Errorf("dialing failed: %s", err)
+		this.notify(link, err)
+		return nil, err
 	}
 	t, hello, err := NewTunnelConnection(this, conn, link, this.links)
 	if err != nil {
@@ -222,6 +224,8 @@ func (this *Mux) removeTunnel(t *TunnelConnection) {
 	}
 	if len(list) == 0 {
 		delete(this.byClusterIP, ips)
+		l := this.links.GetLinkForClusterAddress(t.targetAddress.IP)
+		this.notify(l, io.EOF)
 	} else {
 		this.byClusterIP[ips] = list
 	}

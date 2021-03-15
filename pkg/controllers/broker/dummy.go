@@ -51,6 +51,6 @@ func (this *dummy) Gateway(obj *v1alpha1.KubeLink) (*controllers.LocalGatewayInf
 	return nil, nil
 }
 
-func (this *dummy) UpdateGateway(link *v1alpha1.KubeLink) *string {
+func (this *dummy) GetLinkInfo(link *v1alpha1.KubeLink) *controllers.LinkInfo {
 	return nil
 }

@@ -57,14 +57,16 @@ type Config struct {
 	controllers.Config
 
 	address     string
-	service     string
 	responsible string
 
 	ClusterName    string
 	ClusterAddress *net.IPNet
 	MeshCIDR       *net.IPNet
 
-	ServiceCIDR *net.IPNet
+	serviceCIDR  string
+	ServiceCIDR  *net.IPNet
+	dnsServiceIP string
+	DNSServiceIP net.IP
 
 	Responsible    utils.StringSet
 	Port           int
@@ -95,8 +97,6 @@ type Config struct {
 	meshDNSServiceIP string
 	MeshDNSServiceIP net.IP
 
-	dnsServiceIP  string
-	DNSServiceIP  net.IP
 	ClusterDomain string
 
 	AutoConnect bool
@@ -105,7 +105,7 @@ type Config struct {
 
 func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	this.Config.AddOptionsToSet(set)
-	set.AddStringOption(&this.service, "service-cidr", "", "", "CIDR of local service network")
+	set.AddStringOption(&this.serviceCIDR, "service-cidr", "", "", "CIDR of local service network")
 	set.AddStringOption(&this.responsible, "served-links", "", "all", "Comma separated list of links to serve")
 	set.AddIntOption(&this.Port, "broker-port", "", 0, "Port for bridge/wireguard")
 	set.AddIntOption(&this.AdvertisedPort, "advertised-port", "", kubelink.DEFAULT_PORT, "Advertised broker port for auto-connect")
@@ -162,7 +162,7 @@ func (this *Config) Prepare() error {
 		}
 	}
 
-	_, this.ServiceCIDR, err = this.OptionalCIDR(this.service, "service-cidr")
+	_, this.ServiceCIDR, err = this.OptionalCIDR(this.serviceCIDR, "service-cidr")
 	if err != nil {
 		return err
 	}

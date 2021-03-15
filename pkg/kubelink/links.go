@@ -61,11 +61,14 @@ type Links struct {
 	lock        sync.RWMutex
 	resource    resources.Interface
 	initialized bool
+
 	defaultport int
-	links       *LinkIndex
-	stale       *LinkIndex
-	meshes      *MeshIndex
+	serviceCIDR *net.IPNet
 	gateway     net.IP
+
+	links  *LinkIndex
+	stale  *LinkIndex
+	meshes *MeshIndex
 }
 
 func NewLinks(resc resources.Interface, defaultport int) *Links {
@@ -78,10 +81,12 @@ func NewLinks(resc resources.Interface, defaultport int) *Links {
 	}
 }
 
-func (this *Links) setupLinks(kind string, list []resources.Object, cond func(*api.KubeLink) bool) {
+func (this *Links) setupLinks(logger logger.LogContext, kind string, list []resources.Object, cond func(*api.KubeLink) bool) {
 	last := 0
 
+	logger.Infof("setup %s links", kind)
 	for len(list) > 0 && len(list) != last {
+		logger.Infof("  checking %d entries", len(list))
 		stale := []resources.Object{}
 		last = len(list)
 		for _, l := range list {
@@ -92,11 +97,11 @@ func (this *Links) setupLinks(kind string, list []resources.Object, cond func(*a
 					if valid {
 						stale = append(stale, l)
 					} else {
-						logger.Infof("erroneous %s %s: %s", kind, l.GetName(), err)
+						logger.Infof("  erroneous %s %s: %s", kind, l.GetName(), err)
 					}
 				} else {
 					if link != nil {
-						logger.Infof("found %s %s", kind, link)
+						logger.Infof("  found %s %s", kind, link)
 					}
 				}
 			}
@@ -104,7 +109,7 @@ func (this *Links) setupLinks(kind string, list []resources.Object, cond func(*a
 		list = stale
 	}
 	for _, l := range list {
-		logger.Infof("stale %s %s", kind, l)
+		logger.Infof("  stale %s %s", kind, l.ObjectName())
 	}
 }
 
@@ -116,13 +121,10 @@ func (this *Links) Setup(logger logger.LogContext, list []resources.Object) {
 		return
 	}
 	this.initialized = true
-	if logger != nil {
-		logger.Infof("setup links")
-	}
 	// first setup meshes (LocalLinks)
-	this.setupLinks("mesh", list, func(l *api.KubeLink) bool { return l.Spec.Endpoint == EP_LOCAL })
+	this.setupLinks(logger, "mesh", list, func(l *api.KubeLink) bool { return l.Spec.Endpoint == EP_LOCAL })
 	// the setup foreign links
-	this.setupLinks("mesh", list, func(l *api.KubeLink) bool { return l.Spec.Endpoint != EP_LOCAL })
+	this.setupLinks(logger, "node", list, func(l *api.KubeLink) bool { return l.Spec.Endpoint != EP_LOCAL })
 }
 
 func (this *Links) SetDefaultMesh(clusterName string, clusterAddress *net.IPNet, meshDNS LinkDNSInfo) {
@@ -273,26 +275,44 @@ func (this *Links) updateLink(klink *api.KubeLink) (*Link, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	if l.GatewayLink != nil {
-		if this.IsGatewayLink(l.Name) {
+
+	stale := true
+	defer func() {
+		if stale {
 			this.stale.Add(l)
-			return nil, true, fmt.Errorf("link is gateway for %s and cannot use gateway",
-				this.links.ServedLinksFor(l.Name).AddAll(this.stale.ServedLinksFor(l.Name)))
+		}
+	}()
+
+	if !l.IsLocalLink() {
+		m := this.meshes.ByName(name.mesh)
+		if m == nil {
+			return nil, true, fmt.Errorf("no local link for mesh %q", name.mesh)
+		}
+		cidr := tcp.CIDRNet(l.ClusterAddress)
+		if !tcp.EqualCIDR(cidr, m.cidr) {
+			return nil, true, fmt.Errorf("mesh cidr mismatch (mesh uses %s)", m.cidr)
 		}
 
-		gw := this.links.ByName(*l.GatewayLink)
-		if gw == nil {
-			this.stale.Add(l)
-			gw = this.stale.ByName(*l.GatewayLink)
-			if gw != nil {
-				return nil, true, fmt.Errorf("gateway link %q is stale", *l.GatewayLink)
+		if l.GatewayLink != nil {
+			if this.IsGatewayLink(l.Name) {
+				return nil, true, fmt.Errorf("link is gateway for %s and cannot use gateway",
+					this.links.ServedLinksFor(l.Name).AddAll(this.stale.ServedLinksFor(l.Name)))
 			}
-			if this.meshes.ByLinkName(*l.GatewayLink) != nil {
-				return nil, true, fmt.Errorf("gateway link %q is local link", *l.GatewayLink)
+
+			gw := this.links.ByName(*l.GatewayLink)
+			if gw == nil {
+				gw = this.stale.ByName(*l.GatewayLink)
+				if gw != nil {
+					return nil, true, fmt.Errorf("gateway link %q is stale", *l.GatewayLink)
+				}
+				if this.meshes.ByLinkName(*l.GatewayLink) != nil {
+					return nil, true, fmt.Errorf("gateway link %q is local link", *l.GatewayLink)
+				}
+				return nil, true, fmt.Errorf("gateway link %q not found", *l.GatewayLink)
 			}
-			return nil, true, fmt.Errorf("gateway link %q not found", *l.GatewayLink)
 		}
 	}
+	stale = false
 	return this.replaceLink(l), true, nil
 }
 
