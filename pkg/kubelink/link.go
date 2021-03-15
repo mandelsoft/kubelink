@@ -21,10 +21,12 @@ package kubelink
 import (
 	"fmt"
 	"net"
+	"strconv"
+	"strings"
 
-	utils2 "github.com/gardener/controller-manager-library/pkg/utils"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
+	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 	"github.com/mandelsoft/kubelink/pkg/utils"
@@ -32,17 +34,233 @@ import (
 
 const EP_INBOUND = "Inbound"
 const EP_LOCAL = "LocalLink"
+const EP_NONE = "None"
+
+const DEFAULT_MESH = "<default>"
+
+const LINKNAME_SEP = "--"
+
+////////////////////////////////////////////////////////////////////////////////
+
+type LinkName struct {
+	name string
+	mesh string
+}
+
+func NewLinkName(mesh, name string) LinkName {
+	if mesh == "" {
+		mesh = DEFAULT_MESH
+	}
+	return LinkName{
+		name: name,
+		mesh: mesh,
+	}
+}
+
+func DecodeLinkNameFromString(name string) LinkName {
+	index := strings.Index(name, LINKNAME_SEP)
+	if index > 0 {
+		return NewLinkName(name[:index], name[index+2:])
+	}
+	return NewLinkName(DEFAULT_MESH, name)
+}
+
+func (this LinkName) Name() string {
+	return this.name
+}
+
+func (this LinkName) Mesh() string {
+	return this.mesh
+}
+
+func (this LinkName) String() string {
+	return this.mesh + LINKNAME_SEP + this.name
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+type LinkSpec = api.KubeLinkSpec
+
+func LinkForSpec(name LinkName, spec *LinkSpec, defaultPort int, gw net.IP) (*Link, error) {
+	var egress tcp.CIDRList
+	var serviceCIDR *net.IPNet
+	var gateway *LinkName
+	if spec.Endpoint == EP_LOCAL {
+		if spec.GatewayLink != "" {
+			return nil, fmt.Errorf("local links must not use a gateway")
+		}
+		if len(spec.Egress) != 0 {
+			return nil, fmt.Errorf("no egress possible for local links")
+		}
+		if len(spec.Ingress) != 0 {
+			return nil, fmt.Errorf("no ingress possible for local links")
+		}
+	}
+	if spec.GatewayLink != "" {
+		gw := DecodeLinkNameFromString(spec.GatewayLink)
+		if gw == name {
+			return nil, fmt.Errorf("no self link for gateway link")
+		}
+		gateway = &gw
+	}
+
+	if !utils.Empty(spec.CIDR) {
+		_, cidr, err := net.ParseCIDR(spec.CIDR)
+		if err != nil {
+			return nil, fmt.Errorf("invalid service cidr %q: %s", spec.CIDR, err)
+		}
+		serviceCIDR = cidr
+		if spec.Endpoint != EP_LOCAL {
+			egress.Add(cidr)
+		}
+	}
+	for _, c := range spec.Egress {
+		cidr, err := tcp.ParseNet(c)
+		if err != nil {
+			return nil, fmt.Errorf("invalid routing cidr %q: %s", spec.CIDR, err)
+		}
+		egress.Add(cidr)
+	}
+
+	ingress, err := ParseFirewallRule(spec.Ingress)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cluster ingress: %s", err)
+	}
+
+	if spec.ClusterAddress == "" {
+		return nil, fmt.Errorf("cluster address missing")
+	}
+	ip, ccidr, err := net.ParseCIDR(spec.ClusterAddress)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cluster address %q: %s", spec.ClusterAddress, err)
+	}
+	ccidr.IP = ip
+	if spec.Endpoint == "" && spec.GatewayLink == "" {
+		return nil, fmt.Errorf("endpoint or gateway link missing")
+	}
+
+	endpoint := spec.Endpoint
+	host := ""
+	port := defaultPort
+	if endpoint != EP_LOCAL && endpoint != EP_INBOUND {
+		if len(endpoint) == 0 {
+			return nil, fmt.Errorf("endpoint required")
+		}
+		parts := strings.Split(endpoint, ":")
+		if len(parts) == 1 {
+			endpoint = fmt.Sprintf("%s:%d", endpoint, port)
+		} else {
+			i, err := strconv.ParseInt(parts[1], 10, 32)
+			if err != nil {
+				return nil, fmt.Errorf("invalid gateway port %q: %s", parts[1], err)
+			}
+			port = int(i)
+		}
+		host = parts[0]
+	}
+
+	var publicKey *wgtypes.Key
+	if !utils.Empty(spec.PublicKey) {
+		key, err := wgtypes.ParseKey(spec.PublicKey)
+		if err != nil {
+			return nil, fmt.Errorf("invalid public wireguard key %q: %s", spec.PublicKey, err)
+		}
+		publicKey = &key
+	}
+
+	dnsInfo := LinkDNSInfo{}
+	if spec.DNS != nil {
+		if spec.DNS.OmitDNSPropagation == nil || *spec.DNS.OmitDNSPropagation {
+			dnsInfo.DNSPropagation = true
+			dnsInfo.ClusterDomain = spec.DNS.BaseDomain
+			if dnsInfo.ClusterDomain == "" {
+				if spec.Endpoint == EP_LOCAL {
+					return nil, fmt.Errorf("dns propgation requires dns base domain for local links")
+				}
+				dnsInfo.ClusterDomain = "cluster.local"
+			}
+			if dnsInfo.DnsIP != nil {
+
+			} else {
+				if serviceCIDR != nil {
+					dnsInfo.DnsIP = tcp.SubIP(serviceCIDR, CLUSTER_DNS_IP)
+				} else {
+					return nil, fmt.Errorf("dns service ip required for dns propagation")
+				}
+			}
+		}
+	}
+	link := &Link{
+		Name:            name,
+		ServiceCIDR:     serviceCIDR,
+		Egress:          egress,
+		Ingress:         ingress,
+		ClusterAddress:  ccidr,
+		GatewayLink:     gateway,
+		Host:            host,
+		Port:            port,
+		Endpoint:        endpoint,
+		PublicKey:       publicKey,
+		Gateway:         gw,
+		LinkForeignData: LinkForeignData{LinkDNSInfo: dnsInfo},
+	}
+	return link, nil
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+type LinkNameSet map[LinkName]struct{}
+
+func NewLinkNameSet(names ...LinkName) LinkNameSet {
+	r := LinkNameSet{}
+	r.Add(names...)
+	return r
+}
+
+func (this LinkNameSet) Contains(n LinkName) bool {
+	_, ok := this[n]
+	return ok
+}
+
+func (this LinkNameSet) Add(names ...LinkName) {
+	for _, n := range names {
+		this[n] = struct{}{}
+	}
+}
+
+func (this LinkNameSet) Remove(n LinkName) {
+	delete(this, n)
+}
+
+func (this LinkNameSet) AddAll(sets ...LinkNameSet) LinkNameSet {
+	for _, set := range sets {
+		for n := range set {
+			this[n] = struct{}{}
+		}
+	}
+	return this
+}
+
+func (this LinkNameSet) Copy() LinkNameSet {
+	r := LinkNameSet{}
+	if this != nil {
+		for n := range this {
+			r.Add(n)
+		}
+	}
+	return r
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
 type Link struct {
-	Name           string
+	Name           LinkName
 	ServiceCIDR    *net.IPNet
 	Egress         tcp.CIDRList
 	Ingress        *FirewallRule
 	ClusterAddress *net.IPNet
-	GatewayLink    string
-	GatewayFor     utils2.StringSet
+	GatewayLink    *LinkName
+	GatewayFor     LinkNameSet
 	Gateway        net.IP
 	Host           string
 	Port           int
@@ -90,10 +308,6 @@ func (this *Link) String() string {
 	return fmt.Sprintf("%s[%s,%s,%s]", this.Name, this.ClusterAddress, this.Egress, this.Endpoint)
 }
 
-func (this *Link) MatchMesh(cidr *net.IPNet) bool {
-	return tcp.EqualCIDR(tcp.CIDRNet(this.ClusterAddress), cidr)
-}
-
 func (this *Link) IsInbound() bool {
 	return this.Endpoint == EP_INBOUND
 }
@@ -102,16 +316,27 @@ func (this *Link) IsLocalLink() bool {
 	return this.Endpoint == EP_LOCAL
 }
 
-func (this *Link) GetRequired() utils2.StringSet {
-	if this.GatewayLink == "" {
-		return utils2.StringSet{}
+func (this *Link) HasEndpoint() bool {
+	return !this.IsLocalLink() && !this.IsInbound()
+}
+
+func (this *Link) MatchMesh(cidr *net.IPNet) bool {
+	return tcp.EqualCIDR(tcp.CIDRNet(this.ClusterAddress), cidr)
+}
+
+func (this *Link) GetRequired() LinkNameSet {
+	if this.GatewayLink == nil {
+		return LinkNameSet{}
 	}
-	return utils2.NewStringSet(this.GatewayLink)
+	return NewLinkNameSet(*this.GatewayLink)
 }
 
 func (this *Link) AllowIngress(ip net.IP) (granted bool, set bool) {
 	if !this.Ingress.IsSet() {
 		return true, false
+	}
+	if ip.Equal(this.ClusterAddress.IP) {
+		return true, true
 	}
 	return this.Ingress.Contains(ip), true
 }
@@ -122,7 +347,7 @@ func (this *Link) GetIngressChain() *iptables.ChainRequest {
 	}
 	rules := iptables.Rules{
 		iptables.Rule{
-			iptables.Opt("-m", "comment", "--comment", "firewall settings for link "+this.Name),
+			iptables.Opt("-m", "comment", "--comment", "firewall settings for link "+this.Name.String()),
 		},
 	}
 	for _, i := range this.Ingress.Denied {
@@ -144,7 +369,7 @@ func (this *Link) GetIngressChain() *iptables.ChainRequest {
 	}
 	return iptables.NewChainRequest(
 		TABLE_LINK_CHAIN,
-		FW_LINK_CHAIN_PREFIX+encodeName(this.Name),
+		FW_LINK_CHAIN_PREFIX+encodeName(this.Name.String()),
 		rules, true)
 }
 

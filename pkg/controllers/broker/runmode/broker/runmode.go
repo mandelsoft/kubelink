@@ -164,9 +164,19 @@ func (this *mode) Start() error {
 	return nil
 }
 
+func (this *mode) IsDNSPropagation(klink *api.KubeLink) bool {
+	if this.config.DNSPropagation == config.DNSMODE_NONE {
+		return false
+	}
+	if klink.Spec.DNS == nil || klink.Spec.DNS.OmitDNSPropagation == nil {
+		return true
+	}
+	return !*klink.Spec.DNS.OmitDNSPropagation
+}
+
 func (this *mode) HandleDNSPropagation(klink *api.KubeLink) {
-	if this.config.DNSPropagation != config.DNSMODE_NONE && klink.Spec.Endpoint != kubelink.EP_LOCAL {
-		this.Tasks().ScheduleTask(NewConnectTask(klink.Name, this), 0)
+	if klink.Spec.Endpoint != kubelink.EP_LOCAL && this.IsDNSPropagation(klink) {
+		this.Tasks().ScheduleTask(NewConnectTask(kubelink.DecodeLinkNameFromString(klink.Name), this), 0)
 	}
 }
 
@@ -208,7 +218,7 @@ func (this *mode) Notify(l *kubelink.Link, err error) {
 	} else {
 		this.Controller().Infof("requeue kubelink %q for new connection", l.Name)
 	}
-	this.Controller().EnqueueKey(resources.NewClusterKey(this.Controller().GetMainCluster().GetId(), api.KUBELINK, "", l.Name))
+	this.Controller().EnqueueKey(resources.NewClusterKey(this.Controller().GetMainCluster().GetId(), api.KUBELINK, "", l.Name.String()))
 }
 
 func (this *mode) CreateSecretCertificateSource() (certs.CertificateSource, error) {

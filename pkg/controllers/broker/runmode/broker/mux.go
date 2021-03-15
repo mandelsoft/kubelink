@@ -345,7 +345,7 @@ func (this *Mux) ServeConnection(ctx context.Context, conn net.Conn) {
 		printConnState(this, state)
 		if len(state.PeerCertificates) > 0 {
 			fqdn = state.PeerCertificates[0].Subject.CommonName
-			link = this.links.GetLinkForEndpoint(fqdn)
+			link = this.links.GetLinkForEndpointHost(fqdn)
 			if link == nil {
 				if !this.autoconnect {
 					this.Errorf("unknown endpoint %s for connection from %s", fqdn, remote)
@@ -389,7 +389,7 @@ func (this *Mux) ServeConnection(ctx context.Context, conn net.Conn) {
 		if hello.GetPort() > 0 {
 			fqdn = fmt.Sprintf("%s:%d", fqdn, hello.GetPort())
 		}
-		l, err := this.links.RegisterLink(DefaultLinkName(cidr.IP), &adjusted, fqdn, hello.GetCIDR())
+		l, err := this.links.RegisterLink(DefaultLinkName(m.Name(), cidr.IP), &adjusted, fqdn, hello.GetCIDR())
 		if err != nil {
 			this.Errorf("cannot auto-connect cluster %s: %s", cidr.IP, err)
 			return
@@ -397,7 +397,7 @@ func (this *Mux) ServeConnection(ctx context.Context, conn net.Conn) {
 		this.Infof("auto-connected %s", l)
 		t.targetAddress = cidr
 	}
-	if t.name == "" {
+	if t.name == nil {
 		link := this.links.GetLinkForClusterAddress(cidr.IP)
 		if link == nil {
 			this.Errorf("oops, finally for link found for %s", cidr.IP)
@@ -411,9 +411,9 @@ func (this *Mux) ServeConnection(ctx context.Context, conn net.Conn) {
 	t.Serve()
 }
 
-func DefaultLinkName(ip net.IP) string {
+func DefaultLinkName(meshname string, ip net.IP) kubelink.LinkName {
 	s := ip.String()
 	s = strings.ReplaceAll(s, ".", "-")
 	s = strings.ReplaceAll(s, ":", "-")
-	return s
+	return kubelink.NewLinkName(meshname, s)
 }

@@ -197,7 +197,7 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 
 	keep := 21 * time.Second
 	found := utils.StringSet{}
-	this.Links().Visit(func(l *kubelink.Link) bool {
+	this.Links().VisitLinks(func(l *kubelink.Link) bool {
 		if l.PublicKey != nil && l.Endpoint != "" {
 			var endpoint *net.UDPAddr
 			if l.Endpoint != api.EP_INBOUND {

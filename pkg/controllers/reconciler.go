@@ -34,6 +34,7 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 
 	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/iptables"
@@ -84,11 +85,15 @@ func (this *Common) TriggerUpdate() {
 	this.Controller().EnqueueCommand(CMD_UPDATE)
 }
 
-func (this *Common) TriggerLink(name string) {
+func (this *Common) TriggerLink(name kubelink.LinkName) {
 	this.controller.Infof("trigger link %s", name)
+	n := name.Name()
+	if name.Mesh() != kubelink.DEFAULT_MESH {
+		n = name.String()
+	}
 	this.Controller().EnqueueKey(resources.NewClusterKey(
 		this.controller.GetMainCluster().GetId(),
-		api.KUBELINK, "", name),
+		api.KUBELINK, "", n),
 	)
 }
 
@@ -130,7 +135,10 @@ func (this *Reconciler) Links() *kubelink.Links {
 ///////////////////////////////////////////////////////////////////////////////
 
 func (this *Reconciler) Setup() {
-	this.links.Setup(this.controller, this.controller.GetMainCluster())
+	res, _ := this.controller.GetMainCluster().Resources().Get(api.KUBELINK)
+	list, _ := res.ListCached(labels.Everything())
+
+	this.links.Setup(this.controller, list)
 	this.controller.Infof("setup done")
 }
 
@@ -168,38 +176,56 @@ func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resour
 			}
 		}
 	}
+	state := link.Status.State
 	if err != nil {
 		logger.Infof("  link error: %s", err)
+		state = api.STATE_ERROR
 	}
 
-	var invalid error
 	var ldata *kubelink.Link
 	var uerr error
 	if err == nil {
-		ldata, invalid = this.links.UpdateLink(link)
-		if ldata != nil {
-			if len(ldata.GatewayFor) != 0 {
-				logger.Info("used as gateway for %s", ldata.GatewayFor)
+		var valid bool
+		ldata, valid, err = this.links.UpdateLink(link)
+		if err != nil {
+			if valid {
+				logger.Warnf("invalid link: %s", err)
+				state = api.STATE_INVALID
+			} else {
+				logger.Warnf("stale link: %s", err)
+				state = api.STATE_STALE
 			}
-			if ldata.GatewayLink != "" {
-				logger.Info("using gateway link %s", ldata.GatewayLink)
-			}
-		}
-		if invalid != nil {
-			logger.Warnf("invalid link: %s", err)
 		} else {
-			if updater != nil {
-				uerr, err = updater(logger, link, ldata)
+			if ldata != nil {
+				if len(ldata.GatewayFor) != 0 {
+					logger.Info("used as gateway for %s", ldata.GatewayFor)
+				}
+				if ldata.GatewayLink != nil {
+					logger.Info("using gateway link %s", ldata.GatewayLink)
+				}
+				if updater != nil {
+					uerr, err = updater(logger, link, ldata)
+				}
+				// reconcile all using objects
+				served := this.Links().ServedLinksFor(ldata.Name)
+				if len(served) > 0 {
+					logger.Infof("triggering served links")
+					for u := range served {
+						this.TriggerLink(u)
+					}
+				}
+				if ldata.IsLocalLink() {
+					logger.Infof("triggering mesh members")
+					for u := range this.Links().MeshLinksFor(ldata.Name.Mesh()) {
+						this.TriggerLink(u)
+					}
+				}
 			}
-		}
-		for u := range this.Links().GetUsersOf(link.Name) {
-			// reconcile all using objects
-			this.Controller().EnqueueKey(resources.NewClusterKey(this.Controller().GetMainCluster().GetId(), api.KUBELINK, "", u))
 		}
 	}
-	if this.updateLink(logger, orig, err, invalid, false) {
+	if this.updateLink(logger, orig, state, err, false) {
 		_, err2 := obj.ModifyStatus(func(data resources.ObjectData) (bool, error) {
-			return this.updateLink(logger, data.(*api.KubeLink), err, invalid, true), nil
+			return this.updateLink(logger, data.(*api.KubeLink), state, err, true), nil
 		})
 
 		if err2 != nil {
@@ -216,26 +242,23 @@ func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resour
 	return ldata, reconcile.Succeeded(logger)
 }
 
-func (this *Reconciler) updateLink(logger logger.LogContext, klink *api.KubeLink, err, invalid error, update bool) bool {
+func (this *Reconciler) updateLink(logger logger.LogContext, klink *api.KubeLink, state string, err error, update bool) bool {
 
 	mod := false
 	msg := klink.Status.Message
-	state := klink.Status.State
-
 	gw := this.impl.UpdateGateway(klink)
 
-	if err != nil || invalid != nil {
-		if invalid != nil {
-			state = api.STATE_INVALID
-			msg = invalid.Error()
-		} else {
-			state = api.STATE_ERROR
-			msg = err.Error()
-		}
+	if err != nil {
+		msg = err.Error()
 	} else {
 		if gw != nil && *gw != "" {
-			state = api.STATE_UP
-			msg = ""
+			if state != api.STATE_ERROR {
+				state = api.STATE_UP
+				msg = ""
+			}
+		} else {
+			state = api.STATE_STALE
+			msg = "no gateway"
 		}
 	}
 
@@ -272,7 +295,7 @@ func (this *Reconciler) updateLink(logger logger.LogContext, klink *api.KubeLink
 func (this *Reconciler) Delete(logger logger.LogContext, obj resources.Object) reconcile.Status {
 	if obj.GroupKind() == api.KUBELINK {
 		logger.Infof("delete")
-		this.links.RemoveLink(obj.GetName())
+		this.links.RemoveLink(kubelink.DecodeLinkNameFromString(obj.GetName()))
 		this.TriggerUpdate()
 		return reconcile.Succeeded(logger)
 	}
@@ -282,7 +305,7 @@ func (this *Reconciler) Delete(logger logger.LogContext, obj resources.Object) r
 func (this *Reconciler) Deleted(logger logger.LogContext, key resources.ClusterObjectKey) reconcile.Status {
 	if key.GroupKind() == api.KUBELINK {
 		logger.Infof("deleted")
-		this.links.RemoveLink(key.Name())
+		this.links.RemoveLink(kubelink.DecodeLinkNameFromString(key.Name()))
 		this.TriggerUpdate()
 		return reconcile.Succeeded(logger)
 	}
@@ -356,33 +379,33 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 		defer wg.Close()
 		devs, err := wg.Devices()
 		if err == nil {
-			logger.Infof("found %d wireguard device(s)", len(devs))
+			n := utils.NewNotifier(logger, fmt.Sprintf("found %d wireguard device(s)", len(devs)))
 			for _, d := range devs {
 				match := false
 				link, err := netlink.LinkByName(d.Name)
 				if err != nil {
-					logger.Errorf("link %s not found: %s", d.Name, err)
+					n.Errorf("link %s not found: %s", d.Name, err)
 					continue
 				}
 				addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
 				if err != nil {
-					logger.Errorf("cannot get address list for link %s: %s", d.Name, err)
+					n.Errorf("cannot get address list for link %s: %s", d.Name, err)
 					continue
 				}
 				for _, a := range addrs {
-					cidr, gateways := this.Links().LookupMeshGatewaysFor(a.IP)
-					if cidr != nil {
-						if tcp.IPList(gateways).Contains(this.ifce.IP) {
-							match = true
-							break
-						}
-						logger.Infof("  gateways %s for cluster address %s does not match node ip %s", gateways, a.IP, this.ifce.IP)
+					gateways := this.Links().LookupMeshGatewaysFor(a.IP)
+					if gateways.Contains(this.ifce.IP) {
+						match = true
+						break
+					}
+					if len(gateways) != 0 {
+						n.Debugf("  gateways %s for cluster address %s does not match node ip %s", gateways, a.IP, this.ifce.IP)
 					} else {
-						logger.Infof("  no klink found for links address %s", a.IP)
+						n.Debugf("  no kubelink found for link address %s", a.IP)
 					}
 				}
 				if !match {
-					logger.Infof("  garbage collecting unused wireguard interface %q", link.Attrs().Name)
+					n.Infof("  garbage collecting unused wireguard interface %q", link.Attrs().Name)
 					netlink.LinkDel(link)
 				}
 			}

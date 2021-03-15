@@ -106,12 +106,28 @@ func EqualCIDR(a, b *net.IPNet) bool {
 }
 
 func CIDRNet(cidr *net.IPNet) *net.IPNet {
+	if cidr == nil {
+		return nil
+	}
 	net := *cidr
 	net.IP = cidr.IP.Mask(cidr.Mask)
 	return &net
 }
 
 func CIDRIP(cidr *net.IPNet, ip net.IP) *net.IPNet {
+	if cidr == nil || len(ip) == 0 {
+		return nil
+	}
+	if len(cidr.IP) != len(ip) {
+		if len(cidr.IP) == net.IPv6len {
+			ip = ip.To16()
+		} else {
+			panic("incompatible ip and cidr")
+		}
+	}
+	if !cidr.Contains(ip) {
+		panic(fmt.Sprintf("cidr %s does not contain ip %s", cidr, ip))
+	}
 	net := *cidr
 	net.IP = ip
 	return &net
@@ -196,6 +212,15 @@ func (this *CIDRList) IsSet() bool {
 func (this *CIDRList) Contains(ip net.IP) bool {
 	for _, c := range *this {
 		if c.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func (this *CIDRList) ContainsCIDR(cidr *net.IPNet) bool {
+	for _, c := range *this {
+		if ContainsCIDR(c, cidr) {
 			return true
 		}
 	}

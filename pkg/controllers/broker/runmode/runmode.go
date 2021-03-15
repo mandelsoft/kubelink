@@ -45,7 +45,7 @@ type RunModeEnv interface {
 	GetDNSInfo() kubelink.LinkDNSInfo
 
 	TriggerUpdate()
-	UpdateLinkInfo(logger logger.LogContext, name string, access *kubelink.LinkAccessInfo, dns *kubelink.LinkDNSInfo)
+	UpdateLinkInfo(logger logger.LogContext, name kubelink.LinkName, access *kubelink.LinkAccessInfo, dns *kubelink.LinkDNSInfo)
 }
 
 type RunMode interface {

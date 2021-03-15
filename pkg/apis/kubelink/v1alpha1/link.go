@@ -25,7 +25,10 @@ import (
 
 const STATE_ERROR = "Error"
 const STATE_INVALID = "Invalid"
+const STATE_STALE = "Stale"
+const STATE_ACTIVE = "Active"
 const STATE_UP = "Up"
+const STATE_DOWN = "Down"
 
 const EP_INBOUND = "Inbound"
 

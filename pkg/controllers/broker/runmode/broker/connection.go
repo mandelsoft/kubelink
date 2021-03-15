@@ -63,7 +63,7 @@ type TunnelConnection struct {
 	remoteAddress string
 	handlers      []ConnectionFailHandler
 
-	name    string
+	name    *kubelink.LinkName
 	channel chan []byte
 	wlock   sync.Mutex
 	rlock   sync.Mutex
@@ -270,12 +270,12 @@ func (this *TunnelConnection) handshake(links *kubelink.Links) (*ConnectionHello
 	return remote, nil
 }
 
-func (this *TunnelConnection) ApplyLink(link string) {
+func (this *TunnelConnection) ApplyLink(link kubelink.LinkName) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
-	if this.name == "" {
-		this.name = link
-		this.LogContext = this.LogContext.NewContext("link", this.name)
+	if this.name == nil {
+		this.name = &link
+		this.LogContext = this.LogContext.NewContext("link", this.name.String())
 	}
 }
 
@@ -438,14 +438,14 @@ func (this *TunnelConnection) WritePacket(ty byte, data []byte) error {
 
 type connectTask struct {
 	tasks.BaseTask
-	name        string
+	name        kubelink.LinkName
 	runmode     *mode
 	ratelimiter utils.RateLimiter
 }
 
-func NewConnectTask(name string, runmode *mode) tasks.Task {
+func NewConnectTask(name kubelink.LinkName, runmode *mode) tasks.Task {
 	return &connectTask{
-		BaseTask:    tasks.NewBaseTask("connect", name),
+		BaseTask:    tasks.NewBaseTask("connect", name.String()),
 		name:        name,
 		runmode:     runmode,
 		ratelimiter: utils.NewDefaultRateLimiter(10*time.Second, 10*time.Minute),

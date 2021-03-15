@@ -31,6 +31,7 @@ import (
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 
 	//"github.com/mandelsoft/kubelink/pkg/kubelink"
+
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 	kutils "github.com/mandelsoft/kubelink/pkg/utils"
 )
@@ -43,8 +44,8 @@ const RUN_MODE_NONE = "none"
 const RUN_MODE_BRIDGE = "bridge"
 const RUN_MODE_WIREGUARD = "wireguard"
 
-const CLUSTER_DNS_IP = 10
-const KUBELINK_DNS_IP = 11
+const CLUSTER_DNS_IP = kubelink.CLUSTER_DNS_IP
+const KUBELINK_DNS_IP = kubelink.KUBELINK_DNS_IP
 
 const DNSMODE_NONE = kubelink.DNSMODE_NONE
 const DNSMODE_KUBERNETES = kubelink.DNSMODE_KUBERNETES

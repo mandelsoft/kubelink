@@ -29,6 +29,8 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
 	"github.com/gardener/controller-manager-library/pkg/utils"
+
+	"github.com/mandelsoft/kubelink/pkg/kubelink"
 )
 
 var SECRET = resources.NewGroupKind("", "Secret")
@@ -75,7 +77,7 @@ func (this *secretReconciler) Reconcile(logger logger.LogContext, obj resources.
 	if len(users) > 0 {
 		logger.Infof("secret %s updated -> trigger using links", obj.ObjectName())
 		for n := range users {
-			this.TriggerLink(n.Name())
+			this.TriggerLink(kubelink.DecodeLinkNameFromString(n.Name()))
 		}
 	}
 	this.cache.Notify(obj.ObjectName(), obj)
@@ -87,7 +89,7 @@ func (this *secretReconciler) Deleted(logger logger.LogContext, key resources.Cl
 	if len(users) > 0 {
 		logger.Infof("secret %s deleted -> trigger using links", key.ObjectName())
 		for n := range users {
-			this.TriggerLink(n.Name())
+			this.TriggerLink(kubelink.DecodeLinkNameFromString(n.Name()))
 		}
 	}
 	this.cache.Notify(key.ObjectName(), nil)

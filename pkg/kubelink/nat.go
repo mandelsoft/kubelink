@@ -60,18 +60,18 @@ func (this *Links) GetNatChains(clusterAddresses tcp.CIDRList) iptables.Requests
 	var rules iptables.Rules
 	meshes := map[string]*iptables.ChainRequest{}
 
-	for _, l := range this.links {
+	this.links.Visit(func(l *Link) bool {
 		var clusterAddress *net.IPNet
 
 		mesh := tcp.CIDRNet(l.ClusterAddress)
 		for _, cidr := range clusterAddresses {
 			if mesh.Contains(cidr.IP) {
 				clusterAddress = cidr
-				break
+				return false
 			}
 		}
 		if clusterAddress == nil {
-			continue
+			return true
 		}
 		chain := meshes[mesh.String()]
 		if chain == nil {
@@ -111,14 +111,15 @@ func (this *Links) GetNatChains(clusterAddresses tcp.CIDRList) iptables.Requests
 			for _, e := range l.Egress {
 				chain.Rules = append(chain.Rules,
 					iptables.Rule{
-						iptables.Opt("-m", "comment", "--comment", "link "+l.Name),
+						iptables.Opt("-m", "comment", "--comment", "link "+l.Name.String()),
 						iptables.Opt("-d", e.String()),
 						iptables.ComposeOpt("-j", "SNAT", iptables.Opt("--to-source", clusterAddress.IP.String())),
 					},
 				)
 			}
 		}
-	}
+		return true
+	})
 
 	var chains iptables.Requests
 	if len(rules) > 0 {

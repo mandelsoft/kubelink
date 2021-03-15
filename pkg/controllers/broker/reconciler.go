@@ -136,7 +136,7 @@ func (this *reconciler) MatchLink(obj *api.KubeLink) (bool, net.IP) {
 		return false, nil
 	}
 	for _, m := range this.Links().GetMeshInfos() {
-		if m.CIDR.Contains(ip) {
+		if m.CIDR().Contains(ip) {
 			return true, ip
 		}
 	}
@@ -276,8 +276,8 @@ func (this *reconciler) RestartDeployment(logger logger.LogContext, name resourc
 	return err
 }
 
-func (this *reconciler) UpdateLinkInfo(logger logger.LogContext, name string, access *kubelink.LinkAccessInfo, dns *kubelink.LinkDNSInfo) {
-	_, err := this.linkResource.GetCached(resources.NewObjectName(name))
+func (this *reconciler) UpdateLinkInfo(logger logger.LogContext, name kubelink.LinkName, access *kubelink.LinkAccessInfo, dns *kubelink.LinkDNSInfo) {
+	_, err := this.linkResource.GetCached(resources.NewObjectName(name.String()))
 	if err != nil {
 		logger.Infof("cannot get link %s: %s", name, err)
 		return

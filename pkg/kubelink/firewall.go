@@ -111,7 +111,7 @@ func (this *Links) GetFirewallChains() iptables.Requests {
 	egresses := map[string]bool{}
 	var rules iptables.Rules
 	var linkchains iptables.Requests
-	for _, l := range this.links {
+	this.links.Visit(func(l *Link) bool {
 		ing := l.GetIngressChain()
 		if ing != nil {
 			mesh := tcp.CIDRNet(l.ClusterAddress)
@@ -130,7 +130,8 @@ func (this *Links) GetFirewallChains() iptables.Requests {
 				iptables.Opt("-j", ing.Chain.Chain),
 			})
 		}
-	}
+		return true
+	})
 	var chains iptables.Requests
 	if len(rules) > 0 {
 		if DROP_ACTION == MARK_DROP_CHAIN {
