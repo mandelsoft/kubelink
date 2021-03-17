@@ -261,10 +261,11 @@ func (this *Config) Prepare() error {
 	}
 	this.DNSPropagation = strings.ToLower(this.DNSPropagation)
 	switch this.DNSPropagation {
-	case DNSMODE_KUBERNETES, DNSMODE_DNS, DNSMODE_NONE:
+	case DNSMODE_KUBERNETES, DNSMODE_DNS:
 		if this.ServiceCIDR == nil && this.DNSServiceIP == nil {
 			return fmt.Errorf("dns propagation required service cidr or dns service ip")
 		}
+	case DNSMODE_NONE:
 	default:
 		return fmt.Errorf("invalid dns mode: %s", this.DNSPropagation)
 	}

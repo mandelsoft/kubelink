@@ -69,6 +69,9 @@ type ReconcilerImplementation interface {
 
 	Gateway(obj *api.KubeLink) (*LocalGatewayInfo, error)
 	GetLinkInfo(link *api.KubeLink) *LinkInfo
+
+	HandleReconcile(logger logger.LogContext, obj resources.Object, entry *kubelink.Link) (error, error)
+	HandleDelete(logger logger.LogContext, name kubelink.LinkName, obj resources.Object) (bool, error)
 }
 
 type Common struct {
@@ -110,7 +113,7 @@ type Reconciler struct {
 	baseconfig *Config
 
 	ifce  *kubelink.NodeInterface
-	links *kubelink.Links
+	links kubelink.Links
 
 	impl ReconcilerImplementation
 }
@@ -131,7 +134,7 @@ func (this *Reconciler) NodeInterface() *kubelink.NodeInterface {
 	return this.ifce
 }
 
-func (this *Reconciler) Links() *kubelink.Links {
+func (this *Reconciler) Links() kubelink.Links {
 	return this.links
 }
 
@@ -151,22 +154,23 @@ func (this *Reconciler) Start() {
 
 func (this *Reconciler) Reconcile(logger logger.LogContext, obj resources.Object) reconcile.Status {
 	if obj.GroupKind() == api.KUBELINK {
-		return this.ReconcileLink(logger, obj, nil)
+		return this.ReconcileLink(logger, obj)
 	}
 	return reconcile.Failed(logger, fmt.Errorf("unknown object type %q", obj.GroupKind()))
 }
 
-func (this *Reconciler) ReconcileLink(logger logger.LogContext, obj resources.Object,
-	updater func(logger logger.LogContext, link *api.KubeLink, entry *kubelink.Link) (error, error)) reconcile.Status {
-	_, status := this.ReconcileAndGetLink(logger, obj, updater)
+func (this *Reconciler) ReconcileLink(logger logger.LogContext, obj resources.Object) reconcile.Status {
+	_, status := this.ReconcileAndGetLink(logger, obj)
 	return status
 }
 
-func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resources.Object,
-	updater func(logger logger.LogContext, link *api.KubeLink, entry *kubelink.Link) (error, error)) (*kubelink.Link, reconcile.Status) {
+func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resources.Object) (*kubelink.Link, reconcile.Status) {
 	orig := obj.Data().(*api.KubeLink)
 	link := orig
 	logger.Infof("reconcile cidr %s[gateway %s]", link.Spec.CIDR, link.Status.Gateway)
+
+	logger.Infof("served meshes: %s", utils.StringKeySet(this.links.GetMeshInfos()))
+	logger.Infof("served links: %d ", len(this.links.GetLinks()))
 
 	gateway, err := this.impl.Gateway(link)
 	if gateway != nil {
@@ -185,46 +189,60 @@ func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resour
 		state = api.STATE_ERROR
 	}
 
+	name := kubelink.DecodeLinkNameFromString(link.Name)
+	var oldmesh *kubelink.Link
+	if link.Spec.Endpoint == kubelink.EP_LOCAL {
+		oldmesh = this.Links().GetMeshLink(name)
+	}
+
 	var ldata *kubelink.Link
 	var uerr error
-	if err == nil {
-		var valid bool
-		ldata, valid, err = this.links.UpdateLink(link)
-		if err != nil {
-			if valid {
-				logger.Warnf("invalid link: %s", err)
-				state = api.STATE_INVALID
-			} else {
-				logger.Warnf("stale link: %s", err)
-				state = api.STATE_STALE
-			}
+
+	var valid bool
+	ldata, valid, err = this.links.UpdateLink(link)
+	if err != nil {
+		if valid {
+			logger.Warnf("invalid link: %s", err)
+			state = api.STATE_INVALID
 		} else {
-			if ldata != nil {
-				if len(ldata.GatewayFor) != 0 {
-					logger.Info("used as gateway for %s", ldata.GatewayFor)
+			logger.Warnf("stale link: %s", err)
+			state = api.STATE_STALE
+		}
+	} else {
+		if ldata != nil {
+			if len(ldata.GatewayFor) != 0 {
+				logger.Info("used as gateway for %s", ldata.GatewayFor)
+			}
+			if ldata.GatewayLink != nil {
+				logger.Info("using gateway link %s", ldata.GatewayLink)
+			}
+			uerr, err = this.impl.HandleReconcile(logger, obj, ldata)
+			// reconcile all using objects
+			served := this.Links().ServedLinksFor(ldata.Name)
+			if len(served) > 0 {
+				logger.Infof("triggering served links")
+				for u := range served {
+					this.TriggerLink(u)
 				}
-				if ldata.GatewayLink != nil {
-					logger.Info("using gateway link %s", ldata.GatewayLink)
+			}
+			if ldata.IsLocalLink() {
+				logger.Infof("triggering mesh members")
+				for u := range this.Links().GetMeshMembersFor(ldata.Name.Mesh()) {
+					this.TriggerLink(u)
 				}
-				if updater != nil {
-					uerr, err = updater(logger, link, ldata)
-				}
-				// reconcile all using objects
-				served := this.Links().ServedLinksFor(ldata.Name)
-				if len(served) > 0 {
-					logger.Infof("triggering served links")
-					for u := range served {
-						this.TriggerLink(u)
-					}
-				}
-				if ldata.IsLocalLink() {
-					logger.Infof("triggering mesh members")
-					for u := range this.Links().MeshLinksFor(ldata.Name.Mesh()) {
+			} else {
+				if oldmesh != nil {
+					logger.Infof("triggering old mesh members")
+					for u := range this.Links().GetMeshMembersFor(ldata.Name.Mesh()) {
 						this.TriggerLink(u)
 					}
 				}
 			}
 		}
+	}
+
+	if obj.GetDeletionTimestamp() != nil {
+		state = api.STATE_DELETING
 	}
 	if this.updateLink(logger, orig, state, err, false) {
 		_, err2 := obj.ModifyStatus(func(data resources.ObjectData) (bool, error) {
@@ -245,11 +263,11 @@ func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resour
 	return ldata, reconcile.Succeeded(logger)
 }
 
-func (this *Reconciler) updateLink(logger logger.LogContext, klink *api.KubeLink, state string, err error, update bool) bool {
+func (this *Reconciler) updateLink(logger logger.LogContext, klink *api.KubeLink, preset string, err error, update bool) bool {
 
 	mod := false
 	msg := klink.Status.Message
-
+	state := preset
 	info := this.impl.GetLinkInfo(klink)
 
 	if err != nil {
@@ -272,6 +290,9 @@ func (this *Reconciler) updateLink(logger logger.LogContext, klink *api.KubeLink
 		}
 	}
 
+	if (state == api.STATE_UP || state == api.STATE_IDLE) && preset == api.STATE_DELETING {
+		state = preset
+	}
 	if klink.Status.State != state {
 		mod = true
 		if update {
@@ -305,9 +326,13 @@ func (this *Reconciler) updateLink(logger logger.LogContext, klink *api.KubeLink
 func (this *Reconciler) Delete(logger logger.LogContext, obj resources.Object) reconcile.Status {
 	if obj.GroupKind() == api.KUBELINK {
 		logger.Infof("delete")
-		this.links.RemoveLink(kubelink.DecodeLinkNameFromString(obj.GetName()))
-		this.TriggerUpdate()
-		return reconcile.Succeeded(logger)
+		name := kubelink.DecodeLinkNameFromString(obj.GetName())
+		this.Links().MarkForDeletion(name)
+		ok, err := this.impl.HandleDelete(logger, name, obj)
+		if !ok && err == nil {
+			return this.ReconcileLink(logger, obj)
+		}
+		return reconcile.DelayOnError(logger, err)
 	}
 	return reconcile.Failed(logger, fmt.Errorf("unknown object type %q", obj.GroupKind()))
 }
@@ -315,9 +340,9 @@ func (this *Reconciler) Delete(logger logger.LogContext, obj resources.Object) r
 func (this *Reconciler) Deleted(logger logger.LogContext, key resources.ClusterObjectKey) reconcile.Status {
 	if key.GroupKind() == api.KUBELINK {
 		logger.Infof("deleted")
-		this.links.RemoveLink(kubelink.DecodeLinkNameFromString(key.Name()))
-		this.TriggerUpdate()
-		return reconcile.Succeeded(logger)
+		name := kubelink.DecodeLinkNameFromString(key.Name())
+		_, err := this.impl.HandleDelete(logger, name, nil)
+		return reconcile.DelayOnError(logger, err)
 	}
 	return reconcile.Failed(logger, fmt.Errorf("unknown object type %q", key.GroupKind()))
 }
@@ -340,6 +365,10 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 	err := this.updateFirewall(logger)
 	if err != nil {
 		logger.Errorf("cannot update iptables rules: %s", err)
+	}
+	if !this.Links().IsGateway(this.ifce) {
+		// cleanup used nat rules
+		this.LinkTool().HandleNat(logger, iptables.Requests{})
 	}
 	routes, err := kubelink.ListRoutes()
 	if err != nil {

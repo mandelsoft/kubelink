@@ -19,6 +19,7 @@
 package kubelink
 
 import (
+	"fmt"
 	"net"
 	"sync"
 
@@ -26,8 +27,9 @@ import (
 )
 
 type mesh struct {
-	link *Link
-	info *Mesh
+	link          *Link
+	info          *Mesh
+	deletePending bool
 }
 
 type MeshIndex struct {
@@ -36,7 +38,6 @@ type MeshIndex struct {
 	meshesByName map[string]*mesh
 	meshesByCIDR map[string]*mesh
 	meshesByAddr map[string]*mesh
-	meshlinks    map[string]LinkNameSet
 	defaultMesh  *Link
 }
 
@@ -46,7 +47,6 @@ func NewMeshIndex() *MeshIndex {
 		meshesByName: map[string]*mesh{},
 		meshesByCIDR: map[string]*mesh{},
 		meshesByAddr: map[string]*mesh{},
-		meshlinks:    map[string]LinkNameSet{},
 		defaultMesh:  nil,
 	}
 }
@@ -59,8 +59,10 @@ func (this *MeshIndex) SetDefaultMesh(link *Link) {
 		this.remove(old.link.Name)
 	}
 	if link == nil {
+		fmt.Printf("clearing default mesh\n")
 		this.defaultMesh = nil
 	} else {
+		fmt.Printf("settings default mesh\n")
 		this.defaultMesh = link
 		this.add(link)
 	}
@@ -73,25 +75,21 @@ func (this *MeshIndex) Add(link *Link) {
 }
 
 func (this *MeshIndex) add(link *Link) {
+	old := this.meshesByLink[link.Name]
+
 	this.remove(link.Name)
 
 	if !link.IsLocalLink() {
-		set := this.meshlinks[link.Name.mesh]
-		if set == nil {
-			set = LinkNameSet{}
-			this.meshlinks[link.Name.mesh] = set
-		}
-		set.Add(link.Name)
 		return
 	}
-
 	m := &mesh{
 		link: link,
-		info: NewMeshInfo(link),
+		info: NewMeshInfo(link, old != nil && old.deletePending),
 	}
 
+	fmt.Printf("******** adding mesh %s\n", link.Name)
 	this.meshesByLink[link.Name] = m
-	this.meshesByName[m.info.name] = m
+	this.meshesByName[m.info.Name()] = m
 	if m.info.cidr != nil {
 		this.meshesByCIDR[m.info.cidr.String()] = m
 	}
@@ -115,14 +113,6 @@ func (this *MeshIndex) RemoveByName(name string) {
 }
 
 func (this *MeshIndex) remove(name LinkName) {
-	set := this.meshlinks[name.mesh]
-	if set != nil {
-		set.Remove(name)
-		if len(set) == 0 {
-			delete(this.meshlinks, name.mesh)
-		}
-	}
-
 	old := this.meshesByLink[name]
 	if old == nil {
 		return
@@ -134,14 +124,8 @@ func (this *MeshIndex) remove(name LinkName) {
 	if old.info.cidr != nil {
 		delete(this.meshesByCIDR, old.info.cidr.String())
 	}
-	delete(this.meshesByName, name.name)
+	delete(this.meshesByName, name.mesh)
 	delete(this.meshesByLink, name)
-}
-
-func (this *MeshIndex) MeshLinksFor(name string) LinkNameSet {
-	this.lock.RLock()
-	defer this.lock.RUnlock()
-	return this.meshlinks[name].Copy()
 }
 
 func (this *MeshIndex) All() map[string]*Mesh {
@@ -263,7 +247,7 @@ func (this *MeshIndex) GetMeshInfos() map[string]*Mesh {
 	defer this.lock.RUnlock()
 	r := map[string]*Mesh{}
 	for _, m := range this.meshesByName {
-		r[m.info.name] = m.info
+		r[m.info.Name()] = m.info
 	}
 	return r
 }
@@ -293,4 +277,22 @@ func (this *MeshIndex) Visit(visitor func(m *Mesh, l *Link) bool) {
 			break
 		}
 	}
+}
+
+func (this *MeshIndex) MarkLinkForDeletion(name LinkName) {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+
+	m := this.meshesByLink[name]
+	if m != nil {
+		m.deletePending = true
+	}
+}
+
+func (this *MeshIndex) IsDeletePending(name string) bool {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+
+	m := this.meshesByName[name]
+	return m != nil && m.info.deletePending
 }

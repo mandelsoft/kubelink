@@ -39,7 +39,7 @@ type RunModeEnv interface {
 	LinkTool() *controllers.LinkTool
 	Secrets() *controllers.SecretCache
 	Tasks() tasks.Tasks
-	Links() *kubelink.Links
+	Links() kubelink.Links
 
 	GetAccess() kubelink.LinkAccessInfo
 	GetDNSInfo() kubelink.LinkDNSInfo

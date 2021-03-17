@@ -16,7 +16,7 @@
  *  limitations under the License.
  */
 
-package broker
+package bridge
 
 import (
 	"crypto/tls"

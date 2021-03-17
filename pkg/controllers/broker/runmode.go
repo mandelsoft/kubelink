@@ -23,14 +23,14 @@ import (
 
 	"github.com/mandelsoft/kubelink/pkg/controllers/broker/config"
 	"github.com/mandelsoft/kubelink/pkg/controllers/broker/runmode"
-	"github.com/mandelsoft/kubelink/pkg/controllers/broker/runmode/broker"
+	"github.com/mandelsoft/kubelink/pkg/controllers/broker/runmode/bridge"
 	"github.com/mandelsoft/kubelink/pkg/controllers/broker/runmode/wireguard"
 )
 
 func DefaultPort(mode string) int {
 	switch mode {
 	case config.RUN_MODE_BRIDGE:
-		return broker.DefaultPort
+		return bridge.DefaultPort
 	case config.RUN_MODE_WIREGUARD:
 		return wireguard.DefaultPort
 	}
@@ -40,7 +40,7 @@ func DefaultPort(mode string) int {
 func CreateRunMode(mode string, env runmode.RunModeEnv) (runmode.RunMode, error) {
 	switch mode {
 	case config.RUN_MODE_BRIDGE:
-		return broker.NewBridgeMode(env)
+		return bridge.NewBridgeMode(env)
 	case config.RUN_MODE_WIREGUARD:
 		return wireguard.NewWireguardMode(env)
 	case config.RUN_MODE_NONE:

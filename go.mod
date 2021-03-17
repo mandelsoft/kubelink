@@ -2,7 +2,7 @@ module github.com/mandelsoft/kubelink
 
 go 1.15
 
-replace golang.zx2c4.com/wireguard/wgctrl => github.com/mandelsoft/wgctrl-go v0.0.0-20210208121059-d9ab8e5d81ee
+//replace golang.zx2c4.com/wireguard/wgctrl => github.com/mandelsoft/wgctrl-go v0.0.0-20210208121059-d9ab8e5d81ee
 
 require (
 	github.com/ahmetb/gen-crd-api-reference-docs v0.2.0
@@ -20,7 +20,7 @@ require (
 	golang.org/x/net v0.0.0-20201110031124-69a78807bb2b
 	golang.org/x/sys v0.0.0-20201117222635-ba5294a509c7
 	golang.zx2c4.com/wireguard v0.0.20201118 // indirect
-	golang.zx2c4.com/wireguard/wgctrl v0.0.0-00010101000000-000000000000
+	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20200609130330-bd2cb7843e1b
 	gopkg.in/yaml.v2 v2.3.0
 	k8s.io/api v0.18.6
 	k8s.io/apimachinery v0.18.6

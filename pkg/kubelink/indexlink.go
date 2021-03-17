@@ -32,6 +32,7 @@ type LinkIndex struct {
 	linksByClusterAddr map[string]*Link
 	linksByMesh        map[string]LinkNameSet
 	linkGateways       map[LinkName]LinkNameSet
+	meshlinks          map[string]LinkNameSet
 	wireguard          int
 }
 
@@ -42,6 +43,7 @@ func NewLinkIndex() *LinkIndex {
 		linksByClusterAddr: map[string]*Link{},
 		linksByMesh:        map[string]LinkNameSet{},
 		linkGateways:       map[LinkName]LinkNameSet{},
+		meshlinks:          map[string]LinkNameSet{},
 	}
 }
 
@@ -50,6 +52,10 @@ func (this *LinkIndex) Add(link *Link) {
 	defer this.lock.Unlock()
 
 	old := this.remove(link.Name)
+	if link.IsLocalLink() {
+		return
+	}
+
 	if old != nil && old.UpdatePending && !link.UpdatePending {
 		link.LinkDNSInfo = old.LinkDNSInfo
 		link.LinkAccessInfo = old.LinkAccessInfo
@@ -75,6 +81,14 @@ func (this *LinkIndex) Add(link *Link) {
 		}
 		set.Add(link.Name)
 	}
+
+	set = this.meshlinks[link.Name.mesh]
+	if set == nil {
+		set = LinkNameSet{}
+		this.meshlinks[link.Name.mesh] = set
+	}
+	set.Add(link.Name)
+
 	if link.IsWireguard() {
 		this.wireguard++
 	}
@@ -116,6 +130,14 @@ func (this *LinkIndex) remove(name LinkName) *Link {
 	}
 	delete(this.linksByName, name)
 
+	set = this.meshlinks[name.mesh]
+	if set != nil {
+		set.Remove(name)
+		if len(set) == 0 {
+			delete(this.meshlinks, name.mesh)
+		}
+	}
+
 	if old.IsWireguard() {
 		this.wireguard--
 	}
@@ -126,6 +148,12 @@ func (this *LinkIndex) ServedLinksFor(name LinkName) LinkNameSet {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 	return this.linkGateways[name].Copy()
+}
+
+func (this *LinkIndex) MeshLinksFor(name string) LinkNameSet {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+	return this.meshlinks[name].Copy()
 }
 
 func (this *LinkIndex) All() map[LinkName]*Link {

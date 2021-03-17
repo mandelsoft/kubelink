@@ -16,7 +16,7 @@
  *  limitations under the License.
  */
 
-package broker
+package bridge
 
 import (
 	"fmt"
@@ -201,7 +201,7 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 	logger.Debug("update tun")
 
 	addrs := this.Links().GetGatewayAddrs()
-	natchains := this.Links().GetNatChains(addrs)
+	natchains := this.Links().GetNatChains(addrs, this.mux.tun.link.Attrs().Name)
 	this.finalizer, err = this.Env().LinkTool().PrepareLink(logger, this.mux.tun.link, addrs, natchains)
 
 	if err != nil {

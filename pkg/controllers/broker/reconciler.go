@@ -131,6 +131,51 @@ func (this *reconciler) RequiredIPTablesChains() iptables.Requests {
 	return this.runmode.RequiredIPTablesChains()
 }
 
+func (this *reconciler) HandleDelete(logger logger.LogContext, name kubelink.LinkName, obj resources.Object) (bool, error) {
+	if obj != nil {
+		this.secrets.ReleaseSecretForLink(controllers.ObjectName(name))
+	}
+	deleted := false
+	err := this.Links().Locked(func(links kubelink.Links) error {
+		if m := links.GetMeshByLinkName(name); m != nil {
+			if len(links.GetMeshMembersFor(m.Name())) == 0 {
+				if obj != nil {
+					finalizer := this.Controller().FinalizerHandler().FinalizerName(obj)
+					finalizers := obj.GetFinalizers()
+					if len(finalizers) == 1 && finalizers[0] == finalizer {
+						err := this.Controller().RemoveFinalizer(obj)
+						if err == nil {
+							deleted = true
+							logger.Infof("removing mesh %s", name)
+							links.RemoveLink(name)
+						}
+						return err
+					}
+				}
+			}
+			logger.Infof("mesh still busy")
+		} else {
+			if obj == nil || len(obj.GetFinalizers()) == 0 {
+				deleted = true
+				logger.Infof("removing link %s", name)
+				links.RemoveLink(name)
+				if m := links.GetMesh(name.Mesh()); m != nil && m.DeletePending() {
+					if n := len(links.GetMeshMembersFor(m.Name())); n == 0 {
+						logger.Infof("deleting last member of mesh %s", m.Name)
+						this.TriggerLink(m.LinkName())
+					} else {
+						logger.Infof("still %d members in deleting mesh %s", n, m.Name)
+					}
+				}
+			} else {
+				logger.Infof("still has finalizers %v", obj.GetFinalizers())
+			}
+		}
+		return nil
+	})
+	return deleted && err == nil, err
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 func (this *reconciler) MatchLink(obj *api.KubeLink) (bool, net.IP) {
@@ -224,15 +269,6 @@ func (this *reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 	return this.Reconciler.Command(logger, cmd)
 }
 
-func (this *reconciler) Reconcile(logger logger.LogContext, obj resources.Object) reconcile.Status {
-	return this.ReconcileLink(logger, obj, this.handleLinkAccess)
-}
-
-func (this *reconciler) Deleted(logger logger.LogContext, key resources.ClusterObjectKey) reconcile.Status {
-	this.secrets.ReleaseSecretForLink(key.ObjectName())
-	return this.Reconciler.Deleted(logger, key)
-}
-
 func (this *reconciler) getServiceAccountToken() (*kubelink.LinkAccessInfo, error) {
 	if this.config.ServiceAccount == nil {
 		return nil, fmt.Errorf("no service accound specified")
@@ -294,6 +330,34 @@ func (this *reconciler) UpdateLinkInfo(logger logger.LogContext, name kubelink.L
 		logger.Infof("link access for %s modified -> trigger link", name)
 		this.TriggerUpdate()
 		this.TriggerLink(name)
+	}
+}
+
+func (this *reconciler) HandleReconcile(logger logger.LogContext, obj resources.Object, entry *kubelink.Link) (error, error) {
+	klink := obj.Data().(*api.KubeLink)
+	if entry != nil {
+		if this.dnsInfo.DNSPropagation && entry.DNSPropagation {
+			this.runmode.HandleDNSPropagation(klink)
+		}
+		logger.Infof("%s", entry)
+		if entry.IsLocalLink() {
+			if entry.ServiceCIDR == nil && this.config.ServiceCIDR != nil {
+				if !tcp.EqualCIDR(this.config.ServiceCIDR, entry.ServiceCIDR) {
+					entry.ServiceCIDR = this.config.ServiceCIDR
+					entry.UpdatePending = true
+				}
+			}
+			err := this.Controller().SetFinalizer(obj)
+			if err != nil {
+				return err, nil
+			}
+		}
+	}
+
+	if entry.UpdatePending {
+		return this.updateObjectFromLink(logger, klink, entry)
+	} else {
+		return this.updateLinkFromObject(logger, klink, entry)
 	}
 }
 

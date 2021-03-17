@@ -177,31 +177,36 @@ func LinkForSpec(name LinkName, spec *LinkSpec, defaultPort int, gw net.IP) (*Li
 	}
 
 	dnsInfo := LinkDNSInfo{}
-	if spec.DNS != nil {
-		if spec.DNS.OmitDNSPropagation == nil || *spec.DNS.OmitDNSPropagation {
-			dnsInfo.DNSPropagation = true
+	if spec.DNS == nil || spec.DNS.OmitDNSPropagation == nil || !*spec.DNS.OmitDNSPropagation {
+		dnsInfo.DNSPropagation = true
+		if spec.DNS != nil {
 			dnsInfo.ClusterDomain = spec.DNS.BaseDomain
-			if dnsInfo.ClusterDomain == "" {
-				if spec.Endpoint == EP_LOCAL {
-					return nil, fmt.Errorf("dns propgation requires dns base domain for local links")
-				}
-				dnsInfo.ClusterDomain = "cluster.local"
-			}
-			if spec.Endpoint == EP_LOCAL {
-				if dnsInfo.DnsIP != nil {
-					return nil, fmt.Errorf("no dns ip for local link")
-				}
-			} else {
+			if spec.DNS.DNSIP != "" {
+				dnsInfo.DnsIP = net.ParseIP(spec.DNS.DNSIP)
 				if dnsInfo.DnsIP == nil {
-					if serviceCIDR != nil {
-						dnsInfo.DnsIP = tcp.SubIP(serviceCIDR, CLUSTER_DNS_IP)
-					} else {
-						return nil, fmt.Errorf("dns service ip required for dns propagation")
-					}
+					return nil, fmt.Errorf("invalid dns ip %q", spec.DNS.DNSIP)
+				}
+			}
+		}
+
+		if dnsInfo.ClusterDomain == "" {
+			if spec.Endpoint == EP_LOCAL {
+				return nil, fmt.Errorf("dns propgation requires dns base domain for local links")
+			}
+			dnsInfo.ClusterDomain = "cluster.local"
+		}
+
+		if spec.Endpoint != EP_LOCAL {
+			if dnsInfo.DnsIP == nil {
+				if serviceCIDR != nil {
+					dnsInfo.DnsIP = tcp.SubIP(serviceCIDR, CLUSTER_DNS_IP)
+				} else {
+					return nil, fmt.Errorf("dns service ip required for dns propagation")
 				}
 			}
 		}
 	}
+
 	link := &Link{
 		Name:            name,
 		ServiceCIDR:     serviceCIDR,
