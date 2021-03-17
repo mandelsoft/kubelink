@@ -16,7 +16,7 @@
  *  limitations under the License.
  */
 
-package broker
+package bridge
 
 import (
 	"crypto/tls"
@@ -69,7 +69,7 @@ type TunnelConnection struct {
 	rlock   sync.Mutex
 }
 
-func NewTunnelConnection(mux *Mux, conn net.Conn, link *kubelink.Link, links *kubelink.Links, handlers ...ConnectionFailHandler) (*TunnelConnection, *ConnectionHello, error) {
+func NewTunnelConnection(mux *Mux, conn net.Conn, link *kubelink.Link, links kubelink.Links, handlers ...ConnectionFailHandler) (*TunnelConnection, *ConnectionHello, error) {
 	remote := conn.RemoteAddr().String()
 	this := &TunnelConnection{
 		LogContext:    mux.NewContext("source", remote),
@@ -81,7 +81,7 @@ func NewTunnelConnection(mux *Mux, conn net.Conn, link *kubelink.Link, links *ku
 	}
 	if link != nil {
 		this.targetAddress = link.ClusterAddress
-		this.localAddress = links.GetLocalAddressForClusterAddress(this.targetAddress.IP)
+		this.localAddress = links.LookupClusterAddressByMeshAddress(this.targetAddress.IP)
 		if this.localAddress == nil {
 			return nil, nil, fmt.Errorf("unkown mesh for link %s[%q]", link.Name, this.targetAddress)
 		}
@@ -229,7 +229,7 @@ func (this *TunnelConnection) createHello() *ConnectionHello {
 	return hello
 }
 
-func (this *TunnelConnection) handshake(links *kubelink.Links) (*ConnectionHello, error) {
+func (this *TunnelConnection) handshake(links kubelink.Links) (*ConnectionHello, error) {
 	var werr, rerr error
 	var remote *ConnectionHello
 
@@ -241,7 +241,7 @@ func (this *TunnelConnection) handshake(links *kubelink.Links) (*ConnectionHello
 		remote, rerr = this.readHello()
 		if rerr == nil {
 			cidr := remote.GetCIDR()
-			this.localAddress = links.GetLocalAddressForClusterAddress(cidr.IP)
+			this.localAddress = links.LookupClusterAddressByMeshAddress(cidr.IP)
 			if this.localAddress == nil {
 				return nil, fmt.Errorf("no link or mesh found for %s", cidr)
 			}

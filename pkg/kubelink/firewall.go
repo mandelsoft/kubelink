@@ -85,7 +85,7 @@ func FirewallEmbedding() ([]RuleDef, utils.StringSet) {
 	}
 }
 
-func (this *Links) GetEgressChain(mesh *net.IPNet) *iptables.ChainRequest {
+func (this *links) GetEgressChain(mesh *net.IPNet) *iptables.ChainRequest {
 	rules := iptables.Rules{
 		iptables.Rule{
 			iptables.Opt("-m", "comment", "--comment", "firewall egress for link gateway "+mesh.String()),
@@ -104,10 +104,7 @@ func (this *Links) GetEgressChain(mesh *net.IPNet) *iptables.ChainRequest {
 		rules, true)
 }
 
-func (this *Links) GetFirewallChains() iptables.Requests {
-	this.lock.RLock()
-	defer this.lock.RUnlock()
-
+func (this *links) GetFirewallChains() iptables.Requests {
 	egresses := map[string]bool{}
 	var rules iptables.Rules
 	var linkchains iptables.Requests

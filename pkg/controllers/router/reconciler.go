@@ -89,6 +89,19 @@ func (this *reconciler) isGateway() bool {
 	return this.Links().IsGateway(this.NodeInterface())
 }
 
+func (this *reconciler) HandleDelete(logger logger.LogContext, name kubelink.LinkName, obj resources.Object) (bool, error) {
+	ok := obj == nil || !this.Controller().HasFinalizer(obj)
+	if ok {
+		this.Links().RemoveLink(name)
+		this.TriggerUpdate()
+	}
+	return true, nil
+}
+
+func (this *reconciler) HandleReconcile(logger logger.LogContext, obj resources.Object, entry *kubelink.Link) (error, error) {
+	return nil, nil
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 func (this *reconciler) Setup() {

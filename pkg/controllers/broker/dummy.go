@@ -20,6 +20,8 @@ package broker
 
 import (
 	"github.com/gardener/controller-manager-library/pkg/config"
+	"github.com/gardener/controller-manager-library/pkg/logger"
+	"github.com/gardener/controller-manager-library/pkg/resources"
 	"github.com/vishvananda/netlink"
 
 	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
@@ -53,4 +55,12 @@ func (this *dummy) Gateway(obj *v1alpha1.KubeLink) (*controllers.LocalGatewayInf
 
 func (this *dummy) GetLinkInfo(link *v1alpha1.KubeLink) *controllers.LinkInfo {
 	return nil
+}
+
+func (this *dummy) HandleDelete(logger logger.LogContext, name kubelink.LinkName, obj resources.Object) (bool, error) {
+	return false, nil
+}
+
+func (this *dummy) HandleReconcile(logger logger.LogContext, obj resources.Object, entry *kubelink.Link) (error, error) {
+	return nil, nil
 }

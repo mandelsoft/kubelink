@@ -29,7 +29,6 @@ import (
 
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
-	"github.com/gardener/controller-manager-library/pkg/utils"
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -62,7 +61,7 @@ type mode struct {
 
 	finalizer func()
 
-	peerstate map[string]runmode.LinkState
+	peerstate map[kubelink.LinkName]runmode.LinkState
 }
 
 var _ runmode.RunMode = &mode{}
@@ -72,7 +71,7 @@ func NewWireguardMode(env runmode.RunModeEnv) (runmode.RunMode, error) {
 		RunModeBase: runmode.NewRunModeBase(config.RUN_MODE_WIREGUARD, env),
 		config:      env.Config(),
 		errors:      map[string]error{},
-		peerstate:   map[string]runmode.LinkState{},
+		peerstate:   map[kubelink.LinkName]runmode.LinkState{},
 	}
 	if this.config.Port == 0 {
 		this.config.Port = DefaultPort
@@ -174,7 +173,7 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 	defer wg.Close()
 
 	addrs := this.Links().GetGatewayAddrs()
-	natchains := this.Links().GetNatChains(addrs)
+	natchains := this.Links().GetNatChains(addrs, link.Attrs().Name)
 	this.finalizer, err = this.Env().LinkTool().PrepareLink(logger, link, addrs, natchains)
 	if err != nil {
 		return err
@@ -200,16 +199,18 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 	}
 
 	keep := 21 * time.Second
-	found := utils.StringSet{}
+	keys := map[string]kubelink.LinkName{}
+	links := kubelink.LinkNameSet{}
 	this.Links().VisitLinks(func(l *kubelink.Link) bool {
 		if l.PublicKey != nil && l.Endpoint != "" {
+			links.Add(l.Name)
 			var endpoint *net.UDPAddr
 			if l.Endpoint != api.EP_INBOUND {
 				ip := net.ParseIP(l.Host)
 				if ip == nil {
 					ips, err := net.LookupIP(l.Host)
 					if err != nil {
-						this.propagateError(nil, err, l.ClusterAddress)
+						this.propagateError(nil, err, l)
 						return true
 					}
 					sort.Slice(ips, func(a, b int) bool { return strings.Compare(ips[a].String(), ips[b].String()) < 0 })
@@ -225,6 +226,7 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 			for r := range l.GatewayFor {
 				addAllowed(&allowed, this.Links().GetLink(r))
 			}
+			keys[(*l.PublicKey).String()] = l.Name
 			peer := wgtypes.PeerConfig{
 				PublicKey:                   *l.PublicKey,
 				PresharedKey:                l.PresharedKey,
@@ -234,7 +236,7 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 			}
 			for _, p := range dev.Peers {
 				if equalKey(&p.PublicKey, &peer.PublicKey) {
-					found.Add(p.PublicKey.String())
+					keys[p.PublicKey.String()] = l.Name
 					if !equalUDPAddr(p.Endpoint, peer.Endpoint) {
 						continue
 					}
@@ -251,7 +253,7 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 			logger.Infof("  update peer %s: %s %s", peer.PublicKey, peer.Endpoint, list(peer.AllowedIPs))
 			config.Peers = append(config.Peers, peer)
 			update = true
-			this.propagateError(nil, nil, l.ClusterAddress)
+			this.propagateError(nil, nil, l)
 		}
 		return true
 	})
@@ -260,17 +262,26 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 	offset := time.Now().Add(-3 * time.Minute)
 	for _, p := range dev.Peers {
 		pub := p.PublicKey.String()
-		if p.LastHandshakeTime.Before(offset) {
-			this.peerstate[pub] = runmode.LinkState{
-				State:   api.STATE_DOWN,
-				Message: fmt.Sprintf("last handlshake %s", p.LastHandshakeTime.String()),
+		if n, ok := keys[pub]; ok {
+			// for old peers check and remember peer state (new peers don't have a state yet)
+			var newstate runmode.LinkState
+			if p.LastHandshakeTime.Before(offset) {
+				newstate = runmode.LinkState{
+					State:   api.STATE_DOWN,
+					Message: fmt.Sprintf("last handshake %s", p.LastHandshakeTime.String()),
+				}
+			} else {
+				newstate = runmode.LinkState{
+					State: api.STATE_UP,
+				}
+			}
+			if this.peerstate[n] != newstate {
+				this.peerstate[n] = newstate
+				logger.Infof("  new peer state %s: %s %s", n, newstate.State, newstate.Message)
+				this.TriggerLink(n)
 			}
 		} else {
-			this.peerstate[pub] = runmode.LinkState{
-				State: api.STATE_UP,
-			}
-		}
-		if !found.Contains(pub) {
+			// delete unused peers
 			peer := wgtypes.PeerConfig{
 				PublicKey: p.PublicKey,
 				Remove:    true,
@@ -282,6 +293,12 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 		}
 	}
 
+	// cleanup unused peer states
+	for p := range this.peerstate {
+		if _, ok := links[p]; !ok {
+			delete(this.peerstate, p)
+		}
+	}
 	if update {
 		logger.Infof("update interface with %d peer updates and %d removals", len(config.Peers)-remove, remove)
 		err = wg.ConfigureDevice(this.link.Attrs().Name, config)
@@ -384,36 +401,45 @@ func (this *mode) handleSecret(name resources.ObjectName, obj resources.Object) 
 		this.propagateError(nil, fmt.Errorf("invalid private key in wireguard secret %q: %s", this.config.Secret, err), nil)
 		return
 	}
+
 	this.propagateError(nil, nil, nil)
 
 	this.lock.Lock()
 	defer this.lock.Unlock()
 	//this.Infof("old key %q", this.key)
 	//this.Infof("new key %q", key)
+	update := false
 	if this.key == nil || key.String() != this.key.String() {
 		this.key = &key
 		this.Infof("setting private key with public key %q", key.PublicKey())
+		update = true
+	}
+	if update {
 		this.TriggerUpdate()
 	}
 }
 
-func (this *mode) propagateError(logger logger.LogContext, err error, addr *net.IPNet) {
+func (this *mode) propagateError(logger logger.LogContext, err error, link *kubelink.Link) {
 	if logger == nil {
 		logger = this.Controller()
 	}
 	if err != nil {
-		if addr != nil {
-			logger.Errorf("endpoint error for %q: %s", addr, err)
+		if link != nil {
+			logger.Errorf("endpoint error for %q: %s", link.Name, err)
 		} else {
 			logger.Errorf("interface error: %s", err)
 		}
 	}
 	this.lock.Lock()
 	defer this.lock.Unlock()
-	if addr == nil {
+	if link == nil {
 		this.err = err
 	} else {
-		this.errors[addr.IP.String()] = err
+		old := this.errors[link.ClusterAddress.IP.String()]
+		this.errors[link.ClusterAddress.IP.String()] = err
+		if (err == nil) != (old == nil) || (old != nil && old.Error() != err.Error()) {
+			this.TriggerLink(link.Name)
+		}
 	}
 }
 
@@ -436,5 +462,6 @@ func (this *mode) GetLinkState(link *api.KubeLink) runmode.LinkState {
 			}
 		}
 	}
-	return this.peerstate[link.Spec.PublicKey]
+	n := kubelink.DecodeLinkNameFromString(link.Name)
+	return this.peerstate[n]
 }

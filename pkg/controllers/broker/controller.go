@@ -40,6 +40,7 @@ func init() {
 
 	controllers.BaseController("broker", &config.Config{}).
 		RequireLease().
+		FinalizerDomain("mandelsoft.org").
 		Reconciler(Create).With(controllers.SecretCacheReconciler).
 		With(tasks.TaskReconciler(3)).
 		MustRegister()

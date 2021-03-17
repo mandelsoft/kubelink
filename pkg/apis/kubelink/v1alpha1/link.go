@@ -23,12 +23,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const STATE_INVALID = "Invalid" // Invalid because of erroneous link configuration
-const STATE_STALE = "Stale"     // Invalid because problem in mesh setup
-const STATE_UP = "Up"           // Link is up and connected
-const STATE_IDLE = "Idle"       // Link ready for connections, but not yet active
-const STATE_DOWN = "Down"       // Link is down because of unknown connectivity problem
-const STATE_ERROR = "Error"     // Known error on connection
+const STATE_INVALID = "Invalid"   // Invalid because of erroneous link configuration
+const STATE_STALE = "Stale"       // Invalid because problem in mesh setup
+const STATE_UP = "Up"             // Link is up and connected
+const STATE_IDLE = "Idle"         // Link ready for connections, but not yet active
+const STATE_DOWN = "Down"         // Link is down because of unknown connectivity problem
+const STATE_ERROR = "Error"       // Known error on connection
+const STATE_DELETING = "Deleting" // (Mesh) Link is marked for deletion
 
 const EP_INBOUND = "Inbound"
 
@@ -51,6 +52,7 @@ type KubeLinkList struct {
 // +kubebuilder:printcolumn:name=Endpoint,JSONPath=".spec.endpoint",type=string
 // +kubebuilder:printcolumn:name=Gateway,JSONPath=".status.gateway",type=string
 // +kubebuilder:printcolumn:name=State,JSONPath=".status.state",type=string
+// +kubebuilder:printcolumn:name=Age,JSONPath=".metadata.creationTimestamp",type=date
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
@@ -91,8 +93,12 @@ type KubeLinkSpec struct {
 type KubeLinkDNS struct {
 	// +optional
 	OmitDNSPropagation *bool `json:"omitDNSPropagation,omitempty"`
+	// IP Address of DNS Service. For LocalLinks this is the mesh global dns service
+	// for regular links it is the link (cluster) dns service
 	// +optional
 	DNSIP string `json:"dnsIP,omitempty"`
+	// Base DNS Domain. For LocalLinks this is the mesh domain, for regular
+	// links it is the links local (cluster) domain
 	// +optional
 	BaseDomain string `json:"baseDomain,omitempty"`
 }

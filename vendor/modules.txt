@@ -290,7 +290,7 @@ golang.org/x/xerrors/internal
 # golang.zx2c4.com/wireguard v0.0.20201118
 ## explicit
 golang.zx2c4.com/wireguard/ipc/winpipe
-# golang.zx2c4.com/wireguard/wgctrl v0.0.0-00010101000000-000000000000 => github.com/mandelsoft/wgctrl-go v0.0.0-20210208121059-d9ab8e5d81ee
+# golang.zx2c4.com/wireguard/wgctrl v0.0.0-20200609130330-bd2cb7843e1b
 ## explicit
 golang.zx2c4.com/wireguard/wgctrl
 golang.zx2c4.com/wireguard/wgctrl/internal/wginternal
@@ -601,4 +601,3 @@ sigs.k8s.io/controller-tools/pkg/webhook
 sigs.k8s.io/structured-merge-diff/v3/value
 # sigs.k8s.io/yaml v1.2.0
 sigs.k8s.io/yaml
-# golang.zx2c4.com/wireguard/wgctrl => github.com/mandelsoft/wgctrl-go v0.0.0-20210208121059-d9ab8e5d81ee

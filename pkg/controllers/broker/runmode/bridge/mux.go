@@ -16,7 +16,7 @@
  *  limitations under the License.
  */
 
-package broker
+package bridge
 
 import (
 	"context"
@@ -54,7 +54,7 @@ type Mux struct {
 	errors      map[string]error
 
 	port     uint16
-	links    *kubelink.Links
+	links    kubelink.Links
 	local    tcp.CIDRList
 	tun      *Tun
 	handlers []LinkStateHandler
@@ -63,7 +63,7 @@ type Mux struct {
 	autoconnect       bool
 }
 
-func NewMux(ctx context.Context, logger logger.LogContext, certInfo *CertInfo, port uint16, localCIDRs tcp.CIDRList, tun *Tun, links *kubelink.Links, handlers ...LinkStateHandler) *Mux {
+func NewMux(ctx context.Context, logger logger.LogContext, certInfo *CertInfo, port uint16, localCIDRs tcp.CIDRList, tun *Tun, links kubelink.Links, handlers ...LinkStateHandler) *Mux {
 	return &Mux{
 		LogContext:  logger,
 		ctx:         ctx,
@@ -384,7 +384,7 @@ func (this *Mux) ServeConnection(ctx context.Context, conn net.Conn) {
 			return
 		}
 		adjusted := *cidr
-		m := this.links.GetMeshForClusterAddress(cidr.IP)
+		m := this.links.LookupMeshByMeshAddress(cidr.IP)
 		if m == nil {
 			this.Errorf("cannot auto-connect cluster %s for unknown mesh", cidr.IP, err)
 			return

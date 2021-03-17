@@ -34,6 +34,9 @@ spec:
     - jsonPath: .status.state
       name: State
       type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -65,8 +68,10 @@ spec:
               dns:
                 properties:
                   baseDomain:
+                    description: Base DNS Domain. For LocalLinks this is the mesh domain, for regular links it is the links local (cluster) domain
                     type: string
                   dnsIP:
+                    description: IP Address of DNS Service. For LocalLinks this is the mesh global dns service for regular links it is the link (cluster) dns service
                     type: string
                   omitDNSPropagation:
                     type: boolean

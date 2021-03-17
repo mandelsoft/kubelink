@@ -25,29 +25,32 @@ import (
 )
 
 type Mesh struct {
-	name           string
-	clusterName    string
+	name           LinkName
 	clusterAddress *net.IPNet
 	cidr           *net.IPNet
 	dnsInfo        LinkDNSInfo
+	deletePending  bool
 }
 
-func NewMeshInfo(link *Link) *Mesh {
+func NewMeshInfo(link *Link, delete ...bool) *Mesh {
 	return &Mesh{
-		name:           link.Name.mesh,
-		clusterName:    link.Name.name,
+		name:           link.Name,
 		clusterAddress: link.ClusterAddress,
 		cidr:           tcp.CIDRNet(link.ClusterAddress),
 		dnsInfo:        link.LinkDNSInfo,
+		deletePending:  len(delete) > 0 && delete[0],
 	}
 }
 
 func (this *Mesh) Name() string {
+	return this.name.mesh
+}
+func (this *Mesh) LinkName() LinkName {
 	return this.name
 }
 
 func (this *Mesh) ClusterName() string {
-	return this.clusterName
+	return this.name.name
 }
 
 func (this *Mesh) ClusterAddress() *net.IPNet {
@@ -67,5 +70,9 @@ func (this *Mesh) ClusterDomain() string {
 }
 
 func (this *Mesh) PropagateDNS() bool {
-	return this.dnsInfo.DNSPropagation && this.clusterName != ""
+	return this.dnsInfo.DNSPropagation && this.ClusterName() != ""
+}
+
+func (this *Mesh) DeletePending() bool {
+	return this.deletePending
 }

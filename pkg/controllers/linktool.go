@@ -209,8 +209,8 @@ func (this *LinkTool) PrepareLink(logger logger.LogContext, link netlink.Link, c
 	if err != nil {
 		return nil, err
 	}
-	err = this.HandleNat(logger, link.Attrs().Name, chains)
-	return func() { this.HandleNat(logger, link.Attrs().Name, nil) }, err
+	err = this.HandleNat(logger, chains)
+	return func() { this.HandleNat(logger, nil) }, err
 }
 
 func (this *LinkTool) UpdateLinkAddresses(logger logger.LogContext, link netlink.Link, addrs tcp.CIDRList) error {
@@ -292,8 +292,8 @@ func (this *LinkTool) HandleFirewall(logger logger.LogContext, chains iptables.R
 	return this.ManageChains(logger, "firewall", kubelink.FirewallEmbedding, chains)
 }
 
-func (this *LinkTool) HandleNat(logger logger.LogContext, linkName string, chains iptables.Requests) error {
-	return this.ManageChains(logger, "nat", func() ([]kubelink.RuleDef, utils.StringSet) { return kubelink.NatEmbedding(linkName) }, chains)
+func (this *LinkTool) HandleNat(logger logger.LogContext, chains iptables.Requests) error {
+	return this.ManageChains(logger, "nat", kubelink.NatEmbedding, chains)
 }
 
 type EmbeddingFunction func() ([]kubelink.RuleDef, utils.StringSet)

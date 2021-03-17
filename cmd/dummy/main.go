@@ -16,23 +16,41 @@
  *  limitations under the License.
  */
 
-package controllers
+package main
 
 import (
-	"github.com/gardener/controller-manager-library/pkg/resources"
+	"fmt"
+	"net"
 
-	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 )
 
-func ObjectName(name kubelink.LinkName) resources.ObjectName {
-	n := name.Name()
-	if name.Mesh() != kubelink.DEFAULT_MESH {
-		n = name.String()
+func main() {
+	_, cidr, _ := net.ParseCIDR("192.168.0.11/24")
+	meshName := kubelink.NewLinkName("test", "link0")
+	mesh := &kubelink.Link{
+		Name:            meshName,
+		ServiceCIDR:     nil,
+		Egress:          nil,
+		Ingress:         nil,
+		ClusterAddress:  cidr,
+		GatewayLink:     nil,
+		GatewayFor:      nil,
+		Gateway:         nil,
+		Host:            "",
+		Port:            0,
+		Endpoint:        kubelink.EP_LOCAL,
+		PublicKey:       nil,
+		PresharedKey:    nil,
+		LinkForeignData: kubelink.LinkForeignData{LinkDNSInfo: kubelink.LinkDNSInfo{DNSPropagation: false}},
 	}
-	return resources.NewObjectName(n)
-}
 
-func IsLocalLink(klink *api.KubeLink) bool {
-	return klink.Spec.Endpoint == kubelink.EP_LOCAL
+	links := kubelink.NewLinks(nil, 0)
+
+	links.ReplaceLink(mesh)
+
+	fmt.Printf("mesh %v\n", links.GetMesh("test"))
+	links.RemoveLink(meshName)
+	fmt.Printf("mesh %v\n", links.GetMesh("test"))
+
 }

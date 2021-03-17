@@ -31,19 +31,18 @@ const TABLE_NAT = "nat"
 const NAT_CHAIN = CHAIN_PREFIX + "NAT"
 const NAT_MESH_CHAIN_PREFIX = CHAIN_PREFIX + "NT-"
 
-func NatEmbedding(linkName string) ([]RuleDef, utils.StringSet) {
+func NatEmbedding() ([]RuleDef, utils.StringSet) {
 	// touched tables
 	tables := utils.NewStringSet(TABLE_NAT)
 	return []RuleDef{
 		RuleDef{TABLE_NAT, "POSTROUTING", iptables.Rule{
 			iptables.Opt("-m", "comment", "--comment", "kubelink nat rules"),
-			iptables.Opt("-o", linkName),
 			iptables.Opt("-j", NAT_CHAIN),
 		}, ""},
 	}, tables
 }
 
-func (this *Links) GetGatewayAddrs() tcp.CIDRList {
+func (this *linksdata) GetGatewayAddrs() tcp.CIDRList {
 	meshes := this.GetMeshLinks()
 	addrs := tcp.CIDRList{}
 	for _, m := range meshes {
@@ -52,10 +51,7 @@ func (this *Links) GetGatewayAddrs() tcp.CIDRList {
 	return addrs
 }
 
-func (this *Links) GetNatChains(clusterAddresses tcp.CIDRList) iptables.Requests {
-	this.lock.RLock()
-	defer this.lock.RUnlock()
-
+func (this *links) GetNatChains(clusterAddresses tcp.CIDRList, linkName string) iptables.Requests {
 	var natchains iptables.Requests
 	var rules iptables.Rules
 	meshes := map[string]*iptables.ChainRequest{}
@@ -123,6 +119,9 @@ func (this *Links) GetNatChains(clusterAddresses tcp.CIDRList) iptables.Requests
 
 	var chains iptables.Requests
 	if len(rules) > 0 {
+		rules = append(rules, iptables.Rule{
+			iptables.Opt("!", "-o", linkName, "-j", "RETURN"),
+		})
 		chains = append(chains, natchains...)
 		chains = append(chains, iptables.NewChainRequest(
 			TABLE_NAT,

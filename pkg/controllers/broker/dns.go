@@ -174,29 +174,6 @@ func (this *reconciler) getSecret(logger logger.LogContext, name resources.Objec
 	return sobj, secret, nil, nil
 }
 
-func (this *reconciler) handleLinkAccess(logger logger.LogContext, klink *api.KubeLink, entry *kubelink.Link) (error, error) {
-	if entry != nil {
-		logger.Infof("%s", entry)
-		if entry.IsLocalLink() {
-			if entry.ServiceCIDR == nil && this.config.ServiceCIDR != nil {
-				if !tcp.EqualCIDR(this.config.ServiceCIDR, entry.ServiceCIDR) {
-					entry.ServiceCIDR = this.config.ServiceCIDR
-					entry.UpdatePending = true
-				}
-			}
-		}
-	}
-	if this.dnsInfo.DNSPropagation {
-		this.runmode.HandleDNSPropagation(klink)
-	}
-
-	if entry.UpdatePending {
-		return this.updateObjectFromLink(logger, klink, entry)
-	} else {
-		return this.updateLinkFromObject(logger, klink, entry)
-	}
-}
-
 func (this *reconciler) updateLinkFromObject(logger logger.LogContext, klink *api.KubeLink, entry *kubelink.Link) (error, error) {
 	var access *kubelink.LinkAccessInfo
 	var dnsInfo *kubelink.LinkDNSInfo
@@ -432,17 +409,21 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 			log.Debugf("  handle mesh %q", n)
 			this.Links().VisitLinks(func(l *kubelink.Link) bool {
 				if l.MatchMesh(m.CIDR()) {
-					log.Debugf("  found matching link %s", l.Name)
-					if this.config.DNSPropagation == config.DNSMODE_KUBERNETES {
-						if l.Token != "" {
-							ip := tcp.SubIP(l.ServiceCIDR, 1)
-							kubeconfig.AddCluster(KubeKey(l.Name), fmt.Sprintf("https://%s", ip), l.CACert, l.Token)
+					if l.DNSPropagation {
+						log.Debugf("  found matching link %s with dns propagation", l.Name)
+						if this.config.DNSPropagation == config.DNSMODE_KUBERNETES {
+							if l.Token != "" {
+								ip := tcp.SubIP(l.ServiceCIDR, 1)
+								kubeconfig.AddCluster(KubeKey(l.Name), fmt.Sprintf("https://%s", ip), l.CACert, l.Token)
+								meshDomains[l.Name] = m.ClusterDomain()
+								keys = append(keys, l.Name.String())
+							}
+						} else {
 							meshDomains[l.Name] = m.ClusterDomain()
 							keys = append(keys, l.Name.String())
 						}
 					} else {
-						meshDomains[l.Name] = m.ClusterDomain()
-						keys = append(keys, l.Name.String())
+						log.Debugf("  skip matching link %s without dns propagation", l.Name)
 					}
 				}
 				return true
