@@ -54,6 +54,16 @@ func init() {
 	)
 }
 
+func R_OutOpt(name string) Option {
+	return Opt("-o", name)
+}
+func R_JumpChainOpt(name string) Option {
+	return Opt("-j", name)
+}
+func R_SNATOpt(ip string) Option {
+	return ComposeOpt(Opt("-j", "SNAT"), Opt("--to-source", ip))
+}
+
 type ruleOptions struct {
 	lock  sync.RWMutex
 	types []OptionType

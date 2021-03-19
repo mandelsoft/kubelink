@@ -47,6 +47,10 @@ func (this Rule) HasOption(name string) bool {
 	return Options(this).HasOption(name)
 }
 
+func (this Rule) GetOption(name string) Option {
+	return Options(this).GetOption(name)
+}
+
 func (this *Rule) RemoveOption(name string) *Rule {
 	for i, r := range *this {
 		if r.Index(name) == 0 {

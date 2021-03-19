@@ -8,6 +8,7 @@ metadata:
     dns.gardener.cloud/class: garden
     dns.gardener.cloud/dnsnames: kubelink.kubelink1.ringdev.shoot.dev.k8s-hana.ondemand.com
     dns.gardener.cloud/ttl: "500"
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"  # On AWS an NLB has to be used for UDP
   name: kubelink
   namespace: kube-system
 spec:
@@ -15,9 +16,9 @@ spec:
     app: kubelink
     component: kubelink-broker
   ports:
-    - name: http
-      port: 80
-      protocol: TCP
+    - name: wireguard
+      port: 8777
+      protocol: UDP
       targetPort: 8188
   sessionAffinity: None
   type: LoadBalancer
@@ -45,23 +46,21 @@ spec:
       hostNetwork: true
       containers:
         - name: broker
-          image: mandelsoft/kubelink:latest
+          image: mandelsoft/kubelink:qual
           imagePullPolicy: "Always"
           args:
             - --controllers=broker
-            - --secret=kubelink
+            - --mode=wireguard
+            - --secret=wireguard               # used to store wireguard key
             - --server-port-http=8180
             - --broker-port=8188
-            - --pod-cidr=100.96.0.0/11
             - --node-cidr=10.250.0.0/16
-            - --link-address=192.168.0.11/24
-            - --ifce-name=kubelink
             - --service-cidr=100.64.0.0/20
+            - --ifce-name=kubelink
             - --ipip=shared
             - --dns-advertisement
             - --dns-propagation=dns
             - --coredns-configure
-            - --cluster-name=kubelink1
           securityContext:
             privileged: true
           livenessProbe:
@@ -75,7 +74,7 @@ spec:
             - containerPort: 8180
               protocol: TCP
             - containerPort: 8188
-              protocol: TCP
+              protocol: UDP
           resources:
             {}
 

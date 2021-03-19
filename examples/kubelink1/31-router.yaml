@@ -19,9 +19,14 @@ spec:
         component: kubelink-router
     spec:
       hostNetwork: true
+      volumes:
+        - name: datadir
+          hostPath:
+            path: /var/lib/kubelink
+            type: DirectoryOrCreate
       containers:
         - name: router
-          image: mandelsoft/kubelink:latest
+          image: mandelsoft/kubelink:qual
           imagePullPolicy: "Always"
           args:
             - --controllers=router
@@ -29,6 +34,8 @@ spec:
             - --pod-cidr=100.96.0.0/11
             - --node-cidr=10.250.0.0/16
             - --ipip=shared
+            - --service=kubelink
+            - --datafile=/mnt/data/routes
           securityContext:
             privileged: true
           livenessProbe:
@@ -41,6 +48,9 @@ spec:
           ports:
             - containerPort: 8080
               protocol: TCP
+          volumeMounts:
+            - name: datadir
+              mountPath: /mnt/data
 
       serviceAccountName: kubelink
       terminationGracePeriodSeconds: 120

@@ -169,11 +169,11 @@ func (this *reconciler) HandleDelete(logger logger.LogContext, name kubelink.Lin
 				}
 			}
 
-			// mesh local link can be deleted if it has no members or a replacement
-			if len(members) == 0 || replacement != nil {
-				if obj != nil {
+			if obj != nil {
+				// mesh local link can be deleted if it has no members or a replacement
+				finalizers := obj.GetFinalizers()
+				if len(members) == 0 || replacement != nil {
 					finalizer := this.Controller().FinalizerHandler().FinalizerName(obj)
-					finalizers := obj.GetFinalizers()
 					if len(finalizers) == 1 && finalizers[0] == finalizer {
 						err := this.Controller().RemoveFinalizer(obj)
 						if err == nil {
@@ -187,8 +187,12 @@ func (this *reconciler) HandleDelete(logger logger.LogContext, name kubelink.Lin
 						return err
 					}
 				}
+				if len(members) != 0 {
+					logger.Infof("mesh still busy")
+				} else {
+					logger.Infof("mesh still has finalizers: %s", finalizers)
+				}
 			}
-			logger.Infof("mesh still busy")
 		} else {
 			// any other links including stale mesh links can potentially just be deleted
 			if obj != nil {

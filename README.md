@@ -76,7 +76,39 @@ completely handled by the wireguard device. Therefore the broker configures
 the wireguard device and its peers according the desired cluster links,
 which must provide a public wireguard key for the dedicated endpoint. 
 
-## Configuring Links between Clusters
+## Configuring a Cluster Mesh
+
+A mesh consists of two parts, the mesh definition and foreign links.
+
+### Defining a Cluster Mesh
+
+To connect to a cluster mesh the controller requires information about
+the mesh settings and the name of the local cluster in the mesh.
+
+The broker provides options to configure a default mesh together with
+the broker instance. This is done with the optional options:
+
+| Option | Argument | Meaning |
+|--------|----------|---------|
+| `--cluster-name` | string | name of the local cluster in mesh (for DNS) |
+| `--link-address` | IP CIDR | mesh IP and netmask in cidr notation |
+| `--mesh-domain` | string | dns domain for mesh DNS (required for dns) |
+| `--meshdns-service-ip` | IP | ip address of mesh global dns service (optional) |
+
+A better way, that also allows for configuring multiple meshes is to use
+a special kind of a *KubeLink* object defining the local link.
+A local link object is given by using the endpoint name `LocalLink`.
+
+Such a link defines a dedicated mesh.
+The mesh name is prepended to the local cluster name in the mesh to build the
+object name according to `<mesh-name>--<cluster name>`. If the prefix is missing
+the local link describes the default mesh and the link name is used as cluster
+name for the local cluster in the mesh.
+
+In the `dns` section the base domain describes the mesh domain and the `dnsIP`
+describes the global mesh dns service IP.
+
+### Configuring Links between Clusters
 
 The connections between two clusters can be configured dynamically just be adding
 an instance of the *KubeLink* custom resource.
@@ -93,12 +125,27 @@ spec:
   publicKey: <public key, for wireguard, only>
 ```
 
-That's it. For the TLS bases user space solution no certificate, key, nothing
+That's it. For the TLS based user space solution no certificate, key, nothing
 else required in best case when using the DNS and server certificate provisioning 
 controllers proposed above.
 
 For the wireguard solution only the public key of the foreign sites are required
-(and the local private key, which is maintained in secret)
+(and the local private key, which is maintained in a [secret](examples/kubelink1/33b-wireguard.yaml)
+with key`WireguardPrivateKey` )
+
+To configure a link for a dedicated cluster mesh use the mesh name as prefix
+for the object name according to `<mesh-name>--<link name>`.
+
+Links now have a more relevant state:
+
+| State | Meaning |
+|-------|---------|
+| `Invalid` | Configuration problem with link attributes |
+| `Stale` | Mesh setup wrong for actual link |
+| `Error` | Hard link error (local connection), for example invalid key |
+| `Idle` | for bridge mode if no connection is established |
+| `Up` | Connected and data exchange works |
+| `Down` | Connection cannot be established for wireguard |
 
 ## Constraints
 
@@ -121,7 +168,8 @@ Newer calico versions now support the detection method `cidr`, which allows
 detecting the correct interface by the node subnet CIDR, which is operating
 system agnostic.
 
-If [Gardener](https://gardener.cloud) is used to maintain the involved Kubernetes clusters
+If [Gardener](https://gardener.cloud) is used to maintain the involved
+Kubernetes clusters
 the required calico config can be directly described in the shoot manifest.
 The section `networking` has to be adapted as follows (change to the node cidr
 of your environment) .
@@ -145,6 +193,8 @@ Older versions of calico do not support this detection method, here you have to
 use the method _interface_, which unfortunately is operating system dependent.
 The default method does NOT reliably work in all environments together with the
 additional network device.
+
+Newer versions of *Gardener* provide this option out of the box.
 
 ## Implementation
 
@@ -191,9 +241,14 @@ specific to the dedicated cluster. Here two folders are provided
 files. 
 
 The certificate requests work together with the DNS annotation of the kubernetes
-services used by the [`kubelink-broker` deployments](examples/kubelink1/32-broker.yaml).
+services used by the [`kubelink-broker` deployments](examples/kubelink1/32a-broker-bridgemode.yaml).
 Finally the  [`kubelink-router` daemon sets](examples/kubelink1/31-router.yaml)
 have to be deployed into the clusters.
+
+There are examples for the brigde mode ([32a](examples/kubelink1/32a-broker-bridgemode.yaml))
+and the wireguard mode ([32b](examples/kubelink1/32b-broker-wireguardmode.yaml)).
+For the wireguard mode you need a [secret](examples/kubelink1/33b-wireguard.yaml)
+with at least the wireguard private key to use.
 
 Depending on your network policies it might be required to
 [enable access](examples/52-policy.yaml) from
@@ -359,6 +414,24 @@ Basically this coredns deployment is intentionally not maintained by the broker,
 because this would require extensice permissions (to configure service account and
 RBAC policies).
 
+### Mesh global DNS Names
+
+Using a new coredns plugin ([kubednydns](https://github.com/mandelsoft/kubedyndns))
+it is posible to build a coredns based dns server configured by `CoreDNSEntry`
+resources. Deployed in one cluster of a mesh this dns server can be configured 
+to be used a mesh global dns server by serving the `svc.global.<mesh-domain>`
+domain. It does not contain a cluster location anymore and can be used 
+to configure cross cluster service records or just location independent
+dns names for services.
+
+An example deployment could ook like [this](examples/60-globaldns.yaml).
+The usage of a mesh global dns server can be configured for `LocalLink`
+or for the default mesh using broker option `--meshdns-service-ip`.
+All local links in all clusters of a mesh should use the same service ip.
+
+The `global` sub domain is then automatically added to the mesh domain
+on the local kubeling dns servers.
+
 ## Command Line Reference
 
 ```
@@ -368,77 +441,87 @@ Usage:
   kubelink [flags]
 
 Flags:
+      --accepted-maintainers string                 accepted maintainer key(s) for crds
       --advertised-port int                         Advertised broker port for auto-connect
       --auto-connect                                Automatically register cluster for authenticated incoming requests
       --bind-address-http string                    HTTP server bind address
-      --broker-port int                             Port for broker
-      --broker.advertised-port int                  Advertised broker port for auto-connect of controller broker (default 80)
+      --broker-port int                             Port for bridge/wireguard
+      --broker.advertised-port int                  Advertised broker port for auto-connect of controller broker
       --broker.auto-connect                         Automatically register cluster for authenticated incoming requests of controller broker
-      --broker.broker-port int                      Port for broker of controller broker (default 8088)
+      --broker.broker-port int                      Port for bridge/wireguard of controller broker
       --broker.cacertfile string                    TLS ca certificate file of controller broker
       --broker.certfile string                      TLS certificate file of controller broker
-      --broker.cluster-domain string                Cluster Domain of Cluster DNS Service (for DNS Info Propagation) of controller broker (default "cluster.local")
-      --broker.cluster-name string                  Name of local cluster in cluster mesh of controller broker
+      --broker.cluster-domain string                Cluster Domain of Cluster DNS Service (for DNS Info Propagation) of controller broker
+      --broker.cluster-name string                  Default Name of local cluster in cluster mesh of controller broker
       --broker.coredns-configure                    Enable automatic configuration of cluster DNS (coredns) of controller broker
-      --broker.coredns-deployment string            Name of coredns deployment used by kubelink of controller broker (default "kubelink-coredns")
-      --broker.coredns-secret string                Name of dns secret used by kubelink of controller broker (default "kubelink-coredns")
+      --broker.coredns-deployment string            Name of coredns deployment used by kubelink of controller broker
+      --broker.coredns-secret string                Name of dns secret used by kubelink of controller broker
       --broker.coredns-service-ip string            Service IP of coredns deployment used by kubelink of controller broker
-      --broker.default.pool.size int                Worker pool size for pool default of controller broker (default 1)
+      --broker.default.pool.size int                Worker pool size for pool default of controller broker
       --broker.dns-advertisement                    Enable automatic advertisement of DNS access info of controller broker
       --broker.dns-name string                      DNS Name for managed certificate of controller broker
-      --broker.dns-propagation string               Mode for accessing foreign DNS information (none, dns or kubernetes) of controller broker (default "none")
+      --broker.dns-propagation string               Mode for accessing foreign DNS information (none, dns or kubernetes) of controller broker
       --broker.dns-service-ip string                IP of Cluster DNS Service (for DNS Info Propagation) of controller broker
-      --broker.ifce-name string                     Name of the tun interface of controller broker
-      --broker.ipip string                          ip-ip tunnel mode (none, shared, configure of controller broker (default "IPIP_NONE")
+      --broker.ifce-name string                     Name of the tun/wireguard interface of controller broker
+      --broker.ipip string                          ip-ip tunnel mode (none, shared, configure of controller broker
       --broker.keyfile string                       TLS certificate key file of controller broker
-      --broker.link-address string                  CIDR of cluster in cluster network of controller broker
-      --broker.mesh-domain string                   Base domain for cluster mesh services of controller broker (default "kubelink")
-      --broker.mode string                          VPN mode (bridge, wireguard, none)  of controller broker
+      --broker.link-address string                  Default address of cluster in cluster mesh network of controller broker
+      --broker.mesh-domain string                   Default Base domain for cluster mesh services of controller broker
+      --broker.meshdns-service-ip string            Default Service IP of global mesh service DNS service of controller broker
+      --broker.mode string                          VPN mode (bridge, wireguard, none) of controller broker
       --broker.node-cidr string                     CIDR of node network of cluster of controller broker
       --broker.pool.resync-period duration          Period for resynchronization of controller broker
       --broker.pool.size int                        Worker pool size of controller broker
-      --broker.secret string                        TLS/wireguard secret of controller broker
-      --broker.secret-manage-mode string            Manage mode for TLS secret of controller broker (default "none")
-      --broker.secrets.pool.size int                Worker pool size for pool secrets of controller broker (default 1)
-      --broker.served-links string                  Comma separated list of links to serve of controller broker (default "all")
-      --broker.service string                       Service name for managed certificate of controller broker
+      --broker.secret string                        TLS or wireguard secret of controller broker
+      --broker.secret-manage-mode string            Manage mode for TLS secret of controller broker
+      --broker.secrets.pool.size int                Worker pool size for pool secrets of controller broker
+      --broker.served-links string                  Comma separated list of links to serve of controller broker
+      --broker.service string                       Service name for wireguard or managed certificate of controller broker
       --broker.service-account string               Service Account for API Access propagation of controller broker
       --broker.service-cidr string                  CIDR of local service network of controller broker
-      --broker.tasks.pool.size int                  Worker pool size for pool tasks of controller broker (default 1)
-      --broker.update.pool.resync-period duration   Period for resynchronization for pool update of controller broker (default 20s)
-      --broker.update.pool.size int                 Worker pool size for pool update of controller broker (default 1)
+      --broker.tasks.pool.size int                  Worker pool size for pool tasks of controller broker
+      --broker.update.pool.resync-period duration   Period for resynchronization for pool update of controller broker
+      --broker.update.pool.size int                 Worker pool size for pool update of controller broker
       --cacertfile string                           TLS ca certificate file
       --certfile string                             TLS certificate file
       --cluster-domain string                       Cluster Domain of Cluster DNS Service (for DNS Info Propagation)
-      --cluster-name string                         Name of local cluster in cluster mesh
+      --cluster-name string                         Default Name of local cluster in cluster mesh
       --config string                               config file
-  -c, --controllers string                          comma separated list of controllers to start (<name>,<group>,all) (default "all")
+  -c, --controllers string                          comma separated list of controllers to start (<name>,<group>,all)
       --coredns-configure                           Enable automatic configuration of cluster DNS (coredns)
       --coredns-deployment string                   Name of coredns deployment used by kubelink
       --coredns-secret string                       Name of dns secret used by kubelink
       --coredns-service-ip string                   Service IP of coredns deployment used by kubelink
       --cpuprofile string                           set file for cpu profiling
+      --datafile string                             datafile for storing managed routes
       --default.pool.size int                       Worker pool size for pool default
       --disable-namespace-restriction               disable access restriction for namespace local access only
       --dns-advertisement                           Enable automatic advertisement of DNS access info
       --dns-name string                             DNS Name for managed certificate
       --dns-propagation string                      Mode for accessing foreign DNS information (none, dns or kubernetes)
       --dns-service-ip string                       IP of Cluster DNS Service (for DNS Info Propagation)
+      --force-crd-update                            enforce update of crds even they are unmanaged
       --grace-period duration                       inactivity grace period for detecting end of cleanup for shutdown
   -h, --help                                        help for kubelink
-      --ifce-name string                            Name of the tun interface
+      --ifce-name string                            Name of the tun/wireguard interface
       --ipip string                                 ip-ip tunnel mode (none, shared, configure
       --keyfile string                              TLS certificate key file
       --kubeconfig string                           default cluster access
+      --kubeconfig.apiserver-override string        replace api server url from kubeconfig
       --kubeconfig.disable-deploy-crds              disable deployment of required crds for cluster default
       --kubeconfig.id string                        id for cluster default
+      --kubeconfig.migration-ids string             migration id for cluster default
+      --lease-duration duration                     lease duration
       --lease-name string                           name for lease object
-      --link-address string                         CIDR of cluster in cluster network
+      --lease-renew-deadline duration               lease renew deadline
+      --lease-retry-period duration                 lease retry period
+      --link-address string                         Default address of cluster in cluster mesh network
   -D, --log-level string                            logrus log level
-      --maintainer string                           maintainer key for crds (defaulted by manager name)
-      --mesh-domain string                          Base domain for cluster mesh services
+      --maintainer string                           maintainer key for crds (default "kubelink")
+      --mesh-domain string                          Default Base domain for cluster mesh services
+      --meshdns-service-ip string                   Default Service IP of global mesh service DNS service
       --mode string                                 VPN mode (bridge, wireguard, none)
-      --name string                                 name used for controller manager
+      --name string                                 name used for controller manager (default "kubelink")
       --namespace string                            namespace for lease (default "kube-system")
   -n, --namespace-local-access-only                 enable access restriction for namespace local access only (deprecated)
       --node-cidr string                            CIDR of node network of cluster
@@ -447,20 +530,22 @@ Flags:
       --pod-cidr string                             CIDR of pod network of cluster
       --pool.resync-period duration                 Period for resynchronization
       --pool.size int                               Worker pool size
-      --router.default.pool.size int                Worker pool size for pool default of controller router (default 1)
-      --router.ipip string                          ip-ip tunnel mode (none, shared, configure of controller router (default "IPIP_NONE")
+      --router.datafile string                      datafile for storing managed routes of controller router
+      --router.default.pool.size int                Worker pool size for pool default of controller router
+      --router.ipip string                          ip-ip tunnel mode (none, shared, configure of controller router
       --router.node-cidr string                     CIDR of node network of cluster of controller router
       --router.pod-cidr string                      CIDR of pod network of cluster of controller router
       --router.pool.resync-period duration          Period for resynchronization of controller router
       --router.pool.size int                        Worker pool size of controller router
-      --router.update.pool.resync-period duration   Period for resynchronization for pool update of controller router (default 20s)
-      --router.update.pool.size int                 Worker pool size for pool update of controller router (default 1)
-      --secret string                               TLS/wireguard secret
+      --router.service string                       service to lookup endpoint for broker of controller router
+      --router.update.pool.resync-period duration   Period for resynchronization for pool update of controller router
+      --router.update.pool.size int                 Worker pool size for pool update of controller router
+      --secret string                               TLS or wireguard secret
       --secret-manage-mode string                   Manage mode for TLS secret
       --secrets.pool.size int                       Worker pool size for pool secrets
       --served-links string                         Comma separated list of links to serve
       --server-port-http int                        HTTP server port (serving /healthz, /metrics, ...)
-      --service string                              Service name for managed certificate
+      --service string                              Service name for wireguard or managed certificate, service to lookup endpoint for broker
       --service-account string                      Service Account for API Access propagation
       --service-cidr string                         CIDR of local service network
       --tasks.pool.size int                         Worker pool size for pool tasks

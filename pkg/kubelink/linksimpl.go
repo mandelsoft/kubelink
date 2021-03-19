@@ -417,8 +417,11 @@ func (this *links) IsGateway(ifce *NodeInterface) bool {
 	if ifce == nil {
 		return false
 	}
-	if this.gateway != nil && this.gateway.Equal(ifce.IP) {
-		return true
+	if this.gateway != nil {
+		if this.gateway.Equal(ifce.IP) {
+			return true
+		}
+	} else {
 	}
 
 	return this.links.IsGatewayNode(ifce.IP)

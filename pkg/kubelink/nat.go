@@ -19,6 +19,7 @@
 package kubelink
 
 import (
+	"fmt"
 	"net"
 
 	"github.com/gardener/controller-manager-library/pkg/utils"
@@ -56,6 +57,7 @@ func (this *links) GetNatChains(clusterAddresses tcp.CIDRList, linkName string) 
 	var rules iptables.Rules
 	meshes := map[string]*iptables.ChainRequest{}
 
+	fmt.Printf("lookup nat chains for: %s", clusterAddresses)
 	this.links.Visit(func(l *Link) bool {
 		var clusterAddress *net.IPNet
 
@@ -63,7 +65,7 @@ func (this *links) GetNatChains(clusterAddresses tcp.CIDRList, linkName string) 
 		for _, cidr := range clusterAddresses {
 			if mesh.Contains(cidr.IP) {
 				clusterAddress = cidr
-				return false
+				break
 			}
 		}
 		if clusterAddress == nil {
@@ -71,7 +73,6 @@ func (this *links) GetNatChains(clusterAddresses tcp.CIDRList, linkName string) 
 		}
 		chain := meshes[mesh.String()]
 		if chain == nil {
-
 			natRules := iptables.Rules{
 				iptables.Rule{
 					iptables.Opt("-m", "comment", "--comment", "nat for mesh "+mesh.String()),
@@ -119,9 +120,10 @@ func (this *links) GetNatChains(clusterAddresses tcp.CIDRList, linkName string) 
 
 	var chains iptables.Requests
 	if len(rules) > 0 {
-		rules = append(rules, iptables.Rule{
-			iptables.Opt("!", "-o", linkName, "-j", "RETURN"),
-		})
+		rules = append(append(rules[:0:0], iptables.Rule{
+			iptables.Opt("!", "-o", linkName),
+			iptables.Opt("-j", "RETURN"),
+		}), rules...)
 		chains = append(chains, natchains...)
 		chains = append(chains, iptables.NewChainRequest(
 			TABLE_NAT,

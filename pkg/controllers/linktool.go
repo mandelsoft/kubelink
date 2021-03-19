@@ -307,10 +307,39 @@ func (this *LinkTool) ManageChains(logger logger.LogContext, area string, embed 
 	}
 	embedding, tables := embed()
 	if len(chains) == 0 {
-		n := utils.NewNotifier(logger, fmt.Sprintf("remove %s embedding", area))
+		// deleting of the embedding works only with direct rule matches
+		// to enable slightly changed embeddings first potential target rules are checked.
+		// basically an embedding should not contain logic but just a jump to the
+		// implementing main rule
+		n := utils.NewNotifier(logger, fmt.Sprintf("remove %s embedding (%d rules)", area, len(embedding)))
 		for _, e := range embedding {
-			if this.DeleteRule(e.Table, e.Chain, e.Rule) == nil {
-				n.Activate()
+			var target string
+			var err error
+			// lookup jump target
+			if opt := e.Rule.GetOption("-j"); opt != nil {
+				target = opt.AsArgs()[1]
+			}
+			if target != "" {
+				// if target found delete any such target rule for compatibility
+				var cur *iptables.Chain
+				cur, err = this.ipt.ListChain(e.Table, e.Chain)
+				if err == nil {
+					opt := iptables.Opt("-j", target)
+					for _, r := range cur.Rules {
+						if r.Index(opt) >= 0 {
+							if err = this.DeleteRule(e.Table, e.Chain, r); err == nil {
+								n.Activate()
+							}
+						}
+					}
+					continue
+				}
+			}
+			if err != nil || target == "" {
+				// if match cannot be done just try the new version of the target rule
+				if err := this.DeleteRule(e.Table, e.Chain, e.Rule); err == nil {
+					n.Activate()
+				}
 			}
 		}
 	}
@@ -320,10 +349,11 @@ func (this *LinkTool) ManageChains(logger logger.LogContext, area string, embed 
 		return err
 	}
 	if len(chains) > 0 {
-		n := utils.NewNotifier(logger, fmt.Sprintf("add %s embedding", area))
+		n := utils.NewNotifier(logger, fmt.Sprintf("add %s embedding (%d rules)", area, len(embedding)))
 		for _, e := range embedding {
 			err = this.AssureRule(n, e.Table, e.Chain, e.Rule, e.Before)
 			if err != nil {
+				n.Activate()
 				return err
 			}
 		}

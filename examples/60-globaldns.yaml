@@ -1,0 +1,189 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubelink-globaldns
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  labels:
+    app: kubelink-globaldns
+  name: kubelink:globaldns
+rules:
+- apiGroups:
+  - coredns.mandelsoft.org
+  resources:
+  - corednsentries
+  - corednsentries/status
+  verbs:
+  - get
+  - list
+  - update
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubelink:globaldns
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubelink:globaldns
+subjects:
+- kind: ServiceAccount
+  name: kubelink-globaldns
+  namespace: kube-system
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: kubelink-globaldns
+  name: kubelink-globaldns
+  namespace: kube-system
+spec:
+  clusterIP: 100.64.0.12
+  ports:
+  - name: dns
+    port: 53
+    protocol: UDP
+    targetPort: 8053
+  - name: dns-tcp
+    port: 53
+    protocol: TCP
+    targetPort: 8053
+  - name: metrics
+    port: 9153
+    protocol: TCP
+    targetPort: 9153
+  selector:
+    app: kubelink-globaldns
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: globaldns-corefile
+  namespace: kube-system
+data:
+  Corefile: |
+    .:8053 {
+        errors
+        health
+        ready
+        kubedyndns svc.global.kubelink in-addr.arpa ip6.arpa {
+          ttl 30
+          fallthrough
+        }
+        forward kubelink 100.64.0.11 {
+          except global.kubelink
+        }
+        cache 30
+        loop
+        reload
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: kubelink-globaldns
+  name: kubelink-globaldns
+  namespace: kube-system
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 2
+  revisionHistoryLimit: 0
+  selector:
+    matchLabels:
+      app: kubelink-globaldns
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+#        scheduler.alpha.kubernetes.io/critical-pod: ""
+      creationTimestamp: null
+      labels:
+        app: kubelink-globaldns
+    spec:
+      containers:
+      - args:
+        - -conf
+        - /etc/coredns/Corefile
+        image: mandelsoft/coredns:latest
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 5
+          httpGet:
+            path: /health
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
+        name: coredns
+        ports:
+        - containerPort: 8053
+          name: dns-udp
+          protocol: UDP
+        - containerPort: 8053
+          name: dns-tcp
+          protocol: TCP
+        - containerPort: 9153
+          name: metrics
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /ready
+            port: 8181
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: 250m
+            memory: 100Mi
+          requests:
+            cpu: 50m
+            memory: 15Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - all
+          readOnlyRootFilesystem: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /etc/coredns
+          name: config-volume
+          readOnly: true
+      dnsPolicy: Default
+#      priorityClassName: system-cluster-critical
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+      serviceAccountName: kubelink-globaldns
+      terminationGracePeriodSeconds: 30
+      tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+      volumes:
+      - configMap:
+          name: globaldns-corefile
+          defaultMode: 420
+          items:
+          - key: Corefile
+            path: Corefile
+        name: config-volume

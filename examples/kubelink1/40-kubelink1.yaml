@@ -1,0 +1,10 @@
+apiVersion: kubelink.mandelsoft.org/v1alpha1
+kind: KubeLink
+metadata:
+  name: kubelink1                   # name of local cluster in mesh
+spec:
+  endpoint: LocalLink               # Definition of mesh (replaces default mesh dettings of broker)
+  clusterAddress: 192.168.0.11/24
+  dns:
+    baseDomain: kubelink
+#    dnsIP: 100.64.0.12             # at local links: address of mesh global dns server

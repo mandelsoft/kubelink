@@ -40,7 +40,7 @@ func init() {
 
 	controllers.BaseController("broker", &config.Config{}).
 		RequireLease().
-		FinalizerDomain("mandelsoft.org").
+		FinalizerDomain("kubelink.mandelsoft.org").
 		Reconciler(Create).With(controllers.SecretCacheReconciler).
 		With(tasks.TaskReconciler(3)).
 		MustRegister()
@@ -71,6 +71,9 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	controller.Infof("setting gateway ip to %s", this.NodeInterface().IP)
+	this.Links().SetGateway(this.NodeInterface().IP)
 
 	r, err := controller.GetMainCluster().Resources().GetByExample(&api.KubeLink{})
 	if err != nil {

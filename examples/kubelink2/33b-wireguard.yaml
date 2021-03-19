@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wireguard
+  namespace: kube-system
+type: Opaque
+data:
+  WireguardPrivateKey: c05ldlVFU0MxcGc2XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXlPRmVtWT0K
+  WireguardPublicKey: UC9vUTdEdnZ6NHcyYUFzZmg1UU81SVk0NWRzczJscXhKQW1wdjExNXlHUT0K

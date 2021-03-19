@@ -31,6 +31,13 @@ type NodeInterface struct {
 	IP    net.IP
 }
 
+func (this *NodeInterface) String() string {
+	if this == nil {
+		return "<NoInterface>"
+	}
+	return fmt.Sprintf("%s(%d)[%s]", this.Name, this.Index, this.IP)
+}
+
 func LookupNodeIP(logger logger.LogContext, cidr *net.IPNet) (*NodeInterface, error) {
 	var ifce *NodeInterface
 

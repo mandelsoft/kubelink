@@ -70,6 +70,7 @@ func main() {
 	if len(args) > 0 {
 		name = args[0]
 	}
+	lname := kubelink.NewLinkName("mesh", name)
 	tool, err := controllers.NewLinkTool()
 	CheckErr(err)
 
@@ -83,7 +84,7 @@ func main() {
 	egress, _ := tcp.ParseIPNet("100.64.16.0/22")
 
 	link := &kubelink.Link{
-		Name:           name,
+		Name:           lname,
 		Ingress:        ingress,
 		ClusterAddress: cidr,
 		Egress:         []*net.IPNet{egress},
@@ -94,14 +95,14 @@ func main() {
 	natChains := iptables.Requests{}
 	if !clear {
 		fwChains = links.GetFirewallChains()
-		natChains = links.GetNatChains(tcp.CIDRList{addr})
+		natChains = links.GetNatChains(tcp.CIDRList{addr}, "kubelink")
 	}
 
 	logger.SetLevel("debug")
 	logger := logger.New()
 
 	if nat {
-		err = tool.HandleNat(logger, "kubelink", natChains)
+		err = tool.HandleNat(logger, natChains)
 	} else {
 		err = tool.HandleFirewall(logger, fwChains)
 	}

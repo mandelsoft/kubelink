@@ -237,10 +237,8 @@ func (this *LinkIndex) IsGatewayNode(ip net.IP) bool {
 	defer this.lock.RUnlock()
 
 	for _, l := range this.linksByName {
-		if l.ClusterAddress.Contains(ip) {
-			if l.Gateway != nil && l.Gateway.Equal(ip) {
-				return true
-			}
+		if l.Gateway != nil && l.Gateway.Equal(ip) {
+			return true
 		}
 	}
 	return false
