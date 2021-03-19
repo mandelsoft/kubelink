@@ -37,6 +37,8 @@ type reconciler struct {
 	*controllers.Reconciler
 	config   *Config
 	endpoint resources.ObjectName
+
+	routeTargets tcp.CIDRList
 }
 
 var _ reconcile.Interface = &reconciler{}
@@ -57,11 +59,12 @@ func (this *reconciler) GetLinkInfo(link *v1alpha1.KubeLink) *controllers.LinkIn
 }
 
 func (this *reconciler) IsManagedRoute(route *netlink.Route, routes kubelink.Routes) bool {
+	tunl, _ := netlink.LinkByName("tunl0")
 	if route.Dst != nil {
 		if this.config.PodCIDR.Contains(route.Dst.IP) {
 			return false
 		}
-		if route.Gw != nil && route.LinkIndex == this.NodeInterface().Index {
+		if route.Gw != nil && this.config.NodeCIDR.Contains(route.Gw) && (route.LinkIndex == this.NodeInterface().Index || (tunl != nil && route.LinkIndex == tunl.Attrs().Index)) {
 			return true
 		}
 		for _, r := range routes {
@@ -69,8 +72,27 @@ func (this *reconciler) IsManagedRoute(route *netlink.Route, routes kubelink.Rou
 				return true
 			}
 		}
+		for _, r := range this.routeTargets {
+			if tcp.EqualCIDR(route.Dst, r) {
+				return true
+			}
+		}
 	}
 	return false
+}
+
+func (this *reconciler) ConfirmManagedRoutes(list tcp.CIDRList) {
+	if this.config.DataFile == "" {
+		return
+	}
+	if !list.Equivalent(this.routeTargets) {
+		this.Controller().Infof("confirming routes: %s", list)
+		this.routeTargets = list
+		err := WriteRoutes(this.config.DataFile, list)
+		if err != nil {
+			this.Controller().Errorf("cannot write routes: %s", err)
+		}
+	}
 }
 
 func (this *reconciler) RequiredRoutes() kubelink.Routes {
@@ -135,7 +157,7 @@ func (this *reconciler) ReconcileEndpoint(logger logger.LogContext, obj resource
 			this.Links().SetGateway(nil)
 		case 1:
 			if !this.Links().GetGateway().Equal(eps[0]) {
-				n.Infof("found endpoint %s for broker service %q found", eps[0], this.config.Service)
+				n.Infof("found endpoint %s for broker service %q", eps[0], this.config.Service)
 				this.Links().SetGateway(eps[0])
 			}
 		default:

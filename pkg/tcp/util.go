@@ -122,7 +122,10 @@ func CIDRIP(cidr *net.IPNet, ip net.IP) *net.IPNet {
 		if len(cidr.IP) == net.IPv6len {
 			ip = ip.To16()
 		} else {
-			panic("incompatible ip and cidr")
+			ip = ip.To4()
+			if ip == nil {
+				panic("incompatible ip and cidr")
+			}
 		}
 	}
 	if !cidr.Contains(ip) {
@@ -185,6 +188,18 @@ func ParseNet(s string) (*net.IPNet, error) {
 
 type CIDRList []*net.IPNet
 
+func (this CIDRList) Equivalent(other CIDRList) bool {
+	if len(this) != len(other) {
+		return false
+	}
+	for _, e := range this {
+		if !other.Has(e) {
+			return false
+		}
+	}
+	return true
+}
+
 func (this *CIDRList) String() string {
 	sep := "["
 	end := ""
@@ -198,7 +213,29 @@ func (this *CIDRList) String() string {
 }
 
 func (this *CIDRList) Add(cidrs ...*net.IPNet) {
-	*this = append(*this, cidrs...)
+	for _, a := range cidrs {
+		if this.Has(a) {
+			continue
+		}
+		*this = append(*this, a)
+	}
+}
+
+func (this *CIDRList) Enrich(cidrs ...*net.IPNet) {
+outer:
+	for _, a := range cidrs {
+		for i := 0; i < len(*this); i++ {
+			e := (*this)[i]
+			if ContainsCIDR(e, a) {
+				continue outer
+			}
+			if ContainsCIDR(a, e) {
+				*this = append((*this)[:i], (*this)[i+1:]...)
+				i--
+			}
+		}
+		*this = append(*this, a)
+	}
 }
 
 func (this *CIDRList) IsEmpty() bool {
@@ -207,6 +244,15 @@ func (this *CIDRList) IsEmpty() bool {
 
 func (this *CIDRList) IsSet() bool {
 	return *this != nil
+}
+
+func (this *CIDRList) Has(cidr *net.IPNet) bool {
+	for _, c := range *this {
+		if EqualCIDR(c, cidr) {
+			return true
+		}
+	}
+	return false
 }
 
 func (this *CIDRList) Contains(ip net.IP) bool {

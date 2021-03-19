@@ -74,7 +74,7 @@ type Links interface {
 	LinkInfoUpdated(logger logger.LogContext, name LinkName, access *LinkAccessInfo, dns *LinkDNSInfo) *Link
 	UpdateLinkInfo(logger logger.LogContext, name LinkName, access *LinkAccessInfo, dns *LinkDNSInfo, pending bool) (*Link, bool)
 	ReplaceLink(link *Link) *Link
-	UpdateLink(klink *api.KubeLink) (*Link, bool, error)
+	UpdateLink(klink *api.KubeLink) (*Link, bool, *Link, error)
 	RemoveLink(name LinkName)
 	VisitLinks(visitor func(l *Link) bool)
 	GetLinkForClusterAddress(ip net.IP) *Link
@@ -84,6 +84,7 @@ type Links interface {
 	ServedLinksFor(name LinkName) LinkNameSet
 
 	GetMesh(name string) *Mesh
+	GetStaleMesh(name string) *LinkName
 	GetMeshByLinkName(name LinkName) *Mesh
 	GetMeshLink(name LinkName) *Link
 	GetMeshLinks() map[LinkName]*Link

@@ -21,7 +21,9 @@ package main
 import (
 	"fmt"
 	"net"
+	"os"
 
+	"github.com/mandelsoft/kubelink/pkg/controllers/router"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 )
 
@@ -53,4 +55,8 @@ func main() {
 	links.RemoveLink(meshName)
 	fmt.Printf("mesh %v\n", links.GetMesh("test"))
 
+	_, err := router.ReadRoutes("test")
+	if os.IsNotExist(err) {
+		fmt.Printf("not found")
+	}
 }

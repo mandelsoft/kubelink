@@ -29,6 +29,7 @@ import (
 	ctrlcfg "github.com/mandelsoft/kubelink/pkg/controllers/broker/config"
 	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
+	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
 type dummy struct{}
@@ -43,6 +44,9 @@ func (this *dummy) RequiredRoutes() kubelink.Routes {
 
 func (this *dummy) RequiredIPTablesChains() iptables.Requests {
 	return nil
+}
+
+func (this *dummy) ConfirmManagedRoutes(list tcp.CIDRList) {
 }
 
 func (this *dummy) BaseConfig(cfg config.OptionSource) *controllers.Config {

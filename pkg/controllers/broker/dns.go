@@ -122,8 +122,13 @@ func coreEntry(first *bool, kubekey, clusterName string, basedomain string, dnsI
 	if dnsIP != "" {
 		plugin = fmt.Sprintf(`
     rewrite name regex (.*)\.%s\.%s\. {1}.%s answer name (.*)\.%s {1}.%s.%s.
-    forward . %s
-`, clusterName, basedomain, clusterDomain, escapedDomain, clusterName, basedomain, dnsIP)
+    forward . %s {
+      except %s
+    }
+    template ANY ANY {
+      rcode NXDOMAIN
+    }
+`, clusterName, basedomain, clusterDomain, escapedDomain, clusterName, basedomain, dnsIP, basedomain)
 	} else {
 		if local {
 			plugin = fmt.Sprintf(`
@@ -261,16 +266,18 @@ func (this *reconciler) updateObjectFromLink(logger logger.LogContext, klink *ap
 		if entry.IsLocalLink() && entry.ServiceCIDR != nil {
 			mod.AssureStringValue(&klink.Spec.CIDR, entry.ServiceCIDR.String())
 		}
-		if entry.DnsIP != nil || klink.Spec.DNS != nil {
-			if entry.DnsIP != nil {
+		if entry.DnsIP != nil || entry.ClusterDomain != "" || klink.Spec.DNS != nil {
+			if entry.DnsIP != nil || entry.ClusterDomain != "" {
 				if klink.Spec.DNS == nil {
 					klink.Spec.DNS = &api.KubeLinkDNS{}
 				}
 				mod.AssureStringValue(&klink.Spec.DNS.DNSIP, entry.DnsIP.String())
 				mod.AssureStringValue(&klink.Spec.DNS.BaseDomain, entry.ClusterDomain)
 			} else {
-				klink.Spec.DNS = nil
-				mod.Modify(true)
+				if klink.Spec.DNS.OmitDNSPropagation == nil {
+					klink.Spec.DNS = nil
+					mod.Modify(true)
+				}
 			}
 		}
 		return mod.IsModified(), nil

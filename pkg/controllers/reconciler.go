@@ -64,6 +64,7 @@ type LinkInfo struct {
 type ReconcilerImplementation interface {
 	IsManagedRoute(*netlink.Route, kubelink.Routes) bool
 	RequiredRoutes() kubelink.Routes
+	ConfirmManagedRoutes(list tcp.CIDRList)
 	RequiredIPTablesChains() iptables.Requests
 	BaseConfig(config.OptionSource) *Config
 
@@ -170,7 +171,7 @@ func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resour
 	logger.Infof("reconcile cidr %s[gateway %s]", link.Spec.CIDR, link.Status.Gateway)
 
 	logger.Infof("served meshes: %s", utils.StringKeySet(this.links.GetMeshInfos()))
-	logger.Infof("served links: %d ", len(this.links.GetLinks()))
+	logger.Infof("served links: %d", len(this.links.GetLinks()))
 
 	gateway, err := this.impl.Gateway(link)
 	if gateway != nil {
@@ -185,7 +186,7 @@ func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resour
 	}
 	state := link.Status.State
 	if err != nil {
-		logger.Infof("  link error: %s", err)
+		logger.Errorf("  link error: %s", err)
 		state = api.STATE_ERROR
 	}
 
@@ -195,36 +196,41 @@ func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resour
 		oldmesh = this.Links().GetMeshLink(name)
 	}
 
-	var ldata *kubelink.Link
 	var uerr error
-
-	var valid bool
-	ldata, valid, err = this.links.UpdateLink(link)
-	if err != nil {
+	ldata, valid, redo, lerr := this.links.UpdateLink(link)
+	if lerr != nil {
 		if valid {
-			logger.Warnf("invalid link: %s", err)
+			logger.Warnf("invalid link: %s", lerr)
 			state = api.STATE_INVALID
+			err = lerr
 		} else {
-			logger.Warnf("stale link: %s", err)
+			logger.Warnf("stale link: %s", lerr)
 			state = api.STATE_STALE
+			err = lerr
 		}
-	} else {
-		if ldata != nil {
+	}
+	if ldata != nil {
+		if valid {
 			if len(ldata.GatewayFor) != 0 {
 				logger.Info("used as gateway for %s", ldata.GatewayFor)
 			}
 			if ldata.GatewayLink != nil {
 				logger.Info("using gateway link %s", ldata.GatewayLink)
 			}
-			uerr, err = this.impl.HandleReconcile(logger, obj, ldata)
-			// reconcile all using objects
-			served := this.Links().ServedLinksFor(ldata.Name)
-			if len(served) > 0 {
-				logger.Infof("triggering served links")
-				for u := range served {
-					this.TriggerLink(u)
-				}
+		}
+		uerr, err = this.impl.HandleReconcile(logger, obj, ldata)
+		if err != nil {
+			logger.Warnf("found reconcile error (%t): %s", valid, err)
+		}
+		// reconcile all using objects
+		served := this.Links().ServedLinksFor(ldata.Name)
+		if len(served) > 0 {
+			logger.Infof("triggering served links")
+			for u := range served {
+				this.TriggerLink(u)
 			}
+		}
+		if valid {
 			if ldata.IsLocalLink() {
 				logger.Infof("triggering mesh members")
 				for u := range this.Links().GetMeshMembersFor(ldata.Name.Mesh()) {
@@ -239,6 +245,10 @@ func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resour
 				}
 			}
 		}
+	}
+
+	if redo != nil {
+		this.TriggerLink(redo.Name)
 	}
 
 	if obj.GetDeletionTimestamp() != nil {
@@ -379,6 +389,7 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 	dcnt := 0
 	ocnt := 0
 	ccnt := 0
+	mcidrs := tcp.CIDRList{}
 	n := utils.NewNotifier(logger, "update routes")
 	for i, r := range routes {
 		if this.impl.IsManagedRoute(&r, required) {
@@ -390,9 +401,11 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 				err := netlink.RouteDel(&r)
 				if err != nil {
 					logger.Errorf("cannot delete route %s: %s", String(r), err)
+					mcidrs.Add(r.Dst)
 				}
 			} else {
 				n.Add(dcnt > 0, "keep        %3d: %s", i, String(r))
+				mcidrs.Add(r.Dst)
 			}
 		} else {
 			ocnt++
@@ -407,11 +420,14 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 			err := netlink.RouteAdd(&r)
 			if err != nil {
 				logger.Errorf("cannot add route %s: %s", String(r), err)
+			} else {
+				mcidrs.Add(r.Dst)
 			}
 		}
 	}
 
 	n.Add(false, "found %d managed (%d deleted) and %d created routes (%d other)", mcnt, dcnt, ccnt, ocnt)
+	this.impl.ConfirmManagedRoutes(mcidrs)
 
 	wg, err := wgctrl.New()
 	if err == nil {

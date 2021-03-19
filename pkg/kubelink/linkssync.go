@@ -73,7 +73,7 @@ func (this *synched) ReplaceLink(link *Link) *Link {
 	return this.impl.ReplaceLink(link)
 }
 
-func (this *synched) UpdateLink(klink *api.KubeLink) (*Link, bool, error) {
+func (this *synched) UpdateLink(klink *api.KubeLink) (*Link, bool, *Link, error) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 	return this.impl.UpdateLink(klink)

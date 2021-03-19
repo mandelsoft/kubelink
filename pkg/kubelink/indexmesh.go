@@ -22,9 +22,71 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
+
+type StaleMeshIndex struct {
+	lock   sync.RWMutex
+	meshes map[string]map[LinkName]time.Time
+}
+
+func NewStaleMeshIndex() *StaleMeshIndex {
+	return &StaleMeshIndex{meshes: map[string]map[LinkName]time.Time{}}
+}
+
+func (this *StaleMeshIndex) Add(l *Link) {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+
+	this.remove(l.Name)
+
+	if !l.IsLocalLink() {
+		return
+	}
+	set := this.meshes[l.Name.mesh]
+	if set == nil {
+		set = map[LinkName]time.Time{}
+		this.meshes[l.Name.mesh] = set
+	}
+	set[l.Name] = l.CreationTime
+}
+
+func (this *StaleMeshIndex) Remove(name LinkName) {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	this.remove(name)
+}
+
+func (this *StaleMeshIndex) remove(name LinkName) {
+	set := this.meshes[name.mesh]
+	if set != nil {
+		delete(set, name)
+		if len(set) == 0 {
+			delete(this.meshes, name.mesh)
+		}
+	}
+}
+
+func (this *StaleMeshIndex) ByName(name string) *LinkName {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+
+	var found *LinkName
+	if set := this.meshes[name]; len(set) > 0 {
+		first := time.Now()
+		for n, t := range set {
+			if t.Before(first) {
+				tmp := n
+				found = &tmp
+			}
+		}
+	}
+	return found
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 type mesh struct {
 	link          *Link
@@ -87,7 +149,6 @@ func (this *MeshIndex) add(link *Link) {
 		info: NewMeshInfo(link, old != nil && old.deletePending),
 	}
 
-	fmt.Printf("******** adding mesh %s\n", link.Name)
 	this.meshesByLink[link.Name] = m
 	this.meshesByName[m.info.Name()] = m
 	if m.info.cidr != nil {

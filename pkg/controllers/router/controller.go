@@ -19,6 +19,10 @@
 package router
 
 import (
+	"fmt"
+	"os"
+	"path"
+
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
 	"github.com/gardener/controller-manager-library/pkg/resources"
@@ -55,5 +59,20 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 	}
 	controller.Infof("using endpoint from service %q in namespace %s", this.endpoint.Name(), this.endpoint.Namespace())
 	controller.Infof("using cidr for pods:  %s", this.config.PodCIDR)
+
+	if this.config.DataFile != "" {
+		controller.Infof("using data file:  %s", this.config.DataFile)
+		err = os.MkdirAll(path.Dir(this.config.DataFile), 0666)
+		if err != nil {
+			return nil, fmt.Errorf("cannot create data dir for %q: %s", this.config.DataFile, err)
+		}
+
+		this.routeTargets, err = ReadRoutes(controller, this.config.DataFile)
+		if err != nil {
+			return nil, fmt.Errorf("cannot read routes from %q: %s", this.config.DataFile, err)
+		}
+		controller.Infof("  found %d formerly managed routes for %s", len(this.routeTargets), this.routeTargets)
+	}
+
 	return this, nil
 }

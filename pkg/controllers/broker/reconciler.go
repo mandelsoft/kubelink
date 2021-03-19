@@ -31,6 +31,7 @@ import (
 	"github.com/vishvananda/netlink"
 	_apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 
 	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
@@ -127,6 +128,9 @@ func (this *reconciler) RequiredRoutes() kubelink.Routes {
 	return this.Links().GetRoutesToLink(this.NodeInterface(), link)
 }
 
+func (this *reconciler) ConfirmManagedRoutes(list tcp.CIDRList) {
+}
+
 func (this *reconciler) RequiredIPTablesChains() iptables.Requests {
 	return this.runmode.RequiredIPTablesChains()
 }
@@ -138,7 +142,35 @@ func (this *reconciler) HandleDelete(logger logger.LogContext, name kubelink.Lin
 	deleted := false
 	err := this.Links().Locked(func(links kubelink.Links) error {
 		if m := links.GetMeshByLinkName(name); m != nil {
-			if len(links.GetMeshMembersFor(m.Name())) == 0 {
+			// link is mesh LocalLink, check if unused or existence of an appropriate replacement
+			members := links.GetMeshMembersFor(m.Name())
+			var replacement *kubelink.LinkName
+			if len(members) != 0 {
+				logger.Infof("looking for pending stale local links for mesh %q", m.Name())
+				for {
+					if replacement = this.Links().GetStaleMesh(m.Name()); replacement != nil {
+						r, err := this.linkResource.GetCached(controllers.ObjectName(*replacement))
+						if err == nil {
+							logger.Infof("trying %q", *replacement)
+							err = this.Controller().SetFinalizer(r)
+						}
+						if err != nil {
+							if errors.IsNotFound(err) {
+								this.Links().RemoveLink(*replacement)
+								continue // try next stale mesh
+							}
+							return err
+						}
+					}
+					break
+				}
+				if replacement != nil {
+					logger.Infof("found replacement %q", *replacement)
+				}
+			}
+
+			// mesh local link can be deleted if it has no members or a replacement
+			if len(members) == 0 || replacement != nil {
 				if obj != nil {
 					finalizer := this.Controller().FinalizerHandler().FinalizerName(obj)
 					finalizers := obj.GetFinalizers()
@@ -148,6 +180,9 @@ func (this *reconciler) HandleDelete(logger logger.LogContext, name kubelink.Lin
 							deleted = true
 							logger.Infof("removing mesh %s", name)
 							links.RemoveLink(name)
+							if replacement != nil {
+								this.TriggerLink(*replacement)
+							}
 						}
 						return err
 					}
@@ -155,6 +190,14 @@ func (this *reconciler) HandleDelete(logger logger.LogContext, name kubelink.Lin
 			}
 			logger.Infof("mesh still busy")
 		} else {
+			// any other links including stale mesh links can potentially just be deleted
+			if obj != nil {
+				// first try to remove pending finalizer
+				err := this.Controller().RemoveFinalizer(obj)
+				if err != nil {
+					return err
+				}
+			}
 			if obj == nil || len(obj.GetFinalizers()) == 0 {
 				deleted = true
 				logger.Infof("removing link %s", name)
@@ -339,8 +382,8 @@ func (this *reconciler) HandleReconcile(logger logger.LogContext, obj resources.
 		if this.dnsInfo.DNSPropagation && entry.DNSPropagation {
 			this.runmode.HandleDNSPropagation(klink)
 		}
-		logger.Infof("%s", entry)
-		if entry.IsLocalLink() {
+		logger.Infof("link %s", entry)
+		if entry.IsLocalLink() && this.Links().GetMeshByLinkName(entry.Name) != nil {
 			if entry.ServiceCIDR == nil && this.config.ServiceCIDR != nil {
 				if !tcp.EqualCIDR(this.config.ServiceCIDR, entry.ServiceCIDR) {
 					entry.ServiceCIDR = this.config.ServiceCIDR
@@ -348,6 +391,11 @@ func (this *reconciler) HandleReconcile(logger logger.LogContext, obj resources.
 				}
 			}
 			err := this.Controller().SetFinalizer(obj)
+			if err != nil {
+				return err, nil
+			}
+		} else {
+			err := this.Controller().RemoveFinalizer(obj)
 			if err != nil {
 				return err, nil
 			}

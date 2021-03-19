@@ -53,16 +53,18 @@ var _ Links = &links{}
 // the Links interface
 
 type linksdata struct {
-	links  *LinkIndex
-	stale  *LinkIndex
-	meshes *MeshIndex
+	links       *LinkIndex
+	stalelinks  *LinkIndex
+	meshes      *MeshIndex
+	stalemeshes *StaleMeshIndex
 }
 
 func newData() *linksdata {
 	return &linksdata{
-		links:  NewLinkIndex(),
-		stale:  NewLinkIndex(),
-		meshes: NewMeshIndex(),
+		links:       NewLinkIndex(),
+		stalelinks:  NewLinkIndex(),
+		meshes:      NewMeshIndex(),
+		stalemeshes: NewStaleMeshIndex(),
 	}
 }
 
@@ -114,6 +116,10 @@ func (this *linksdata) GetLinkForEndpointHost(dnsname string) *Link {
 
 func (this *linksdata) GetMesh(name string) *Mesh {
 	return this.meshes.ByName(name)
+}
+
+func (this *linksdata) GetStaleMesh(name string) *LinkName {
+	return this.stalemeshes.ByName(name)
 }
 
 func (this *linksdata) GetMeshByLinkName(name LinkName) *Mesh {
@@ -190,7 +196,7 @@ func (this *links) setupLinks(logger logger.LogContext, kind string, list []reso
 		for _, l := range list {
 			o := l.Data().(*api.KubeLink)
 			if cond != nil && cond(o) {
-				link, valid, err := this.UpdateLink(o)
+				link, valid, redo, err := this.UpdateLink(o)
 				if err != nil {
 					if valid {
 						stale = append(stale, l)
@@ -201,6 +207,9 @@ func (this *links) setupLinks(logger logger.LogContext, kind string, list []reso
 					if link != nil {
 						logger.Infof("  found %s %s", kind, link)
 					}
+				}
+				if redo != nil {
+					stale = append(stale, l)
 				}
 			}
 		}
@@ -307,61 +316,78 @@ func (this *links) UpdateLinkInfo(logger logger.LogContext, name LinkName, acces
 ////////////////////////////////////////////////////////////////////////////////
 
 func (this *links) ReplaceLink(link *Link) *Link {
-
-	if link.IsLocalLink() {
-		this.links.Remove(link.Name)
-		this.meshes.Add(link)
-	} else {
-		this.meshes.Add(link)
-		this.links.Add(link)
-	}
+	this.stalelinks.Remove(link.Name)
+	this.stalemeshes.Remove(link.Name)
+	this.meshes.Add(link)
+	this.links.Add(link)
 	return link
 }
 
-func (this *links) UpdateLink(klink *api.KubeLink) (*Link, bool, error) {
+func linkErr(msg string, args ...interface{}) (*Link, bool, *Link, error) {
+	return nil, true, nil, fmt.Errorf(msg, args...)
+}
+
+func (this *links) UpdateLink(klink *api.KubeLink) (*Link, bool, *Link, error) {
 	name := DecodeLinkNameFromString(klink.Name)
 
-	l, err := LinkForSpec(name, &klink.Spec, this.defaultport, net.ParseIP(klink.Status.Gateway))
+	l, err := LinkForSpec(name, klink.CreationTimestamp.Time, &klink.Spec, this.defaultport, net.ParseIP(klink.Status.Gateway))
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 
 	stale := true
+	var redo *Link
+
 	defer func() {
 		if stale {
-			this.stale.Add(l)
+			if l.IsLocalLink() {
+				this.stalemeshes.Add(l)
+			} else {
+				this.stalelinks.Add(l)
+			}
 		}
 	}()
 
+	m := this.meshes.ByName(name.mesh)
 	if !l.IsLocalLink() {
-		m := this.meshes.ByName(name.mesh)
 		if m == nil {
-			return nil, true, fmt.Errorf("no local link for mesh %q", name.mesh)
+			return linkErr("no local link for mesh %q", name.mesh)
 		}
 		cidr := tcp.CIDRNet(l.ClusterAddress)
 		if !tcp.EqualCIDR(cidr, m.cidr) {
-			return nil, true, fmt.Errorf("mesh cidr mismatch (mesh uses %s)", m.cidr)
+			return linkErr("mesh cidr mismatch (mesh uses %s)", m.cidr)
 		}
 
 		if l.GatewayLink != nil {
 			if this.IsGatewayLink(l.Name) {
-				return nil, true, fmt.Errorf("link is gateway for %s and cannot use gateway",
-					this.links.ServedLinksFor(l.Name).AddAll(this.stale.ServedLinksFor(l.Name)))
+				return linkErr("link is gateway for %s and cannot use gateway",
+					this.links.ServedLinksFor(l.Name).AddAll(this.stalelinks.ServedLinksFor(l.Name)))
 			}
 
 			gw := this.links.ByName(*l.GatewayLink)
 			if gw == nil {
-				gw = this.stale.ByName(*l.GatewayLink)
+				gw = this.stalelinks.ByName(*l.GatewayLink)
 				if gw != nil {
-					return nil, true, fmt.Errorf("gateway link %q is stale", *l.GatewayLink)
+					return nil, true, nil, fmt.Errorf("gateway link %q is stale", *l.GatewayLink)
 				}
 				if this.meshes.ByLinkName(*l.GatewayLink) != nil {
-					return nil, true, fmt.Errorf("gateway link %q is local link", *l.GatewayLink)
+					return linkErr("gateway link %q is local link", *l.GatewayLink)
 				}
-				return nil, true, fmt.Errorf("gateway link %q not found", *l.GatewayLink)
+				return linkErr("gateway link %q not found", *l.GatewayLink)
+			}
+		}
+	} else {
+		if m != nil && m.name != name {
+			ml := this.meshes.LinkByName(m.Name())
+			if ml.CreationTime.Before(l.CreationTime) {
+				return linkErr("mesh %q already defined by local link %q", name.Mesh(), m.name)
+			} else {
+				this.RemoveLink(ml.Name)
+				redo = ml
 			}
 		}
 	}
+
 	stale = false
 	link := this.ReplaceLink(l)
 	if !link.IsLocalLink() {
@@ -369,21 +395,22 @@ func (this *links) UpdateLink(klink *api.KubeLink) (*Link, bool, error) {
 			this.MarkForDeletion(link.Name)
 		}
 	}
-	return link, true, nil
+	return link, true, redo, nil
 }
 
 func (this *links) GetMeshMembersFor(name string) LinkNameSet {
-	return this.links.MeshLinksFor(name).AddAll(this.stale.MeshLinksFor(name))
+	return this.links.MeshLinksFor(name).AddAll(this.stalelinks.MeshLinksFor(name))
 }
 
 func (this *links) RemoveLink(name LinkName) {
 	this.links.Remove(name)
-	this.stale.Remove(name)
+	this.stalelinks.Remove(name)
 	this.meshes.Remove(name)
+	this.stalemeshes.Remove(name)
 }
 
 func (this *links) IsGatewayLink(name LinkName) bool {
-	return this.links.IsGatewayLink(name) || this.stale.IsGatewayLink(name)
+	return this.links.IsGatewayLink(name) || this.stalelinks.IsGatewayLink(name)
 }
 
 func (this *links) IsGateway(ifce *NodeInterface) bool {
@@ -425,19 +452,22 @@ func (this *links) GetRoutes(ifce *NodeInterface) Routes {
 	for _, l := range this.links.All() {
 		gateway := this.getGatewayFor(l)
 		if gateway == nil || !gateway.Equal(ifce.IP) {
+			meshCidr := tcp.CIDRNet(l.ClusterAddress)
 			for _, c := range l.Egress {
-				r := netlink.Route{
-					Dst:       c,
-					Gw:        l.Gateway,
-					LinkIndex: index,
-					Protocol:  protocol,
-					Priority:  101,
+				if !tcp.ContainsCIDR(meshCidr, c) {
+					r := netlink.Route{
+						Dst:       c,
+						Gw:        l.Gateway,
+						LinkIndex: index,
+						Protocol:  protocol,
+						Priority:  101,
+					}
+					r.SetFlag(flags)
+					routes.Add(r)
 				}
-				r.SetFlag(flags)
-				routes.Add(r)
 			}
 			r := netlink.Route{
-				Dst:       tcp.CIDRNet(l.ClusterAddress),
+				Dst:       meshCidr,
 				Gw:        l.Gateway,
 				LinkIndex: index,
 				Protocol:  protocol,
@@ -499,7 +529,7 @@ func (this *links) RegisterLink(name LinkName, clusterCIDR *net.IPNet, fqdn stri
 	if err != nil {
 		return nil, err
 	}
-	l, _, err := this.UpdateLink(kl)
+	l, _, _, err := this.UpdateLink(kl)
 	return l, err
 }
 

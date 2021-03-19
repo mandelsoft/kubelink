@@ -34,12 +34,15 @@ type Config struct {
 
 	PodCIDR *net.IPNet
 	Service string
+
+	DataFile string
 }
 
 func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	this.Config.AddOptionsToSet(set)
 	set.AddStringOption(&this.podcidr, "pod-cidr", "", "", "CIDR of pod network of cluster")
 	set.AddStringOption(&this.Service, "service", "", "kubelink", "service to lookup endpoint for broker")
+	set.AddStringOption(&this.DataFile, "datafile", "", "", "datafile for storing managed routes")
 }
 
 func (this *Config) Prepare() error {

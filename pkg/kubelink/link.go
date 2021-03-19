@@ -23,6 +23,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
@@ -34,7 +35,6 @@ import (
 
 const EP_INBOUND = "Inbound"
 const EP_LOCAL = "LocalLink"
-const EP_NONE = "None"
 
 const DEFAULT_MESH = "<default>"
 
@@ -81,7 +81,7 @@ func (this LinkName) String() string {
 
 type LinkSpec = api.KubeLinkSpec
 
-func LinkForSpec(name LinkName, spec *LinkSpec, defaultPort int, gw net.IP) (*Link, error) {
+func LinkForSpec(name LinkName, created time.Time, spec *LinkSpec, defaultPort int, gw net.IP) (*Link, error) {
 	var egress tcp.CIDRList
 	var serviceCIDR *net.IPNet
 	var gateway *LinkName
@@ -119,7 +119,7 @@ func LinkForSpec(name LinkName, spec *LinkSpec, defaultPort int, gw net.IP) (*Li
 		if err != nil {
 			return nil, fmt.Errorf("invalid routing cidr %q: %s", spec.CIDR, err)
 		}
-		egress.Add(cidr)
+		egress.Enrich(cidr)
 	}
 
 	ingress, err := ParseFirewallRule(spec.Ingress)
@@ -209,6 +209,7 @@ func LinkForSpec(name LinkName, spec *LinkSpec, defaultPort int, gw net.IP) (*Li
 
 	link := &Link{
 		Name:            name,
+		CreationTime:    created,
 		ServiceCIDR:     serviceCIDR,
 		Egress:          egress,
 		Ingress:         ingress,
@@ -273,6 +274,7 @@ func (this LinkNameSet) Copy() LinkNameSet {
 
 type Link struct {
 	Name           LinkName
+	CreationTime   time.Time
 	ServiceCIDR    *net.IPNet
 	Egress         tcp.CIDRList
 	Ingress        *FirewallRule
