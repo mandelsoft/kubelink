@@ -19,10 +19,11 @@
 package kubelink
 
 import (
-	"fmt"
 	"net"
 	"sync"
 	"time"
+
+	"github.com/gardener/controller-manager-library/pkg/logger"
 
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
@@ -121,10 +122,10 @@ func (this *MeshIndex) SetDefaultMesh(link *Link) {
 		this.remove(old.link.Name)
 	}
 	if link == nil {
-		fmt.Printf("clearing default mesh\n")
+		logger.Infof("clearing default mesh\n")
 		this.defaultMesh = nil
 	} else {
-		fmt.Printf("settings default mesh\n")
+		logger.Infof("settings default mesh\n")
 		this.defaultMesh = link
 		this.add(link)
 	}

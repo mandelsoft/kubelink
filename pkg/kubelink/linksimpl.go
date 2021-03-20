@@ -30,6 +30,9 @@ import (
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
+const MAIN_TABLE = 254
+const LOCAL_TABLE = 255
+
 // links is the unsynchronized internal implementation of the Links interface
 // externally the synced wrapper is used, that adds locking
 // it also used the internal version to pass it to synchronized functions executed
@@ -464,6 +467,7 @@ func (this *links) GetRoutes(ifce *NodeInterface) Routes {
 						LinkIndex: index,
 						Protocol:  protocol,
 						Priority:  101,
+						Table:     MAIN_TABLE,
 					}
 					r.SetFlag(flags)
 					routes.Add(r)
@@ -475,6 +479,7 @@ func (this *links) GetRoutes(ifce *NodeInterface) Routes {
 				LinkIndex: index,
 				Protocol:  protocol,
 				Priority:  101,
+				Table:     MAIN_TABLE,
 			}
 			r.SetFlag(flags)
 			routes.Add(r)
@@ -489,6 +494,7 @@ func (this *links) GetRoutesToLink(ifce *NodeInterface, link netlink.Link) Route
 		r := netlink.Route{
 			Dst:       c,
 			LinkIndex: link.Attrs().Index,
+			Table:     MAIN_TABLE,
 		}
 		routes.Add(r)
 	}

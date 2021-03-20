@@ -64,6 +64,9 @@ func (this *reconciler) IsManagedRoute(route *netlink.Route, routes kubelink.Rou
 		if this.config.PodCIDR.Contains(route.Dst.IP) {
 			return false
 		}
+		if route.Src != nil {
+			return false
+		}
 		if route.Gw != nil && this.config.NodeCIDR.Contains(route.Gw) && (route.LinkIndex == this.NodeInterface().Index || (tunl != nil && route.LinkIndex == tunl.Attrs().Index)) {
 			return true
 		}

@@ -19,7 +19,6 @@
 package kubelink
 
 import (
-	"fmt"
 	"net"
 
 	"github.com/gardener/controller-manager-library/pkg/utils"
@@ -57,7 +56,7 @@ func (this *links) GetNatChains(clusterAddresses tcp.CIDRList, linkName string) 
 	var rules iptables.Rules
 	meshes := map[string]*iptables.ChainRequest{}
 
-	fmt.Printf("lookup nat chains for: %s", clusterAddresses)
+	// fmt.Printf("lookup nat chains for: %s", clusterAddresses)
 	this.links.Visit(func(l *Link) bool {
 		var clusterAddress *net.IPNet
 

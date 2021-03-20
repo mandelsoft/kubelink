@@ -31,6 +31,9 @@ import (
 	"github.com/mandelsoft/kubelink/pkg"
 )
 
+const MAIN_TABLE = 254
+const MAIN_LOCAL = 255
+
 const ROUTE = "192.168.3.0/24"
 const TUNIP = "192.168.1.2"
 const TUNCIDR = TUNIP + "/24"
@@ -50,7 +53,7 @@ func ConfigureTun(name string) {
 
 	_, dst, err := net.ParseCIDR(ROUTE)
 	pkg.ExitOnErr("cannot parse cidr %q", ROUTE, err)
-	route := &netlink.Route{LinkIndex: link.Attrs().Index, Dst: dst}
+	route := &netlink.Route{LinkIndex: link.Attrs().Index, Dst: dst, Table: MAIN_TABLE}
 	err = netlink.RouteAdd(route)
 	pkg.ExitOnErr("cannot add route", err)
 }

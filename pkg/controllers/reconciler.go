@@ -392,7 +392,7 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 	mcidrs := tcp.CIDRList{}
 	n := utils.NewNotifier(logger, "update routes")
 	for i, r := range routes {
-		if this.impl.IsManagedRoute(&r, required) {
+		if r.Table != kubelink.LOCAL_TABLE && this.impl.IsManagedRoute(&r, required) {
 			mcnt++
 			if required.Lookup(r) < 0 {
 				dcnt++

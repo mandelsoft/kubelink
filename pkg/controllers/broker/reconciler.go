@@ -107,6 +107,9 @@ func (this *reconciler) GetLinkInfo(link *api.KubeLink) *controllers.LinkInfo {
 func (this *reconciler) IsManagedRoute(route *netlink.Route, routes kubelink.Routes) bool {
 	link := this.runmode.GetInterface()
 
+	if route.Src != nil {
+		return false
+	}
 	if link != nil && route.LinkIndex == link.Attrs().Index {
 		return true
 	}

@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"net"
 	"reflect"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -198,71 +196,57 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 		ListenPort: &port,
 	}
 
-	keep := 21 * time.Second
-	keys := map[string]kubelink.LinkName{}
-	links := kubelink.LinkNameSet{}
+	peers := Peers{}
+	activelinks := kubelink.LinkNameSet{}
 	this.Links().VisitLinks(func(l *kubelink.Link) bool {
 		if l.PublicKey != nil && l.Endpoint != "" {
-			links.Add(l.Name)
-			var endpoint *net.UDPAddr
-			if l.Endpoint != api.EP_INBOUND {
-				ip := net.ParseIP(l.Host)
-				if ip == nil {
-					ips, err := net.LookupIP(l.Host)
-					if err != nil {
-						this.propagateError(nil, err, l)
-						return true
-					}
-					sort.Slice(ips, func(a, b int) bool { return strings.Compare(ips[a].String(), ips[b].String()) < 0 })
-					ip = ips[0]
-				}
-				endpoint = &net.UDPAddr{
-					Port: l.Port,
-					IP:   ip,
-				}
+			activelinks.Add(l.Name)
+			peer := peers.Assure(l.Name, *l.PublicKey)
+
+			err := peer.AddPresharedKey(l.PresharedKey)
+			if err != nil {
+				this.propagateError(nil, err, peer.Links)
+				return true
 			}
-			allowed := []net.IPNet{}
-			addAllowed(&allowed, l)
-			for r := range l.GatewayFor {
-				addAllowed(&allowed, this.Links().GetLink(r))
+			err = peer.SetEndpoint(l)
+			if err != nil {
+				this.propagateError(nil, err, peer.Links)
+				return true
 			}
-			keys[(*l.PublicKey).String()] = l.Name
-			peer := wgtypes.PeerConfig{
-				PublicKey:                   *l.PublicKey,
-				PresharedKey:                l.PresharedKey,
-				Endpoint:                    endpoint,
-				PersistentKeepaliveInterval: &keep,
-				AllowedIPs:                  allowed,
-			}
-			for _, p := range dev.Peers {
-				if equalKey(&p.PublicKey, &peer.PublicKey) {
-					keys[p.PublicKey.String()] = l.Name
-					if !equalUDPAddr(p.Endpoint, peer.Endpoint) {
-						continue
-					}
-					if !equalIPNetList(p.AllowedIPs, peer.AllowedIPs) {
-						peer.ReplaceAllowedIPs = true
-						continue
-					}
-					if p.PersistentKeepaliveInterval != keep {
-						continue
-					}
-					return true
-				}
-			}
-			logger.Infof("  update peer %s: %s %s", peer.PublicKey, peer.Endpoint, list(peer.AllowedIPs))
-			config.Peers = append(config.Peers, peer)
-			update = true
-			this.propagateError(nil, nil, l)
+			peer.AddAllowedIPs(this.Links(), l)
 		}
 		return true
 	})
+
+next:
+	for _, peer := range peers {
+		peercfg := peer.GetConfig()
+		for _, p := range dev.Peers {
+			if equalKey(&p.PublicKey, &peercfg.PublicKey) {
+				if !equalUDPAddr(p.Endpoint, peercfg.Endpoint) {
+					continue
+				}
+				if !equalIPNetList(p.AllowedIPs, peercfg.AllowedIPs) {
+					peercfg.ReplaceAllowedIPs = true
+					continue
+				}
+				if p.PersistentKeepaliveInterval != keepAlive {
+					continue
+				}
+				continue next
+			}
+		}
+		logger.Infof("  update peer %s: %s %s", peercfg.PublicKey, peercfg.Endpoint, list(peercfg.AllowedIPs))
+		config.Peers = append(config.Peers, *peercfg)
+		update = true
+		this.propagateError(nil, nil, peer.Links)
+	}
 
 	remove := 0
 	offset := time.Now().Add(-3 * time.Minute)
 	for _, p := range dev.Peers {
 		pub := p.PublicKey.String()
-		if n, ok := keys[pub]; ok {
+		if n, ok := peers[pub]; ok {
 			// for old peers check and remember peer state (new peers don't have a state yet)
 			var newstate runmode.LinkState
 			if p.LastHandshakeTime.Before(offset) {
@@ -275,10 +259,12 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 					State: api.STATE_UP,
 				}
 			}
-			if this.peerstate[n] != newstate {
-				this.peerstate[n] = newstate
-				logger.Infof("  new peer state %s: %s %s", n, newstate.State, newstate.Message)
-				this.TriggerLink(n)
+			for name := range n.Links {
+				if this.peerstate[name] != newstate {
+					this.peerstate[name] = newstate
+					logger.Infof("  new peer state %s: %s %s", name, newstate.State, newstate.Message)
+					this.TriggerLink(name)
+				}
 			}
 		} else {
 			// delete unused peers
@@ -295,7 +281,7 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 
 	// cleanup unused peer states
 	for p := range this.peerstate {
-		if _, ok := links[p]; !ok {
+		if _, ok := activelinks[p]; !ok {
 			delete(this.peerstate, p)
 		}
 	}
@@ -419,26 +405,31 @@ func (this *mode) handleSecret(name resources.ObjectName, obj resources.Object) 
 	}
 }
 
-func (this *mode) propagateError(logger logger.LogContext, err error, link *kubelink.Link) {
+func (this *mode) propagateError(logger logger.LogContext, err error, links kubelink.LinkNameSet) {
 	if logger == nil {
 		logger = this.Controller()
 	}
 	if err != nil {
-		if link != nil {
-			logger.Errorf("endpoint error for %q: %s", link.Name, err)
+		if links != nil {
+			logger.Errorf("endpoint error for %s: %s", links, err)
 		} else {
 			logger.Errorf("interface error: %s", err)
 		}
 	}
 	this.lock.Lock()
 	defer this.lock.Unlock()
-	if link == nil {
+	if links == nil {
 		this.err = err
 	} else {
-		old := this.errors[link.ClusterAddress.IP.String()]
-		this.errors[link.ClusterAddress.IP.String()] = err
-		if (err == nil) != (old == nil) || (old != nil && old.Error() != err.Error()) {
-			this.TriggerLink(link.Name)
+		for n := range links {
+			link := this.Links().GetLink(n)
+			if link != nil {
+				old := this.errors[link.ClusterAddress.IP.String()]
+				this.errors[link.ClusterAddress.IP.String()] = err
+				if (err == nil) != (old == nil) || (old != nil && old.Error() != err.Error()) {
+					this.TriggerLink(link.Name)
+				}
+			}
 		}
 	}
 }
