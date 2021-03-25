@@ -377,24 +377,24 @@ func (this *Link) GetIngressChain() *iptables.ChainRequest {
 	}
 	rules := iptables.Rules{
 		iptables.Rule{
-			iptables.Opt("-m", "comment", "--comment", "firewall settings for link "+this.Name.String()),
+			iptables.R_CommentOpt("firewall settings for link " + this.Name.String()),
 		},
 	}
 	for _, i := range this.Ingress.Denied {
 		rules = append(rules, iptables.Rule{
-			iptables.Opt("-d", i.String()),
-			iptables.Opt("-j", DROP_ACTION),
+			iptables.R_DestOpt(i.String()),
+			iptables.R_DropOpt(),
 		})
 	}
 	if this.Ingress.Allowed.IsSet() {
 		for _, i := range this.Ingress.Allowed {
 			rules = append(rules, iptables.Rule{
-				iptables.Opt("-d", i.String()),
-				iptables.Opt("-j", "RETURN"),
+				iptables.R_DestOpt(i.String()),
+				iptables.R_ReturnOpt(),
 			})
 		}
 		rules = append(rules, iptables.Rule{
-			iptables.Opt("-j", DROP_ACTION),
+			iptables.R_JumpChainOpt(DROP_ACTION),
 		})
 	}
 	return iptables.NewChainRequest(

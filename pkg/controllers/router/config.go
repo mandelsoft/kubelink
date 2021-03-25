@@ -20,7 +20,6 @@ package router
 
 import (
 	"fmt"
-	"net"
 
 	"github.com/gardener/controller-manager-library/pkg/config"
 
@@ -32,7 +31,6 @@ type Config struct {
 
 	podcidr string
 
-	PodCIDR *net.IPNet
 	Service string
 
 	DataFile string
@@ -40,7 +38,6 @@ type Config struct {
 
 func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	this.Config.AddOptionsToSet(set)
-	set.AddStringOption(&this.podcidr, "pod-cidr", "", "", "CIDR of pod network of cluster")
 	set.AddStringOption(&this.Service, "service", "", "kubelink", "service to lookup endpoint for broker")
 	set.AddStringOption(&this.DataFile, "datafile", "", "", "datafile for storing managed routes")
 }
@@ -51,10 +48,6 @@ func (this *Config) Prepare() error {
 		return err
 	}
 
-	_, this.PodCIDR, err = this.RequireCIDR(this.podcidr, "pod-cidr")
-	if err != nil {
-		return err
-	}
 	if this.Service == "" {
 		return fmt.Errorf("broker service name required")
 	}

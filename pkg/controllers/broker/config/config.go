@@ -58,6 +58,9 @@ type Config struct {
 
 	address     string
 	responsible string
+	nodeip      string
+
+	NodeIP net.IP
 
 	ClusterName    string
 	ClusterAddress *net.IPNet
@@ -105,6 +108,7 @@ type Config struct {
 
 func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	this.Config.AddOptionsToSet(set)
+	set.AddStringOption(&this.nodeip, "node-ip", "", "", "Node ip in case of pod mode")
 	set.AddStringOption(&this.serviceCIDR, "service-cidr", "", "", "CIDR of local service network")
 	set.AddStringOption(&this.responsible, "served-links", "", "all", "Comma separated list of links to serve")
 	set.AddIntOption(&this.Port, "broker-port", "", 0, "Port for bridge/wireguard")
@@ -248,6 +252,13 @@ func (this *Config) Prepare() error {
 	if this.DNSServiceIP == nil {
 		if this.ServiceCIDR != nil {
 			this.DNSServiceIP = tcp.SubIP(this.ServiceCIDR, CLUSTER_DNS_IP)
+		}
+	}
+
+	if this.nodeip != "" {
+		this.NodeIP = net.ParseIP(this.nodeip)
+		if this.NodeIP == nil {
+			return fmt.Errorf("invalid node ip: %s", this.nodeip)
 		}
 	}
 

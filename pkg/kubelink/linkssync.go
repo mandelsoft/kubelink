@@ -24,7 +24,6 @@ import (
 
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
-	"github.com/vishvananda/netlink"
 
 	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/iptables"
@@ -97,13 +96,13 @@ func (this *synched) IsGatewayLink(name LinkName) bool {
 	return this.impl.IsGatewayLink(name)
 }
 
-func (this *synched) IsGateway(ifce *NodeInterface) bool {
-	if ifce == nil {
+func (this *synched) IsGateway(ip net.IP) bool {
+	if ip == nil {
 		return false
 	}
 	this.lock.RLock()
 	defer this.lock.RUnlock()
-	return this.impl.IsGateway(ifce)
+	return this.impl.IsGateway(ip)
 }
 
 func (this *synched) LookupMeshGatewaysFor(ip net.IP) tcp.IPList {
@@ -112,22 +111,22 @@ func (this *synched) LookupMeshGatewaysFor(ip net.IP) tcp.IPList {
 	return this.impl.LookupMeshGatewaysFor(ip)
 }
 
-func (this *synched) GetRoutes(ifce *NodeInterface) Routes {
+func (this *synched) GetRoutes(ifce *InterfaceInfo) Routes {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 	return this.impl.GetRoutes(ifce)
 }
 
-func (this *synched) GetRoutesToLink(ifce *NodeInterface, link netlink.Link) Routes {
+func (this *synched) GetRoutesToLink(gateway net.IP, index int, nexthop net.IP) Routes {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
-	return this.impl.GetRoutesToLink(ifce, link)
+	return this.impl.GetRoutesToLink(gateway, index, nexthop)
 }
 
-func (this *synched) GetGatewayEgress(ifce *NodeInterface, meshCIDR *net.IPNet) tcp.CIDRList {
+func (this *synched) GetGatewayEgress(gateway net.IP, meshCIDR *net.IPNet) tcp.CIDRList {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
-	return this.impl.GetGatewayEgress(ifce, meshCIDR)
+	return this.impl.GetGatewayEgress(gateway, meshCIDR)
 }
 
 func (this *synched) GetEgressChain(mesh *net.IPNet) *iptables.ChainRequest {
@@ -146,6 +145,12 @@ func (this *synched) GetNatChains(clusterAddresses tcp.CIDRList, linkName string
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 	return this.impl.GetNatChains(clusterAddresses, linkName)
+}
+
+func (this *synched) GetSNatChains(clusterAddresses tcp.CIDRList, linkName string) iptables.Requests {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+	return this.impl.GetSNatChains(clusterAddresses, linkName)
 }
 
 func (this *synched) RegisterLink(name LinkName, clusterCIDR *net.IPNet, fqdn string, cidr *net.IPNet) (*Link, error) {

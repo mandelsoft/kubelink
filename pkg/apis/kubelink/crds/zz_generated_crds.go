@@ -150,6 +150,128 @@ status:
   storedVersions: []
   `
 	utils.Must(registry.RegisterCRD(data))
+	data = `
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.2.9
+  creationTimestamp: null
+  name: meshservices.kubelink.mandelsoft.org
+spec:
+  group: kubelink.mandelsoft.org
+  names:
+    kind: MeshService
+    listKind: MeshServiceList
+    plural: meshservices
+    shortNames:
+    - msvc
+    singular: meshservice
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.meshAddress
+      name: Address
+      type: string
+    - jsonPath: .spec.service
+      name: Service
+      type: string
+    - jsonPath: .spec.endpoint
+      name: Endpoints
+      type: string
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              apiAccess:
+                description: SecretReference represents a Secret Reference. It has enough information to retrieve secret in any namespace
+                properties:
+                  name:
+                    description: Name is unique within a namespace to reference a secret resource.
+                    type: string
+                  namespace:
+                    description: Namespace defines the space within which the secret name must be unique.
+                    type: string
+                type: object
+              cidr:
+                type: string
+              clusterAddress:
+                type: string
+              dns:
+                properties:
+                  baseDomain:
+                    description: Base DNS Domain. For LocalLinks this is the mesh domain, for regular links it is the links local (cluster) domain
+                    type: string
+                  dnsIP:
+                    description: IP Address of DNS Service. For LocalLinks this is the mesh global dns service for regular links it is the link (cluster) dns service
+                    type: string
+                  omitDNSPropagation:
+                    type: boolean
+                type: object
+              egress:
+                items:
+                  type: string
+                type: array
+              endpoint:
+                type: string
+              gatewayLink:
+                type: string
+              ingress:
+                items:
+                  type: string
+                type: array
+              presharedKey:
+                type: string
+              publicKey:
+                description: public key for wireguard
+                type: string
+            required:
+            - clusterAddress
+            type: object
+          status:
+            properties:
+              gateway:
+                type: string
+              message:
+                type: string
+              publicKey:
+                type: string
+              state:
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []
+  `
+	utils.Must(registry.RegisterCRD(data))
 }
 
 func AddToRegistry(r apiextensions.Registry) {

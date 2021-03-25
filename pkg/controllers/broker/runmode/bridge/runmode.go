@@ -192,7 +192,7 @@ func (this *mode) GetErrorForMeshNode(ip net.IP) error {
 }
 
 func (this *mode) RequiredIPTablesChains() iptables.Requests {
-	return nil
+	return iptables.Requests{}
 }
 
 func (this *mode) ReconcileInterface(logger logger.LogContext) error {
@@ -201,8 +201,7 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 	logger.Debug("update tun")
 
 	addrs := this.Links().GetGatewayAddrs()
-	natchains := this.Links().GetNatChains(addrs, this.mux.tun.link.Attrs().Name)
-	this.finalizer, err = this.Env().LinkTool().PrepareLink(logger, this.mux.tun.link, addrs, natchains)
+	this.finalizer, err = this.Env().LinkTool().PrepareLink(logger, this.mux.tun.link, addrs)
 
 	if err != nil {
 		logger.Errorf("%s", err)

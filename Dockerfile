@@ -14,8 +14,7 @@ FROM alpine:3.11.3 AS base
 #############      kubelink     #############
 FROM base AS kubelink
 
-RUN apk add iptables
-RUN apk add wireguard-tools
+RUN apk add iptables  wireguard-tools iputils  tcpdump  curl
 COPY --from=builder /go/bin/kubelink /kubelink
 
 WORKDIR /

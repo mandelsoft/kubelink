@@ -9,6 +9,8 @@
 package iptables_test
 
 import (
+	"fmt"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
@@ -16,12 +18,13 @@ import (
 )
 
 func init() {
-	RegisterArgType("--all", 0, All)
+	RegisterTypeByArg("--all", 0, All)
 }
 
 const OPT = 1
 const ARG = 2
 const ADD = 3
+const EXT = 4
 
 func checkOption(mode int, args ...interface{}) {
 	opt := ComposeOpt(args...)
@@ -34,8 +37,19 @@ func checkOption(mode int, args ...interface{}) {
 		expected[0].Add(StringArg("rest"))
 	case OPT:
 		expected[0].Add(Opt("rest"))
+	case EXT:
+		o := expected[0][len(expected[0])-1].(Option)
+		o.Add(StringArg("rest"))
+		expected[0][len(expected[0])-1] = o
 	}
 
+	Expect(r).To(Equal(expected))
+}
+
+func checkDirect(args ...Option) {
+	expected := Rule(args)
+	r := ParseRule(expected.AsList()...)
+	fmt.Printf("rule: %#v\n", r)
 	Expect(r).To(Equal(expected))
 }
 
@@ -92,16 +106,16 @@ var _ = Describe("Types", func() {
 
 	Context("Not", func() {
 		It("should handle -m", func() {
-			checkOption(ADD, "-m", "mark", "!", "--mark", "0x2000:0x200")
+			checkOption(ADD, "-m", "mark", Opt("!", "--mark", "0x2000:0x200"))
 		})
 	})
 
 	Context("Nested Options", func() {
 		It("should handle -m", func() {
-			checkOption(ADD, "-m", "comment", "--comment", "test")
+			checkOption(ADD, "-m", "comment", Opt("--comment", "test"))
 		})
 		It("should handle wrong -m at end", func() {
-			checkOption(ARG, "-m", "comment", "--comment")
+			checkOption(EXT, "-m", "comment", Opt("--comment"))
 		})
 		It("should handle plain simple -j", func() {
 			checkOpts(Opt("-j", "RETURN"))
@@ -122,7 +136,7 @@ var _ = Describe("Types", func() {
 			checkMulti(false, Opt("-d", "test"), Opt("-j", "RETURN"))
 		})
 		It("should handle complex -j", func() {
-			checkMulti(false, Opt("-m", "comment", "--comment", "test"), ComposeOpt("-j", "MARK", Opt("--set-xmark", "test")))
+			checkMulti(false, ComposeOpt("-m", "comment", Opt("--comment", "test")), ComposeOpt("-j", "MARK", Opt("--set-xmark", "test")))
 		})
 
 	})
@@ -130,6 +144,38 @@ var _ = Describe("Types", func() {
 	Context("Special", func() {
 		It("should handle all", func() {
 			checkMulti(true, ComposeOpt("--all", Opt("-x", "addr")))
+		})
+	})
+
+	Context("rules", func() {
+		It("comment", func() {
+			checkDirect(R_CommentOpt("test"))
+			checkDirect(R_DestOpt("1.1.1.1"), R_CommentOpt("test"))
+		})
+		It("snat", func() {
+			checkDirect(R_DestOpt("1.1.1.1"), R_SNATOpt("2.2.2.2"))
+		})
+		It("setmark", func() {
+			checkDirect(R_DestOpt("1.1.1.1"), R_SetXMarkOpt("0x0/0x0"))
+		})
+		It("checkmark", func() {
+			checkDirect(R_DestOpt("1.1.1.1"), R_CheckMarkOpt("0x0/0x0"))
+		})
+
+		It("probability", func() {
+			checkDirect(R_DestOpt("1.1.1.1"), R_ProbabilityOpt(0.5), R_DNATOpt("2.2.2.2"))
+		})
+	})
+
+	Context("unknown", func() {
+		It("mixed", func() {
+			checkDirect(
+				Opt("-A", "chain"),
+				Opt("-m", "other", "-arg", "argument"),
+				R_CommentOpt("test"),
+				Opt("-other", "something", "else"),
+				R_DropOpt(),
+			)
 		})
 	})
 })

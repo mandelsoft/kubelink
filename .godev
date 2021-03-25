@@ -2,7 +2,7 @@
 
 echo "adding commands"
 export PATH="$PATH:$PWD/local"
-export RUNMODE=wireguard
+export RUNMODE=wireguard-pod
 
 Runmode()
 {

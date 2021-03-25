@@ -19,6 +19,7 @@
 package controllers
 
 import (
+	"fmt"
 	"net"
 
 	"github.com/gardener/controller-manager-library/pkg/resources"
@@ -27,9 +28,27 @@ import (
 )
 
 var ENDPOINTS = resources.NewGroupKind("", "Endpoints")
+var POD = resources.NewGroupKind("", "Pod")
 
-func GetEndpoints(logger *utils.Notifier, obj resources.Object) []net.IP {
-	var result []net.IP
+type Endpoint struct {
+	EndpointIP net.IP
+	HostIP     net.IP
+}
+
+func (this Endpoint) String() string {
+	if this.HostIP == nil {
+		return this.EndpointIP.String()
+	}
+	if this.HostIP.Equal(this.EndpointIP) {
+		return fmt.Sprintf("@%s", this.EndpointIP)
+	}
+	return fmt.Sprintf("%s@%s", this.EndpointIP, this.HostIP)
+}
+
+func GetEndpoints(logger *utils.Notifier, obj resources.Object) []Endpoint {
+	podres, _ := obj.Resources().Get(POD)
+
+	var result []Endpoint
 	ep := obj.Data().(*core.Endpoints)
 	logger.Add(false, "checking %d subsets", len(ep.Subsets))
 	for _, sub := range ep.Subsets {
@@ -47,10 +66,21 @@ func GetEndpoints(logger *utils.Notifier, obj resources.Object) []net.IP {
 		}
 		if port != nil {
 			for _, a := range sub.Addresses {
-				logger.Add(false, "found address %q", a.IP)
+				if a.TargetRef != nil {
+					logger.Add(false, "found address %q (for %s %s)", a.IP, a.TargetRef.Kind, a.TargetRef.Name)
+				} else {
+					logger.Add(false, "found address %q", a.IP)
+				}
 				ip := net.ParseIP(a.IP)
 				if ip != nil {
-					result = append(result, ip)
+					var hostIP net.IP
+					if a.TargetRef != nil && a.TargetRef.Kind == "Pod" {
+						pod, err := podres.Get(resources.NewObjectName(obj.GetNamespace(), a.TargetRef.Name))
+						if err == nil && pod != nil {
+							hostIP = net.ParseIP(pod.Data().(*core.Pod).Status.HostIP)
+						}
+					}
+					result = append(result, Endpoint{EndpointIP: ip, HostIP: hostIP})
 				}
 			}
 		} else {

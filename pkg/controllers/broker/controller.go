@@ -20,6 +20,7 @@ package broker
 
 import (
 	"fmt"
+	"io/ioutil"
 
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
@@ -41,6 +42,7 @@ func init() {
 	controllers.BaseController("broker", &config.Config{}).
 		RequireLease().
 		FinalizerDomain("kubelink.mandelsoft.org").
+		//	WatchesByGK(api.MESHSERVICE, controllers.SERVICE).
 		Reconciler(Create).With(controllers.SecretCacheReconciler).
 		With(tasks.TaskReconciler(3)).
 		MustRegister()
@@ -72,8 +74,32 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 		return nil, err
 	}
 
-	controller.Infof("setting gateway ip to %s", this.NodeInterface().IP)
-	this.Links().SetGateway(this.NodeInterface().IP)
+	if this.NodeInterface() == nil {
+		if this.config.NodeIP == nil {
+			return nil, fmt.Errorf("node ip required for pod mode")
+		}
+		err = this.SetNodeIP(this.config.NodeIP)
+		if err != nil {
+			return nil, err
+		}
+		controller.Infof("broker running in pod mode (%s)", this.NetworkInterface())
+		data, err := ioutil.ReadFile("/proc/sys/net/ipv4/ip_forward")
+		if err != nil {
+			return nil, fmt.Errorf("cannot detect ip forwarding: %s", err)
+		}
+		if len(data) < 1 || data[0] != '1' {
+			controller.Infof("enable ip forwarding in pod")
+			err = ioutil.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte{'1'}, 0666)
+			if err != nil {
+				return nil, fmt.Errorf("cannot enable ip forwarding: %s", err)
+			}
+		}
+	} else {
+		controller.Infof("broker running in node mode")
+	}
+
+	controller.Infof("setting gateway ip to %s", this.NodeIP())
+	this.Links().SetGateway(this.NodeIP())
 
 	r, err := controller.GetMainCluster().Resources().GetByExample(&api.KubeLink{})
 	if err != nil {

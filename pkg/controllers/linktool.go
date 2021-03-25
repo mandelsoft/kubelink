@@ -49,28 +49,38 @@ func NewLinkTool() (*LinkTool, error) {
 	}, nil
 }
 
-func (this *LinkTool) AssureRule(logger utils.NotificationLogger, t string, c string, r iptables.Rule, before string) error {
-	ok, err := this.ipt.Exists(t, c, r.AsList()...)
+func isJumpRule(r iptables.Rule, targets utils.StringSet) string {
+	for target := range targets {
+		if r.Index(iptables.Opt("-j", target)) >= 0 {
+			return target
+		}
+	}
+	return ""
+}
+
+func (this *LinkTool) AssureRule(logger utils.NotificationLogger, tname string, cname string, r iptables.Rule, before utils.StringSet) error {
+	ok, err := this.ipt.Exists(tname, cname, r.AsList()...)
 	if err != nil {
 		return err
 	}
 	if ok {
-		if before == "" {
+		if len(before) == 0 {
 			return nil
 		}
-		logger.Infof("checking position before %q: %s", before, r)
-		chain, err := this.ipt.ListChain(t, c)
+		logger.Debugf("checking position before %q: %s", before, r)
+		chain, err := this.ipt.ListChain(tname, cname)
 		if err != nil {
 			return err
 		}
 		for _, f := range chain.Rules {
 			if f.Equals(r) {
-				logger.Infof("found %s before %q", r, before)
+				logger.Debugf("already before %q", before)
 				return nil
 			}
-			if r.Index(iptables.Opt(".j", before)) >= 0 {
-				logger.Infof("found %q before %s", before, r)
-				err = this.ipt.DeleteRule(t, c, r)
+			if found := isJumpRule(f, before); found != "" {
+				logger.Infof("currently after %q ", found)
+				logger.Infof("deleting rule %s", r)
+				err = this.ipt.DeleteRule(tname, cname, r)
 				if err != nil {
 					return err
 				}
@@ -79,10 +89,12 @@ func (this *LinkTool) AssureRule(logger utils.NotificationLogger, t string, c st
 		}
 
 	}
-	if before != "" {
-		return this.ipt.InsertRule(t, c, 1, r)
+	if len(before) != 0 {
+		logger.Infof("inserting rule %s", r)
+		return this.ipt.InsertRule(tname, cname, 1, r)
 	} else {
-		return this.ipt.AppendRule(t, c, r)
+		logger.Infof("appending rule %s", r)
+		return this.ipt.AppendRule(tname, cname, r)
 	}
 	return nil
 }
@@ -173,43 +185,11 @@ func (this *LinkTool) ChainRequest(logger utils.NotificationLogger, req *iptable
 	return this.ipt.Execute(logger, req)
 }
 
-func (this *LinkTool) NatRulesExists(rule ...string) (bool, error) {
-	return this.ipt.Exists(IPTAB, IPCHAIN, rule...)
-}
-
-func (this *LinkTool) NatRulesAppend(rule ...string) error {
-	return this.ipt.Append(IPTAB, IPCHAIN, rule...)
-}
-
-func (this *LinkTool) NatRulesDelete(rule ...string) error {
-	return this.ipt.Delete(IPTAB, IPCHAIN, rule...)
-}
-
-func (this *LinkTool) SetNATRule(link netlink.Link, clusterAddress *net.IPNet) (func(), error) {
-	name := link.Attrs().Name
-
-	rule := []string{"!", "-s", tcp.CIDRNet(clusterAddress).String(), "-o", name, "-j", "SNAT", "--to-source", clusterAddress.IP.String()}
-	ok, err := this.NatRulesExists(rule...)
-	if err != nil {
-		return nil, fmt.Errorf("cannot check nat: %s", err)
+func (this *LinkTool) PrepareLink(logger logger.LogContext, link netlink.Link, clusterAddresses tcp.CIDRList) (func(), error) {
+	if link == nil {
+		return nil, nil
 	}
-
-	if !ok {
-		err = this.NatRulesAppend(rule...)
-		if err != nil {
-			return nil, fmt.Errorf("cannot add nat rule %v: %s", rule, err)
-		}
-		logger.Infof("added nat rule %v", rule)
-	}
-	return func() { this.NatRulesDelete(rule...) }, nil
-}
-
-func (this *LinkTool) PrepareLink(logger logger.LogContext, link netlink.Link, clusterAddresses tcp.CIDRList, chains iptables.Requests) (func(), error) {
 	err := this.UpdateLinkAddresses(logger, link, clusterAddresses)
-	if err != nil {
-		return nil, err
-	}
-	err = this.HandleNat(logger, chains)
 	return func() { this.HandleNat(logger, nil) }, err
 }
 

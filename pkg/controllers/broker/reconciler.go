@@ -74,7 +74,7 @@ func (this *reconciler) BaseConfig(cfg config.OptionSource) *controllers.Config 
 }
 
 func (this *reconciler) Gateway(obj *api.KubeLink) (*controllers.LocalGatewayInfo, error) {
-	gateway := this.NodeInterface().IP
+	gateway := this.NodeIP()
 	match, ip := this.MatchLink(obj)
 	if !match {
 		return nil, nil
@@ -85,7 +85,7 @@ func (this *reconciler) Gateway(obj *api.KubeLink) (*controllers.LocalGatewayInf
 }
 
 func (this *reconciler) GetLinkInfo(link *api.KubeLink) *controllers.LinkInfo {
-	gateway := this.NodeInterface().IP
+	gateway := this.NodeIP()
 	match, _ := this.MatchLink(link)
 	if !match {
 		gateway = nil
@@ -107,9 +107,6 @@ func (this *reconciler) GetLinkInfo(link *api.KubeLink) *controllers.LinkInfo {
 func (this *reconciler) IsManagedRoute(route *netlink.Route, routes kubelink.Routes) bool {
 	link := this.runmode.GetInterface()
 
-	if route.Src != nil {
-		return false
-	}
 	if link != nil && route.LinkIndex == link.Attrs().Index {
 		return true
 	}
@@ -128,14 +125,19 @@ func (this *reconciler) RequiredRoutes() kubelink.Routes {
 	if link == nil {
 		return nil
 	}
-	return this.Links().GetRoutesToLink(this.NodeInterface(), link)
+	return this.Links().GetRoutesToLink(this.NodeIP(), link.Attrs().Index, nil)
 }
 
 func (this *reconciler) ConfirmManagedRoutes(list tcp.CIDRList) {
 }
 
-func (this *reconciler) RequiredIPTablesChains() iptables.Requests {
+func (this *reconciler) RequiredFirewallChains() iptables.Requests {
 	return this.runmode.RequiredIPTablesChains()
+}
+
+func (this *reconciler) RequiredNATChains() iptables.Requests {
+	addrs := this.Links().GetGatewayAddrs()
+	return this.Links().GetNatChains(addrs, this.runmode.GetInterface().Attrs().Name)
 }
 
 func (this *reconciler) HandleDelete(logger logger.LogContext, name kubelink.LinkName, obj resources.Object) (bool, error) {

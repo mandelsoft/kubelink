@@ -51,6 +51,7 @@ rules:
   resources:
     - serviceaccounts
     - services     # for --service option
+    - pods
   verbs:
     - get
 

@@ -25,3 +25,11 @@ type KubeLinkListerExpansion interface{}
 // KubeLinkNamespaceListerExpansion allows custom methods to be added to
 // KubeLinkNamespaceLister.
 type KubeLinkNamespaceListerExpansion interface{}
+
+// MeshServiceListerExpansion allows custom methods to be added to
+// MeshServiceLister.
+type MeshServiceListerExpansion interface{}
+
+// MeshServiceNamespaceListerExpansion allows custom methods to be added to
+// MeshServiceNamespaceLister.
+type MeshServiceNamespaceListerExpansion interface{}

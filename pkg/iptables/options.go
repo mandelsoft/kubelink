@@ -24,44 +24,97 @@ import (
 	"sync"
 )
 
+////////////////////////////////////////////////////////////////////////////////
+// Known structured iptables options, modules and module options
+// all other options between known options will be parsed as single multi arg
+// options.
+
 func init() {
-	RegisterArgType("-m", 1,
-		Nested("comment", 0,
-			Nested("--comment", 1)),
-		Nested("mark", 0,
-			Nested("--mark", 1)))
-	RegisterArgType("-N", 1)
-	RegisterArgType("-A", 1)
-	RegisterArgType("-d", 1)
-	RegisterArgType("-s", 1)
-	RegisterArgType("-o", 1)
-	RegisterArgType("-i", 1)
-	RegisterArgType("-g", 1)
-	RegisterArgType("-j", 1,
+	RegisterTypeByArg("-m", 1,
+		MultiOptType("tcp", 0,
+			OptType("--dport", 1)),
+		MultiOptType("udp", 0,
+			OptType("--dport", 1)),
+		MultiOptType("comment", 0,
+			OptType("--comment", 1)),
+		MultiOptType("mark", 0,
+			OptType("--mark", 1)),
+		MultiOptType("statistic", 0,
+			OptType("--mode", 1),
+			OptType("--probability", 1)))
+	RegisterTypeByArg("-N", 1)
+	RegisterTypeByArg("-A", 1)
+	RegisterTypeByArg("-d", 1)
+	RegisterTypeByArg("-s", 1)
+	RegisterTypeByArg("-o", 1)
+	RegisterTypeByArg("-i", 1)
+	RegisterTypeByArg("-p", 1)
+	RegisterTypeByArg("-g", 1)
+	RegisterTypeByArg("-j", 1,
 		//	Trailing("RETURN", 0),
 		//	Trailing("DROP", 0),
 		Trailing("MARK", 0,
-			ArgType("--set-xmark", 1),
+			OptType("--set-xmark", 1),
 		),
 		Trailing("DNAT", 0,
-			ArgType("--to-destination", 1),
-			ArgType("---to-source", 1),
+			OptType("--to-destination", 1),
+			OptType("---to-source", 1),
 		),
 		Trailing("SNAT", 0,
-			ArgType("---to-source", 1),
+			OptType("---to-source", 1),
 		),
 		AllArg,
 	)
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Predefined iptable option support
+
 func R_OutOpt(name string) Option {
 	return Opt("-o", name)
 }
+func R_SourceOpt(addr string) Option {
+	return Opt("-s", addr)
+}
+func R_DestOpt(addr string) Option {
+	return Opt("-d", addr)
+}
+func R_PortFilter(proto string, port int32) Options {
+	return Options{Opt("-p", proto), ComposeOpt("-m", proto, Opt("--dport", fmt.Sprintf("%d", port)))}
+}
+
 func R_JumpChainOpt(name string) Option {
 	return Opt("-j", name)
 }
+func R_AcceptOpt() Option {
+	return R_JumpChainOpt("ACCEPT")
+}
+func R_ReturnOpt() Option {
+	return R_JumpChainOpt("RETURN")
+}
+func R_DropOpt() Option {
+	return R_JumpChainOpt("DROP")
+}
+func R_MarkOpt(opt Option) Option {
+	return ComposeOpt("-j", "MARK", opt)
+}
+func R_SetXMarkOpt(mark string) Option {
+	return R_MarkOpt(Opt("--set-xmark", mark))
+}
+func R_CheckMarkOpt(mark string) Option {
+	return ComposeOpt("-m", "mark", Opt("--mark", mark))
+}
 func R_SNATOpt(ip string) Option {
-	return ComposeOpt(Opt("-j", "SNAT"), Opt("--to-source", ip))
+	return ComposeOpt("-j", "SNAT", Opt("--to-source", ip))
+}
+func R_DNATOpt(ip string) Option {
+	return ComposeOpt("-j", "DNAT", Opt("--to-destination", ip))
+}
+func R_CommentOpt(c string) Option {
+	return ComposeOpt("-m", "comment", Opt("--comment", c))
+}
+func R_ProbabilityOpt(propability float64) Option {
+	return ComposeOpt("-m", "statistic", Opt("--mode", "random"), Opt("--probability", fmt.Sprintf("%.12f", propability)))
 }
 
 type ruleOptions struct {
@@ -118,9 +171,14 @@ func (this *ruleOptions) ExtractOptions(list ...string) (Options, []string) {
 		for _, t := range this.types {
 			o, l := t.Consume(list[i:])
 			if o != nil {
+				if i > 0 {
+					r.Add(Opt(list[:i]...))
+				}
 				r.Add(o...)
+				list = l
+				i = -1
+				break
 			}
-			list = append(list[:i], l...)
 		}
 	}
 	return r, list
@@ -132,8 +190,8 @@ func RegisterType(t OptionType) {
 	registry.RegisterType(t)
 }
 
-func RegisterArgType(name string, n int, nested ...NestedType) {
-	RegisterType(ArgType(name, n, nested...))
+func RegisterTypeByArg(name string, n int, nested ...NestedType) {
+	RegisterType(OptType(name, n, nested...))
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -148,7 +206,7 @@ type optionType struct {
 	options nestedType
 }
 
-func ArgType(name string, n int, nested ...NestedType) OptionType {
+func OptType(name string, n int, nested ...NestedType) OptionType {
 	return &optionType{nestedType{name, n, nested}}
 }
 
@@ -244,14 +302,14 @@ func (this *trailingType) Consume(list []string) (int, Options, []string) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-type multiArgType struct {
+type multiOptType struct {
 	name  string
 	args  int
 	types ruleOptions
 }
 
-func MultiArgType(name string, n int, nested ...OptionType) NestedType {
-	t := &multiArgType{
+func MultiOptType(name string, n int, nested ...OptionType) NestedType {
+	t := &multiOptType{
 		name: name,
 		args: n,
 	}
@@ -261,12 +319,12 @@ func MultiArgType(name string, n int, nested ...OptionType) NestedType {
 	return t
 }
 
-func (this *multiArgType) Consume(list []string) (int, Options, []string) {
+func (this *multiOptType) Consume(list []string) (int, Options, []string) {
 	if len(list) < this.args+1 || list[0] != this.name {
 		return -1, nil, list
 	}
 	if this.types.types != nil {
-		// handle unknown trailing options as single additional option
+		// consume leading options as many as possible
 		opts, list := this.types.ConsumeOptions(list[this.args+1:]...)
 		return this.args + 1, opts, list
 	} else {
@@ -402,6 +460,10 @@ func Opt(args ...string) Option {
 		r[i] = StringArg(v)
 	}
 	return Option(r)
+}
+
+func R_Not(opt Option) Option {
+	return append([]OptionArg{StringArg("!")}, []OptionArg(opt)...)
 }
 
 func ComposeOpt(args ...interface{}) Option {

@@ -20,6 +20,7 @@ package kubelink
 
 import (
 	"fmt"
+	"net"
 
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/vishvananda/netlink"
@@ -32,15 +33,25 @@ type Routes []netlink.Route
 
 func (this Routes) Lookup(route netlink.Route) int {
 	for i, r := range this {
-		if r.LinkIndex == route.LinkIndex &&
-			r.Flags == route.Flags &&
+		if (route.LinkIndex == 0 || r.LinkIndex == route.LinkIndex) &&
+			(route.Flags == 0 || r.Flags == route.Flags) &&
 			r.Gw.Equal(route.Gw) &&
 			tcp.EqualCIDR(r.Dst, route.Dst) &&
-			tcp.EqualIP(r.Src, route.Src) {
+			(route.Src == nil || tcp.EqualIP(r.Src, route.Src)) {
 			return i
 		}
 	}
 	return -1
+}
+
+func (this Routes) LookupByGateway(gw net.IP) Routes {
+	var routes Routes
+	for _, r := range this {
+		if r.Gw.Equal(gw) {
+			routes = append(routes, r)
+		}
+	}
+	return routes
 }
 
 func (this Routes) LookupAndLogMismatchReason(logger logger.LogContext, route netlink.Route) int {
@@ -73,13 +84,19 @@ func (this *Routes) Add(route netlink.Route) Routes {
 	return *this
 }
 
+func (this Routes) SetTable(tab int) {
+	for i := range this {
+		this[i].Table = tab
+	}
+}
+
 func ShowRoutes(name string) error {
 	link, err := netlink.LinkByName(name)
 	if err != nil {
 		return fmt.Errorf("cannot get link %q: %s", name, err)
 	}
 
-	fmt.Printf("link index: %d\n", link.Attrs().Index)
+	fmt.Printf("Link %s: index: %d\n", name, link.Attrs().Index)
 	routes, err := netlink.RouteList(link, nl.FAMILY_V4)
 	if err != nil {
 		return fmt.Errorf("cannot get routes: %s", err)
@@ -103,20 +120,11 @@ func ListRoutesForInterface(name string) (Routes, error) {
 	return Routes(routes), nil
 }
 
-func ListRoutes() (Routes, error) {
-	var routes Routes
-	links, err := netlink.LinkList()
+func ListRoutes(tab int) (Routes, error) {
+	filter := &netlink.Route{Table: tab}
+	routes, err := netlink.RouteListFiltered(nl.FAMILY_V4, filter, netlink.RT_FILTER_TABLE)
 	if err != nil {
-		return nil, fmt.Errorf("cannot get link list: %s", err)
-	}
-
-	for _, link := range links {
-		r, err := netlink.RouteList(link, nl.FAMILY_V4)
-		if err != nil {
-			return nil, fmt.Errorf("cannot get routes: %s", err)
-		}
-		routes = append(routes, r...)
-
+		return nil, fmt.Errorf("cannot get routes: %s", err)
 	}
 	return routes, nil
 }

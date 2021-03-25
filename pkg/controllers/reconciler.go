@@ -65,7 +65,8 @@ type ReconcilerImplementation interface {
 	IsManagedRoute(*netlink.Route, kubelink.Routes) bool
 	RequiredRoutes() kubelink.Routes
 	ConfirmManagedRoutes(list tcp.CIDRList)
-	RequiredIPTablesChains() iptables.Requests
+	RequiredFirewallChains() iptables.Requests
+	RequiredNATChains() iptables.Requests
 	BaseConfig(config.OptionSource) *Config
 
 	Gateway(obj *api.KubeLink) (*LocalGatewayInfo, error)
@@ -113,8 +114,10 @@ type Reconciler struct {
 	config     config.OptionSource
 	baseconfig *Config
 
-	ifce  *kubelink.NodeInterface
-	links kubelink.Links
+	nodeIP   net.IP
+	nodeIfce *kubelink.InterfaceInfo
+	netIfce  *kubelink.InterfaceInfo
+	links    kubelink.Links
 
 	impl ReconcilerImplementation
 }
@@ -131,12 +134,48 @@ func (this *Reconciler) LinkTool() *LinkTool {
 	return this.tool
 }
 
-func (this *Reconciler) NodeInterface() *kubelink.NodeInterface {
-	return this.ifce
+func (this *Reconciler) NodeIP() net.IP {
+	return this.nodeIP
+}
+
+func (this *Reconciler) SetNodeIP(ip net.IP) error {
+	if !this.baseconfig.NodeCIDR.Contains(ip) {
+		return fmt.Errorf("%s not in node cidr %s", ip, this.baseconfig.NodeCIDR)
+	}
+	this.nodeIP = ip
+	return nil
+}
+
+func (this *Reconciler) NodeCIDR() *net.IPNet {
+	return this.baseconfig.NodeCIDR
+}
+
+func (this *Reconciler) PodCIDR() *net.IPNet {
+	return this.baseconfig.PodCIDR
+}
+
+func (this *Reconciler) NodeInterface() *kubelink.InterfaceInfo {
+	return this.nodeIfce
+}
+
+func (this *Reconciler) NetworkInterface() *kubelink.InterfaceInfo {
+	return this.netIfce
 }
 
 func (this *Reconciler) Links() kubelink.Links {
 	return this.links
+}
+
+func (this *Reconciler) IsGatewayNode() bool {
+	return this.Links().IsGateway(this.NodeIP())
+}
+
+func (this *Reconciler) RouteTableId() int {
+	return int(this.baseconfig.RouteTable)
+}
+
+func (this *Reconciler) UseOwnRouteTable() bool {
+	return this.baseconfig.RouteTable != RTTABLE_MAIN
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -150,7 +189,7 @@ func (this *Reconciler) Setup() {
 }
 
 func (this *Reconciler) Start() {
-	this.TriggerUpdate()
+	time.AfterFunc(10*time.Second, this.TriggerUpdate)
 }
 
 func (this *Reconciler) Reconcile(logger logger.LogContext, obj resources.Object) reconcile.Status {
@@ -362,7 +401,7 @@ func String(r netlink.Route) string {
 }
 
 func (this *Reconciler) updateFirewall(logger logger.LogContext) error {
-	reqs := this.impl.RequiredIPTablesChains()
+	reqs := this.impl.RequiredFirewallChains()
 
 	if reqs == nil {
 		return nil
@@ -371,20 +410,60 @@ func (this *Reconciler) updateFirewall(logger logger.LogContext) error {
 	return this.LinkTool().HandleFirewall(logger, reqs)
 }
 
-func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.Status {
-	err := this.updateFirewall(logger)
-	if err != nil {
-		logger.Errorf("cannot update iptables rules: %s", err)
+func (this *Reconciler) updateNAT(logger logger.LogContext) error {
+	reqs := this.impl.RequiredNATChains()
+
+	if reqs == nil {
+		return nil
 	}
-	if !this.Links().IsGateway(this.ifce) {
-		// cleanup used nat rules
-		this.LinkTool().HandleNat(logger, iptables.Requests{})
+	logger.Debug("update nat")
+	return this.LinkTool().HandleNat(logger, reqs)
+}
+
+func (this *Reconciler) assureRoutingPolicyRule(logger logger.LogContext) error {
+	if this.UseOwnRouteTable() {
+		rules, err := netlink.RuleList(netlink.FAMILY_V4)
+		if err != nil {
+			return err
+		}
+		tfound := -1
+		priofound := false
+		for _, r := range rules {
+			if r.Table == this.RouteTableId() {
+				tfound = r.Priority
+			}
+			if r.Priority == int(this.baseconfig.RulePrio) {
+				priofound = true
+			}
+		}
+		if tfound != -1 {
+			if tfound != int(this.baseconfig.RulePrio) && priofound {
+				panic(fmt.Sprintf("rule priority mismatch for table %d: %d != %d", this.baseconfig.RouteTable, tfound, this.baseconfig.RulePrio))
+			}
+		} else {
+			logger.Infof("creating routing policy rule %d for table %d", this.baseconfig.RulePrio, this.baseconfig.RouteTable)
+			r := netlink.NewRule()
+			r.Priority = int(this.baseconfig.RulePrio)
+			r.Table = int(this.baseconfig.RouteTable)
+			err := netlink.RuleAdd(r)
+			if err != nil {
+				return err
+			}
+		}
 	}
-	routes, err := kubelink.ListRoutes()
+	return nil
+}
+
+func (this *Reconciler) updateRoutes(logger logger.LogContext) error {
+	routes, err := kubelink.ListRoutes(this.RouteTableId())
 	if err != nil {
-		return reconcile.Delay(logger, err)
+		return err
 	}
 	required := this.impl.RequiredRoutes()
+	if this.UseOwnRouteTable() {
+		required.SetTable(this.RouteTableId())
+	}
+
 	mcnt := 0
 	dcnt := 0
 	ocnt := 0
@@ -392,7 +471,8 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 	mcidrs := tcp.CIDRList{}
 	n := utils.NewNotifier(logger, "update routes")
 	for i, r := range routes {
-		if r.Table != kubelink.LOCAL_TABLE && this.impl.IsManagedRoute(&r, required) {
+		if (this.UseOwnRouteTable() && r.Table == this.RouteTableId()) ||
+			(r.Table != kubelink.LOCAL_TABLE && this.impl.IsManagedRoute(&r, required)) {
 			mcnt++
 			if required.Lookup(r) < 0 {
 				dcnt++
@@ -428,44 +508,75 @@ func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 
 	n.Add(false, "found %d managed (%d deleted) and %d created routes (%d other)", mcnt, dcnt, ccnt, ocnt)
 	this.impl.ConfirmManagedRoutes(mcidrs)
+	return nil
+}
 
-	wg, err := wgctrl.New()
-	if err == nil {
-		defer wg.Close()
-		devs, err := wg.Devices()
+func (this *Reconciler) cleanupWireguard(logger logger.LogContext) error {
+	if this.nodeIfce != nil {
+		wg, err := wgctrl.New()
 		if err == nil {
-			n := utils.NewNotifier(logger, fmt.Sprintf("found %d wireguard device(s)", len(devs)))
-			for _, d := range devs {
-				match := false
-				link, err := netlink.LinkByName(d.Name)
-				if err != nil {
-					n.Errorf("link %s not found: %s", d.Name, err)
-					continue
-				}
-				addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
-				if err != nil {
-					n.Errorf("cannot get address list for link %s: %s", d.Name, err)
-					continue
-				}
-				for _, a := range addrs {
-					gateways := this.Links().LookupMeshGatewaysFor(a.IP)
-					if gateways.Contains(this.ifce.IP) {
-						match = true
-						break
+			defer wg.Close()
+			devs, err := wg.Devices()
+			if err == nil {
+				n := utils.NewNotifier(logger, fmt.Sprintf("found %d wireguard device(s)", len(devs)))
+				for _, d := range devs {
+					match := false
+					link, err := netlink.LinkByName(d.Name)
+					if err != nil {
+						n.Errorf("link %s not found: %s", d.Name, err)
+						continue
 					}
-					if len(gateways) != 0 {
-						n.Debugf("  gateways %s for cluster address %s does not match node ip %s", gateways, a.IP, this.ifce.IP)
-					} else {
-						n.Debugf("  no kubelink found for link address %s", a.IP)
+					addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
+					if err != nil {
+						n.Errorf("cannot get address list for link %s: %s", d.Name, err)
+						continue
 					}
-				}
-				if !match {
-					n.Infof("  garbage collecting unused wireguard interface %q", link.Attrs().Name)
-					netlink.LinkDel(link)
+					for _, a := range addrs {
+						gateways := this.Links().LookupMeshGatewaysFor(a.IP)
+						if gateways.Contains(this.nodeIfce.IP) {
+							match = true
+							break
+						}
+						if len(gateways) != 0 {
+							n.Debugf("  gateways %s for cluster address %s does not match node ip %s", gateways, a.IP, this.nodeIfce.IP)
+						} else {
+							n.Debugf("  no kubelink found for link address %s", a.IP)
+						}
+					}
+					if !match {
+						n.Infof("  garbage collecting unused wireguard interface %q", link.Attrs().Name)
+						netlink.LinkDel(link)
+					}
 				}
 			}
 		}
 	}
+	return nil
+}
+
+func (this *Reconciler) Command(logger logger.LogContext, cmd string) reconcile.Status {
+	err := this.assureRoutingPolicyRule(logger)
+	if err != nil {
+		return reconcile.Delay(logger, err)
+	}
+
+	err = this.updateFirewall(logger)
+	if err != nil {
+		logger.Errorf("cannot update firewall iptables rules: %s", err)
+	}
+	err = this.updateNAT(logger)
+	if err != nil {
+		logger.Errorf("cannot update NAT iptables rules: %s", err)
+	}
+	err = this.updateRoutes(logger)
+	if err != nil {
+		logger.Errorf("cannot update routes: %s", err)
+	}
+	err = this.cleanupWireguard(logger)
+	if err != nil {
+		logger.Errorf("cannot cleanup obsolete wireguard devices: %s", err)
+	}
+
 	return reconcile.Succeeded(logger)
 }
 
@@ -539,7 +650,7 @@ func (this *Reconciler) SetupIPIP() error {
 						this.Controller().Infof("bring up tunl0")
 					}
 				}
-				ip := this.ifce.IP
+				ip := this.nodeIfce.IP
 				addr := &netlink.Addr{
 					IPNet: &net.IPNet{
 						IP:   ip,
@@ -578,7 +689,7 @@ func (this *Reconciler) WaitNetworkReady() {
 	if err != nil {
 		panic(err)
 	}
-	nodeIP := this.NodeInterface().IP.String()
+	nodeIP := this.NodeIP().String()
 	this.Controller().Infof("lookup node for ip %s...", nodeIP)
 	var node *core.Node
 	for node == nil {

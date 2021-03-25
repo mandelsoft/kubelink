@@ -55,6 +55,8 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 	// Group=kubelink.mandelsoft.org, Version=v1alpha1
 	case v1alpha1.SchemeGroupVersion.WithResource("kubelinks"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Kubelink().V1alpha1().KubeLinks().Informer()}, nil
+	case v1alpha1.SchemeGroupVersion.WithResource("meshservices"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Kubelink().V1alpha1().MeshServices().Informer()}, nil
 
 	}
 

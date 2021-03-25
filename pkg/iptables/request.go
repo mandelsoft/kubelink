@@ -18,6 +18,12 @@
 
 package iptables
 
+import (
+	"fmt"
+
+	"github.com/gardener/controller-manager-library/pkg/utils"
+)
+
 type ChainRequest struct {
 	*Chain
 	Cleanup bool
@@ -34,4 +40,20 @@ func NewChainRequest(table, chain string, rules Rules, cleanup bool) *ChainReque
 	}
 }
 
+func (this *ChainRequest) String() string {
+	s := fmt.Sprintf("  *%s(%t)", this.Chain.Chain, this.Cleanup)
+	for _, r := range this.Rules {
+		s = fmt.Sprintf("%s\n    %s", s, utils.Strings(r.AsList()...))
+	}
+	return s
+}
+
 type Requests []*ChainRequest
+
+func (this Requests) String() string {
+	s := "["
+	for _, c := range this {
+		s = fmt.Sprintf("%s\n%s", s, c)
+	}
+	return s + "\n]"
+}

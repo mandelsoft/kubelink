@@ -22,6 +22,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"fmt"
+	"hash"
 	"net"
 	"strings"
 
@@ -57,7 +58,7 @@ type RuleDef struct {
 	Table  string
 	Chain  string
 	Rule   iptables.Rule
-	Before string
+	Before utils.StringSet
 }
 
 func FirewallEmbedding() ([]RuleDef, utils.StringSet) {
@@ -68,19 +69,19 @@ func FirewallEmbedding() ([]RuleDef, utils.StringSet) {
 	}
 
 	opt := iptables.Opt("-m", "comment", "--comment", "kubelink firewall rules")
-	before := ""
+	var before utils.StringSet
 	if TABLE_LINKS_CHAIN != "mangle" {
-		before = "KUBE-SERVICES"
+		before = utils.NewStringSet("KUBE-SERVICES")
 	}
 	if DROP_ACTION == MARK_DROP_CHAIN {
 		return []RuleDef{
-			RuleDef{TABLE_LINKS_CHAIN, "PREROUTING", iptables.Rule{opt, iptables.Opt("-j", LINKS_CHAIN)}, before},
-			RuleDef{TABLE_FIREWALL_CHAIN, "FORWARD", iptables.Rule{opt, iptables.Opt("-j", FIREWALL_CHAIN)}, "KUBE-FORWARD"},
-			RuleDef{TABLE_FIREWALL_CHAIN, "OUTPUT", iptables.Rule{opt, iptables.Opt("-j", FIREWALL_CHAIN)}, ""},
+			RuleDef{TABLE_LINKS_CHAIN, "PREROUTING", iptables.Rule{opt, iptables.R_JumpChainOpt(LINKS_CHAIN)}, before},
+			RuleDef{TABLE_FIREWALL_CHAIN, "FORWARD", iptables.Rule{opt, iptables.R_JumpChainOpt(FIREWALL_CHAIN)}, utils.NewStringSet("KUBE-FORWARD")},
+			RuleDef{TABLE_FIREWALL_CHAIN, "OUTPUT", iptables.Rule{opt, iptables.R_JumpChainOpt(FIREWALL_CHAIN)}, nil},
 		}, tables
 	} else {
 		return []RuleDef{
-			RuleDef{TABLE_LINKS_CHAIN, "PREROUTING", iptables.Rule{opt, iptables.Opt("-j", LINKS_CHAIN)}, before},
+			RuleDef{TABLE_LINKS_CHAIN, "PREROUTING", iptables.Rule{opt, iptables.R_JumpChainOpt(LINKS_CHAIN)}, before},
 		}, tables
 	}
 }
@@ -88,14 +89,14 @@ func FirewallEmbedding() ([]RuleDef, utils.StringSet) {
 func (this *links) GetEgressChain(mesh *net.IPNet) *iptables.ChainRequest {
 	rules := iptables.Rules{
 		iptables.Rule{
-			iptables.Opt("-m", "comment", "--comment", "firewall egress for link gateway "+mesh.String()),
+			iptables.R_CommentOpt("firewall egress for link gateway " + mesh.String()),
 		},
 	}
 	// allow all traffic forwarded to other links
 	for _, e := range this.GetGatewayEgress(nil, mesh) {
 		rules = append(rules, iptables.Rule{
-			iptables.Opt("-d", e.String()),
-			iptables.Opt("-j", "ACCEPT"),
+			iptables.R_DestOpt(e.String()),
+			iptables.R_AcceptOpt(),
 		})
 	}
 	return iptables.NewChainRequest(
@@ -117,14 +118,14 @@ func (this *links) GetFirewallChains() iptables.Requests {
 				egress := this.GetEgressChain(mesh)
 				linkchains = append(linkchains, egress)
 				rules = append(rules, iptables.Rule{
-					iptables.Opt("-s", mesh.String()),
-					iptables.Opt("-j", egress.Chain.Chain),
+					iptables.R_SourceOpt(mesh.String()),
+					iptables.R_JumpChainOpt(egress.Chain.Chain),
 				})
 			}
 			linkchains = append(linkchains, ing)
 			rules = append(rules, iptables.Rule{
-				iptables.Opt("-s", tcp.IPtoCIDR(l.ClusterAddress.IP).String()),
-				iptables.Opt("-j", ing.Chain.Chain),
+				iptables.R_SourceOpt(tcp.IPtoCIDR(l.ClusterAddress.IP).String()),
+				iptables.R_JumpChainOpt(ing.Chain.Chain),
 			})
 		}
 		return true
@@ -137,10 +138,10 @@ func (this *links) GetFirewallChains() iptables.Requests {
 				DROP_CHAIN,
 				iptables.Rules{
 					iptables.Rule{
-						iptables.ComposeOpt("-j", "MARK", iptables.Opt("--set-xmark", fmt.Sprintf("0x0/%s", MARK_BIT))),
+						iptables.R_SetXMarkOpt(fmt.Sprintf("0x0/%s", MARK_BIT)),
 					},
 					iptables.Rule{
-						iptables.Opt("-j", "DROP"),
+						iptables.R_DropOpt(),
 					},
 				}, true,
 			))
@@ -149,7 +150,7 @@ func (this *links) GetFirewallChains() iptables.Requests {
 				MARK_DROP_CHAIN,
 				iptables.Rules{
 					iptables.Rule{
-						iptables.ComposeOpt("-j", "MARK", iptables.Opt("--set-xmark", fmt.Sprintf("%s/%s", MARK_BIT, MARK_BIT))),
+						iptables.R_SetXMarkOpt(fmt.Sprintf("%s/%s", MARK_BIT)),
 					},
 				}, true,
 			))
@@ -166,8 +167,8 @@ func (this *links) GetFirewallChains() iptables.Requests {
 				FIREWALL_CHAIN,
 				iptables.Rules{
 					iptables.Rule{
-						iptables.Opt("-m", "mark", "--mark", fmt.Sprintf("%s/%s", MARK_BIT, MARK_BIT)),
-						iptables.Opt("-j", DROP_CHAIN),
+						iptables.R_CheckMarkOpt(fmt.Sprintf("%s/%s", MARK_BIT, MARK_BIT)),
+						iptables.R_DropOpt(),
 					},
 				}, true,
 			))
@@ -179,4 +180,12 @@ func (this *links) GetFirewallChains() iptables.Requests {
 func encodeName(name string) string {
 	sum := sha1.Sum([]byte(name))
 	return strings.ToUpper(base64.URLEncoding.EncodeToString(sum[:12]))
+}
+
+func encodeHash(hash hash.Hash) string {
+	h := strings.ToUpper(base64.URLEncoding.EncodeToString(hash.Sum(nil)))
+	if len(h) > 12 {
+		return h[:12]
+	}
+	return h
 }

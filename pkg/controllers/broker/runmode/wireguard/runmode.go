@@ -171,8 +171,9 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 	defer wg.Close()
 
 	addrs := this.Links().GetGatewayAddrs()
-	natchains := this.Links().GetNatChains(addrs, link.Attrs().Name)
-	this.finalizer, err = this.Env().LinkTool().PrepareLink(logger, link, addrs, natchains)
+	// keep nat rules for wireguard because it still works even without broker pod
+	/*this.finalizer*/
+	_, err = this.Env().LinkTool().PrepareLink(logger, link, addrs)
 	if err != nil {
 		return err
 	}
@@ -221,22 +222,32 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 next:
 	for _, peer := range peers {
 		peercfg := peer.GetConfig()
+		found := false
 		for _, p := range dev.Peers {
 			if equalKey(&p.PublicKey, &peercfg.PublicKey) {
+				found = true
 				if !equalUDPAddr(p.Endpoint, peercfg.Endpoint) {
-					continue
+					logger.Infof("  endpoint changed %s: %s -> %s", peercfg.PublicKey, p.Endpoint, peercfg.Endpoint)
+					break
 				}
 				if !equalIPNetList(p.AllowedIPs, peercfg.AllowedIPs) {
+					logger.Infof("  allowed ips changed %s: %v -> %v", peercfg.PublicKey, p.AllowedIPs, peercfg.AllowedIPs)
 					peercfg.ReplaceAllowedIPs = true
-					continue
+					break
 				}
 				if p.PersistentKeepaliveInterval != keepAlive {
-					continue
+					logger.Infof("  keep alive changed %s: %v -> %v", peercfg.PublicKey, p.PersistentKeepaliveInterval, keepAlive)
+					break
 				}
 				continue next
 			}
 		}
-		logger.Infof("  update peer %s: %s %s", peercfg.PublicKey, peercfg.Endpoint, list(peercfg.AllowedIPs))
+		if found {
+			peercfg.UpdateOnly = true
+			logger.Infof("  update peer %s: %s %s", peercfg.PublicKey, peercfg.Endpoint, list(peercfg.AllowedIPs))
+		} else {
+			logger.Infof("  add    peer %s: %s %s", peercfg.PublicKey, peercfg.Endpoint, list(peercfg.AllowedIPs))
+		}
 		config.Peers = append(config.Peers, *peercfg)
 		update = true
 		this.propagateError(nil, nil, peer.Links)

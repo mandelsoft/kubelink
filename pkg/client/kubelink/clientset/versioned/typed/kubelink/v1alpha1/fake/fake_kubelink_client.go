@@ -32,6 +32,10 @@ func (c *FakeKubelinkV1alpha1) KubeLinks(namespace string) v1alpha1.KubeLinkInte
 	return &FakeKubeLinks{c, namespace}
 }
 
+func (c *FakeKubelinkV1alpha1) MeshServices(namespace string) v1alpha1.MeshServiceInterface {
+	return &FakeMeshServices{c, namespace}
+}
+
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
 func (c *FakeKubelinkV1alpha1) RESTClient() rest.Interface {

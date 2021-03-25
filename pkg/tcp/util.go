@@ -200,11 +200,11 @@ func (this CIDRList) Equivalent(other CIDRList) bool {
 	return true
 }
 
-func (this *CIDRList) String() string {
+func (this CIDRList) String() string {
 	sep := "["
 	end := ""
 	s := ""
-	for _, c := range *this {
+	for _, c := range this {
 		s = fmt.Sprintf("%s%s%s", s, sep, c)
 		sep = ","
 		end = "]"
@@ -238,16 +238,16 @@ outer:
 	}
 }
 
-func (this *CIDRList) IsEmpty() bool {
-	return len(*this) == 0
+func (this CIDRList) IsEmpty() bool {
+	return len(this) == 0
 }
 
-func (this *CIDRList) IsSet() bool {
-	return *this != nil
+func (this CIDRList) IsSet() bool {
+	return this != nil
 }
 
-func (this *CIDRList) Has(cidr *net.IPNet) bool {
-	for _, c := range *this {
+func (this CIDRList) Has(cidr *net.IPNet) bool {
+	for _, c := range this {
 		if EqualCIDR(c, cidr) {
 			return true
 		}
@@ -255,8 +255,8 @@ func (this *CIDRList) Has(cidr *net.IPNet) bool {
 	return false
 }
 
-func (this *CIDRList) Contains(ip net.IP) bool {
-	for _, c := range *this {
+func (this CIDRList) Contains(ip net.IP) bool {
+	for _, c := range this {
 		if c.Contains(ip) {
 			return true
 		}
@@ -264,8 +264,8 @@ func (this *CIDRList) Contains(ip net.IP) bool {
 	return false
 }
 
-func (this *CIDRList) ContainsCIDR(cidr *net.IPNet) bool {
-	for _, c := range *this {
+func (this CIDRList) ContainsCIDR(cidr *net.IPNet) bool {
+	for _, c := range this {
 		if ContainsCIDR(c, cidr) {
 			return true
 		}
@@ -273,13 +273,19 @@ func (this *CIDRList) ContainsCIDR(cidr *net.IPNet) bool {
 	return false
 }
 
-func (this *CIDRList) Lookup(ip net.IP) *net.IPNet {
-	for _, c := range *this {
+func (this CIDRList) Lookup(ip net.IP) *net.IPNet {
+	for _, c := range this {
 		if c.Contains(ip) {
 			return c
 		}
 	}
 	return nil
+}
+
+func (this CIDRList) Copy() CIDRList {
+	n := make(CIDRList, len(this))
+	copy(n, this)
+	return n
 }
 
 ////////////////////////////////////////////////////////////////////////////////

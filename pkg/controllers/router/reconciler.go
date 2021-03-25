@@ -19,6 +19,9 @@
 package router
 
 import (
+	"fmt"
+	"net"
+
 	"github.com/gardener/controller-manager-library/pkg/config"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
 	"github.com/gardener/controller-manager-library/pkg/logger"
@@ -35,8 +38,11 @@ import (
 
 type reconciler struct {
 	*controllers.Reconciler
-	config   *Config
-	endpoint resources.ObjectName
+	config      *Config
+	endpoint    resources.ObjectName
+	nodeGateway bool
+	gatewayIfce *kubelink.InterfaceInfo
+	gatewayIP   net.IP
 
 	routeTargets tcp.CIDRList
 }
@@ -67,8 +73,15 @@ func (this *reconciler) IsManagedRoute(route *netlink.Route, routes kubelink.Rou
 		if route.Src != nil {
 			return false
 		}
-		if route.Gw != nil && this.config.NodeCIDR.Contains(route.Gw) && (route.LinkIndex == this.NodeInterface().Index || (tunl != nil && route.LinkIndex == tunl.Attrs().Index)) {
-			return true
+		if route.Gw != nil {
+			if this.config.NodeCIDR.Contains(route.Gw) && (route.LinkIndex == this.NodeInterface().Index || (tunl != nil && route.LinkIndex == tunl.Attrs().Index)) {
+				return true
+			}
+		}
+		if !this.UseNodeGateway() {
+			if route.LinkIndex == this.gatewayIfce.Index {
+				return true
+			}
 		}
 		for _, r := range routes {
 			if tcp.EqualCIDR(route.Dst, r.Dst) {
@@ -99,19 +112,32 @@ func (this *reconciler) ConfirmManagedRoutes(list tcp.CIDRList) {
 }
 
 func (this *reconciler) RequiredRoutes() kubelink.Routes {
-	return this.Links().GetRoutes(this.NodeInterface())
+	if this.UseNodeGateway() {
+		return this.Links().GetRoutes(this.NodeInterface())
+	}
+	if this.gatewayIfce != nil {
+		return this.Links().GetRoutesToLink(this.NodeIP(), this.gatewayIfce.Index, this.gatewayIP)
+	}
+	return kubelink.Routes{}
 }
 
-func (this *reconciler) RequiredIPTablesChains() iptables.Requests {
+func (this *reconciler) RequiredFirewallChains() iptables.Requests {
 
-	if this.Links().HasWireguard() && !this.isGateway() {
+	if this.Links().HasWireguard() && (!this.IsGatewayNode() || !this.UseNodeGateway()) {
 		return iptables.Requests{} // no firewall settings on non-gateway nodes
 	}
 	return nil // no iptables update
 }
 
-func (this *reconciler) isGateway() bool {
-	return this.Links().IsGateway(this.NodeInterface())
+func (this *reconciler) RequiredNATChains() iptables.Requests {
+	if !this.IsGatewayNode() || !this.UseNodeGateway() {
+		return iptables.Requests{} // no NAT settings on non-gateway nodes
+	}
+	return nil
+}
+
+func (this *reconciler) UseNodeGateway() bool {
+	return this.nodeGateway
 }
 
 func (this *reconciler) HandleDelete(logger logger.LogContext, name kubelink.LinkName, obj resources.Object) (bool, error) {
@@ -155,14 +181,67 @@ func (this *reconciler) ReconcileEndpoint(logger logger.LogContext, obj resource
 		eps := controllers.GetEndpoints(n, obj)
 		switch len(eps) {
 		case 0:
-			n.Activate()
-			logger.Warnf("no endpoint for broker service %q found", this.config.Service)
+			n.Warnf("no endpoint for broker service %q found", this.config.Service)
 			this.Links().SetGateway(nil)
 		case 1:
-			if !this.Links().GetGateway().Equal(eps[0]) {
-				n.Infof("found endpoint %s for broker service %q", eps[0], this.config.Service)
-				this.Links().SetGateway(eps[0])
+			gw := eps[0].HostIP
+			ep := eps[0].EndpointIP
+			if gw == nil {
+				if this.NodeCIDR().Contains(ep) {
+					gw = ep
+				}
 			}
+			if gw == nil {
+				n.Infof("no gateway node found")
+				break
+			}
+			if !tcp.EqualIP(this.Links().GetGateway(), gw) || !tcp.EqualIP(this.gatewayIP, ep) {
+				n.Infof("found endpoint %s for broker service %q", eps[0], this.config.Service)
+			}
+			this.gatewayIP = ep
+
+			if tcp.EqualIP(this.NodeIP(), gw) {
+				// on gateway node
+				if !tcp.EqualIP(this.Links().GetGateway(), gw) {
+					n.Infof("running on gateway node now")
+				}
+				this.Links().SetGateway(gw)
+				if gw.Equal(ep) {
+					// host network for gateway
+					if !this.nodeGateway {
+						n.Infof("switching to node gateway mode")
+					}
+					this.gatewayIfce = nil
+					this.nodeGateway = true
+				} else {
+					// pod network for gateway
+					if this.nodeGateway {
+						n.Infof("switching to pod gateway mode")
+					}
+					this.nodeGateway = false
+					podIfce, err := kubelink.LookupPodInterface(nil, ep)
+					if err == nil {
+						if this.gatewayIfce == nil {
+							n.Infof("found pod gateway interface %s", podIfce)
+						} else {
+							if podIfce.Index != this.gatewayIfce.Index {
+								n.Infof("changing pod gateway interface to %s", podIfce)
+							}
+						}
+						this.gatewayIfce = podIfce
+					} else {
+						this.gatewayIfce = podIfce
+						return reconcile.Delay(logger, fmt.Errorf("cannot find pod interface on gateway node: %s", err))
+					}
+				}
+			} else {
+				if tcp.EqualIP(this.Links().GetGateway(), this.NodeIP()) {
+					n.Infof("running on no gateway node now")
+				}
+				this.Links().SetGateway(gw)
+				this.nodeGateway = true
+			}
+
 		default:
 			n.Infof("invalid service definition for broker service: multiple endpoints found: %v", eps)
 		}

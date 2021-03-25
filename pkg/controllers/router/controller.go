@@ -49,6 +49,12 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 	if err != nil {
 		return nil, err
 	}
+	if this.PodCIDR() == nil {
+		return nil, fmt.Errorf("pod cidr required for router")
+	}
+	if this.NodeInterface() == nil {
+		return nil, fmt.Errorf("no valid node ip found for cidr %s on any interface", this.NodeCIDR())
+	}
 	this.config = this.Reconciler.Config().(*Config)
 	this.endpoint = resources.NewObjectName(controller.GetEnvironment().Namespace(), this.config.Service)
 

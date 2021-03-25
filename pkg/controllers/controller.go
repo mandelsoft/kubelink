@@ -20,6 +20,7 @@ package controllers
 
 import (
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/gardener/controller-manager-library/pkg/config"
@@ -43,7 +44,6 @@ func BaseController(name string, config config.OptionSource) controller.Configur
 		DefaultWorkerPool(1, 0).
 		OptionsByExample("options", config).
 		MainResourceByGK(v1alpha1.KUBELINK).
-		CustomResourceDefinitions(v1alpha1.KUBELINK).
 		WorkerPool("update", 1, 20*time.Second).
 		Commands(CMD_UPDATE)
 }
@@ -59,9 +59,23 @@ func CreateBaseReconciler(controller controller.Interface, impl ReconcilerImplem
 
 	controller.Infof("using cidr for nodes: %s", config.NodeCIDR)
 
-	ifce, err := kubelink.LookupNodeIP(controller, config.NodeCIDR)
+	ifce, err := kubelink.LookupIPForCIDR(controller, "node", config.NodeCIDR)
 	if err != nil {
 		return nil, err
+	}
+
+	var nodeip net.IP
+	netifce := ifce
+	if ifce == nil {
+		// running in pod mode
+		if config.PodCIDR != nil {
+			netifce, err = kubelink.LookupIPForCIDR(controller, "net", config.PodCIDR)
+			if err != nil {
+				return nil, fmt.Errorf("cannot find network interface in %s: %s", config.PodCIDR, err)
+			}
+		}
+	} else {
+		nodeip = ifce.IP
 	}
 
 	tool, err := NewLinkTool()
@@ -74,7 +88,9 @@ func CreateBaseReconciler(controller controller.Interface, impl ReconcilerImplem
 		tool:       tool,
 		config:     cfg,
 		baseconfig: config,
-		ifce:       ifce,
+		netIfce:    netifce,
+		nodeIfce:   ifce,
+		nodeIP:     nodeip,
 		links:      kubelink.GetSharedLinks(controller, defaultport),
 		impl:       impl,
 	}, nil

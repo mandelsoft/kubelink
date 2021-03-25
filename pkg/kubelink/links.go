@@ -25,7 +25,7 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/ctxutil"
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
-	"github.com/vishvananda/netlink"
+	"github.com/gardener/controller-manager-library/pkg/utils"
 
 	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/iptables"
@@ -63,7 +63,7 @@ type Links interface {
 
 	SetGateway(ip net.IP)
 	GetGateway() net.IP
-	IsGateway(ifce *NodeInterface) bool
+	IsGateway(ip net.IP) bool
 
 	IsGatewayLink(name LinkName) bool
 	HasWireguard() bool
@@ -98,14 +98,22 @@ type Links interface {
 	LookupClusterAddressByMeshAddress(ip net.IP) *net.IPNet
 	LookupMeshByMeshAddress(ip net.IP) *Mesh
 
-	GetRoutesToLink(ifce *NodeInterface, link netlink.Link) Routes
-	GetRoutes(ifce *NodeInterface) Routes
-	GetGatewayEgress(ifce *NodeInterface, meshCIDR *net.IPNet) tcp.CIDRList
+	GetRoutesToLink(gateway net.IP, linkIndex int, nexthop net.IP) Routes
+	GetRoutes(ifce *InterfaceInfo) Routes
+	GetGatewayEgress(gateway net.IP, meshCIDR *net.IPNet) tcp.CIDRList
 
 	GetFirewallChains() iptables.Requests
 	GetEgressChain(mesh *net.IPNet) *iptables.ChainRequest
 	GetNatChains(clusterAddresses tcp.CIDRList, linkName string) iptables.Requests
+	GetSNatChains(clusterAddresses tcp.CIDRList, linkName string) iptables.Requests
 	GetGatewayAddrs() tcp.CIDRList
+
+	UpdateService(svc *Service)
+	GetServices() map[string]*Service
+	GetService(key string) *Service
+	GetServiceForAddress(ip net.IP) *Service
+	VisitServices(visitor func(l *Service) bool)
+	GetServiceChains(clusterAddresses tcp.CIDRList) iptables.Requests
 
 	Locked(func(Links) error) error
 }
@@ -120,4 +128,10 @@ func NewLinks(resc resources.Interface, defaultport int) Links {
 		linksdata: links.linksdata,
 		impl:      links,
 	}
+}
+
+func NatEmbedding() ([]RuleDef, utils.StringSet) {
+	rules, tables := SNatEmbedding()
+	dnat, dtab := DNatEmbedding()
+	return append(rules, dnat...), tables.AddSet(dtab)
 }

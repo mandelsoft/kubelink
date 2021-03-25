@@ -27,6 +27,7 @@ import (
 	"github.com/vishvananda/netlink"
 
 	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
@@ -60,6 +61,7 @@ type linksdata struct {
 	stalelinks  *LinkIndex
 	meshes      *MeshIndex
 	stalemeshes *StaleMeshIndex
+	services    *ServiceIndex
 }
 
 func newData() *linksdata {
@@ -68,6 +70,7 @@ func newData() *linksdata {
 		stalelinks:  NewLinkIndex(),
 		meshes:      NewMeshIndex(),
 		stalemeshes: NewStaleMeshIndex(),
+		services:    NewServiceIndex(),
 	}
 }
 
@@ -166,6 +169,29 @@ func (this *linksdata) LookupMeshByMeshAddress(ip net.IP) *Mesh {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+
+func (this *linksdata) UpdateService(svc *Service) {
+	svc.Normalize()
+	this.services.Add(svc)
+}
+
+func (this *linksdata) GetServices() map[string]*Service {
+	return this.services.All()
+}
+
+func (this *linksdata) GetService(key string) *Service {
+	return this.services.ByKey(key)
+}
+
+func (this *linksdata) VisitServices(visitor func(l *Service) bool) {
+	this.services.Visit(visitor)
+}
+
+func (this *linksdata) GetServiceForAddress(ip net.IP) *Service {
+	return this.services.ByAddress(ip)
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // internal methods, always called synchronized
 
 func (this *links) getGatewayFor(l *Link) net.IP {
@@ -176,12 +202,12 @@ func (this *links) getGatewayFor(l *Link) net.IP {
 	return gateway
 }
 
-func (this *links) matchGateway(l *Link, ifce *NodeInterface) bool {
-	if ifce == nil {
+func (this *links) matchGateway(l *Link, ip net.IP) bool {
+	if ip == nil {
 		return true
 	}
 	gateway := this.getGatewayFor(l)
-	return gateway != nil && gateway.Equal(ifce.IP)
+	return gateway != nil && gateway.Equal(ip)
 }
 
 func (this *links) matchMesh(l *Link, mesh *net.IPNet) bool {
@@ -416,18 +442,18 @@ func (this *links) IsGatewayLink(name LinkName) bool {
 	return this.links.IsGatewayLink(name) || this.stalelinks.IsGatewayLink(name)
 }
 
-func (this *links) IsGateway(ifce *NodeInterface) bool {
-	if ifce == nil {
+func (this *links) IsGateway(ip net.IP) bool {
+	if ip == nil {
 		return false
 	}
 	if this.gateway != nil {
-		if this.gateway.Equal(ifce.IP) {
+		if this.gateway.Equal(ip) {
 			return true
 		}
 	} else {
 	}
 
-	return this.links.IsGatewayNode(ifce.IP)
+	return this.links.IsGatewayNode(ip)
 }
 
 func (this *links) LookupMeshGatewaysFor(ip net.IP) tcp.IPList {
@@ -441,7 +467,7 @@ func (this *links) LookupMeshGatewaysFor(ip net.IP) tcp.IPList {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (this *links) GetRoutes(ifce *NodeInterface) Routes {
+func (this *links) GetRoutes(ifce *InterfaceInfo) Routes {
 	var flags netlink.NextHopFlag
 	index := ifce.Index
 	protocol := 0
@@ -488,12 +514,13 @@ func (this *links) GetRoutes(ifce *NodeInterface) Routes {
 	return routes
 }
 
-func (this *links) GetRoutesToLink(ifce *NodeInterface, link netlink.Link) Routes {
+func (this *links) GetRoutesToLink(gateway net.IP, index int, nexthop net.IP) Routes {
 	routes := Routes{}
-	for _, c := range this.GetGatewayEgress(ifce, nil) {
+	for _, c := range this.GetGatewayEgress(gateway, nil) {
 		r := netlink.Route{
 			Dst:       c,
-			LinkIndex: link.Attrs().Index,
+			LinkIndex: index,
+			Gw:        nexthop,
 			Table:     MAIN_TABLE,
 		}
 		routes.Add(r)
@@ -503,7 +530,7 @@ func (this *links) GetRoutesToLink(ifce *NodeInterface, link netlink.Link) Route
 
 // GetGatewayEgress determines the possible mesh interface egress for
 // an interface or a dedicated mesh given by its cidr.
-func (this *links) GetGatewayEgress(ifce *NodeInterface, meshCIDR *net.IPNet) tcp.CIDRList {
+func (this *links) GetGatewayEgress(gateway net.IP, meshCIDR *net.IPNet) tcp.CIDRList {
 	meshCIDR = tcp.CIDRNet(meshCIDR)
 
 	// first determine all potential mesh egresses
@@ -516,7 +543,7 @@ func (this *links) GetGatewayEgress(ifce *NodeInterface, meshCIDR *net.IPNet) tc
 
 	egress := tcp.CIDRList{}
 	for _, l := range this.links.All() {
-		if this.matchGateway(l, ifce) && this.matchMesh(l, meshCIDR) {
+		if this.matchGateway(l, gateway) && this.matchMesh(l, meshCIDR) {
 			for _, c := range l.Egress {
 				if !meshes.ContainsCIDR(c) {
 					egress = append(egress, c)
@@ -526,6 +553,13 @@ func (this *links) GetGatewayEgress(ifce *NodeInterface, meshCIDR *net.IPNet) tc
 	}
 	egress = append(egress, meshes...)
 	return egress
+}
+
+func (this *links) GetNatChains(clusterAddresses tcp.CIDRList, linkName string) iptables.Requests {
+	reqs := this.GetSNatChains(clusterAddresses, linkName)
+	dreqs := this.GetServiceChains(clusterAddresses)
+	return append(reqs, dreqs...)
+
 }
 
 func (this *links) RegisterLink(name LinkName, clusterCIDR *net.IPNet, fqdn string, cidr *net.IPNet) (*Link, error) {

@@ -33,6 +33,7 @@ const (
 )
 
 var KUBELINK = resources.NewGroupKind(GroupName, "KubeLink")
+var MESHSERVICE = resources.NewGroupKind(GroupName, "MeshService")
 
 // SchemeGroupVersion is group version used to register these objects
 var SchemeGroupVersion = schema.GroupVersion{Group: GroupName, Version: Version}
@@ -57,6 +58,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
 		&KubeLink{},
 		&KubeLinkList{},
+		&MeshService{},
+		&MeshServiceList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil
