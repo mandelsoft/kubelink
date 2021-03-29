@@ -10,7 +10,7 @@ metadata:
     dns.gardener.cloud/ttl: "500"
     service.beta.kubernetes.io/aws-load-balancer-type: "nlb"  # On AWS an NLB has to be used for UDP
   name: kubelink
-  namespace: kube-system
+  namespace: kubelink
 spec:
   selector:
     app: kubelink
@@ -30,7 +30,7 @@ metadata:
     app: kubelink-broker
     component: kubelink-broker
   name: kubelink-broker
-  namespace: kube-system
+  namespace: kubelink
 spec:
   replicas: 1
   selector:

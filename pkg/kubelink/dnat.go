@@ -50,10 +50,10 @@ func DNatEmbedding() ([]RuleDef, utils.StringSet) {
 ////////////////////////////////////////////////////////////////////////////////
 
 const DNAT_CHAIN = CHAIN_PREFIX + "SERVICES"
-const DNAT_SVC_CHAIN_PREFIX = CHAIN_PREFIX + "SVC-"
-const DNAT_SVCPORT_CHAIN_PREFIX = CHAIN_PREFIX + "SEP-"
+const DNAT_SVC_CHAIN_PREFIX = CHAIN_PREFIX + "MS-"
+const DNAT_SVCPORT_CHAIN_PREFIX = CHAIN_PREFIX + "EP-"
 
-func (this *linksdata) GetServiceChains(clusterAddresses tcp.CIDRList) iptables.Requests {
+func (this *links) GetServiceChains(src net.IP, clusterAddresses tcp.CIDRList) iptables.Requests {
 	var svcchains iptables.Requests
 	var rules iptables.Rules
 
@@ -64,30 +64,41 @@ func (this *linksdata) GetServiceChains(clusterAddresses tcp.CIDRList) iptables.
 			return true
 		}
 
+		addr := s.Address
+		if addr == nil {
+			name := s.Mesh
+			if name == "" {
+				name = DEFAULT_MESH
+			}
+			if m := this.meshes.ByName(name); m != nil {
+				addr = m.clusterAddress.IP
+			}
+		}
 		for _, cidr := range clusterAddresses {
-			if cidr.Contains(s.Address) {
+			if cidr.Contains(addr) {
 				clusterAddress = cidr
 				break
 			}
 		}
+
 		if clusterAddress == nil {
 			return true
 		}
 
 		natRules := iptables.Rules{
 			iptables.Rule{
-				iptables.R_CommentOpt(fmt.Sprintf("service %s %s", s.Key, s.Address)),
+				iptables.R_CommentOpt(fmt.Sprintf("service %s %s", s.Key, addr)),
 			},
 		}
 		// append service/port rules
 
 		if len(s.Ports) == 0 {
 			// a single endpoint chain for the service ip
-			handlePort(s, nil, &natRules, &svcchains)
+			handlePort(s, addr, nil, &natRules, &svcchains)
 		} else {
 			// dedicated endpoint chains for every port
 			for _, p := range s.Ports {
-				handlePort(s, &p, &natRules, &svcchains)
+				handlePort(s, addr, &p, &natRules, &svcchains)
 			}
 		}
 
@@ -99,6 +110,7 @@ func (this *linksdata) GetServiceChains(clusterAddresses tcp.CIDRList) iptables.
 		svcchains = append(svcchains, chain)
 
 		rules = append(rules, iptables.Rule{
+			iptables.R_DestOpt(tcp.IPtoCIDR(addr)),
 			iptables.R_JumpChainOpt(chain.Chain.Chain),
 		})
 
@@ -116,10 +128,10 @@ func (this *linksdata) GetServiceChains(clusterAddresses tcp.CIDRList) iptables.
 	return chains
 }
 
-func handlePort(s *Service, port *ServicePort, svcrules *iptables.Rules, svcchains *iptables.Requests) {
+func handlePort(s *Service, addr net.IP, port *ServicePort, svcrules *iptables.Rules, svcchains *iptables.Requests) {
 	eprules := iptables.Rules{
 		iptables.Rule{
-			iptables.R_CommentOpt(fmt.Sprintf("mesh service %s %s%s", s.Key, s.Address, port)),
+			iptables.R_CommentOpt(fmt.Sprintf("mesh service %s %s%s", s.Key, addr, port)),
 		},
 	}
 	hash := s.Endpoints.Hash(port)
@@ -127,13 +139,17 @@ func handlePort(s *Service, port *ServicePort, svcrules *iptables.Rules, svcchai
 	cnt := len(s.Endpoints)
 	for i, ep := range s.Endpoints {
 		var rule iptables.Rule
-		if cnt-i > 1 {
-			rule = iptables.Rule{
-				iptables.R_ProbabilityOpt(1.0 / float64(cnt-i)),
-			}
+
+		if port != nil {
+			rule = append(rule, iptables.R_ProtocolOpt(port.Protocol))
 		}
-		tgt := ep.Address.String() + ep.PortSuffix(port)
-		rule = append(rule, iptables.R_DNATOpt(tgt))
+		if cnt-i > 1 {
+			rule = append(rule, iptables.R_ProbabilityOpt(1.0/float64(cnt-i)))
+		}
+		if port != nil {
+			rule = append(rule, iptables.Opt("-m", port.Protocol))
+		}
+		rule = append(rule, iptables.R_DNATOpt(ep.Address, ep.TargetPortFor(port)))
 		eprules = append(eprules, rule)
 	}
 	epchain := iptables.NewChainRequest(
@@ -141,9 +157,7 @@ func handlePort(s *Service, port *ServicePort, svcrules *iptables.Rules, svcchai
 		DNAT_SVCPORT_CHAIN_PREFIX+encodeHash(hash),
 		eprules, true)
 
-	rule := iptables.Rule{
-		iptables.R_DestOpt(s.Address.String()),
-	}
+	var rule iptables.Rule
 	if port != nil {
 		rule = append(rule, iptables.R_PortFilter(port.Protocol, port.Port)...)
 	}

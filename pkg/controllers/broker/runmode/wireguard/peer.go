@@ -35,6 +35,7 @@ import (
 type Peers map[string]*Peer
 
 type Peer struct {
+	Key          string
 	Links        kubelink.LinkNameSet
 	PublicKey    wgtypes.Key
 	PresharedKey *wgtypes.Key
@@ -50,6 +51,7 @@ func (this Peers) Assure(name kubelink.LinkName, pub wgtypes.Key) *Peer {
 	p := this[k]
 	if p == nil {
 		p = &Peer{
+			Key:       k,
 			Links:     kubelink.LinkNameSet{},
 			PublicKey: pub,
 		}

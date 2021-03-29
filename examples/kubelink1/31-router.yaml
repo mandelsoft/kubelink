@@ -6,7 +6,7 @@ metadata:
     app: kubelink
     component: kubelink-router
   name: kubelink-router
-  namespace: kube-system
+  namespace: kubelink
 spec:
   selector:
     matchLabels:

@@ -24,7 +24,9 @@ import (
 
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
-
+	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile/reconcilers"
+	"github.com/gardener/controller-manager-library/pkg/resources"
+	"github.com/gardener/controller-manager-library/pkg/types"
 	_apps "k8s.io/api/apps/v1"
 	_core "k8s.io/api/core/v1"
 
@@ -42,10 +44,40 @@ func init() {
 	controllers.BaseController("broker", &config.Config{}).
 		RequireLease().
 		FinalizerDomain("kubelink.mandelsoft.org").
-		//	WatchesByGK(api.MESHSERVICE, controllers.SERVICE).
+		WatchesByGK(api.MESHSERVICE).
 		Reconciler(Create).With(controllers.SecretCacheReconciler).
 		With(tasks.TaskReconciler(3)).
+		//With(reconcilers.UsageReconcilerForGKs("services", controller.CLUSTER_MAIN, controllers.SERVICE)).
+		With(reconcilers.UsageReconcilerForRelation("services",
+			reconcilers.MainClusterUsageRelationFor(api.MESHSERVICE,
+				reconcilers.UsedResource(controllers.SERVICE, extractServiceUsageForMeshService),
+			),
+		)).
 		MustRegister()
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+func extractServiceUsageForMeshService(obj resources.Object) resources.ClusterObjectKeySet {
+	data := obj.Data().(*api.MeshService)
+
+	// TODO: to be moved to cmlib
+	// return types.ClusterKeyRelativeTo(obj, data.Spec.Service, controllers.SERVICE)
+	ref := types.ObjectReference{
+		Name: data.Spec.Service,
+	}
+	return controllers.AsKeySet(ref.ClusterKeyRelativeTo(obj, controllers.SERVICE))
+}
+
+func extractMeshUsageForMeshService(obj resources.Object) resources.ClusterObjectKeySet {
+	data := obj.Data().(*api.MeshService)
+
+	// TODO: to be moved to cmlib
+	// return types.ClusterKeyRelativeTo(obj, data.Spec.Service, controllers.SERVICE)
+	ref := types.ObjectReference{
+		Name: data.Spec.Mesh,
+	}
+	return controllers.AsKeySet(ref.ClusterKeyRelativeTo(obj, api.KUBELINK))
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -56,8 +88,10 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 		return nil, err
 	}
 	this := &reconciler{
-		secrets: controllers.GetSharedSecrets(controller),
-		config:  cfg.(*config.Config),
+		meshServices: map[string]resources.ClusterObjectKeySet{},
+		secrets:      controllers.GetSharedSecrets(controller),
+		usageCache:   reconcilers.GetSharedSimpleUsageCache(controller),
+		config:       cfg.(*config.Config),
 	}
 
 	var impl controllers.ReconcilerImplementation
@@ -83,6 +117,7 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 			return nil, err
 		}
 		controller.Infof("broker running in pod mode (%s)", this.NetworkInterface())
+		this.Links().SetPodMode(true)
 		data, err := ioutil.ReadFile("/proc/sys/net/ipv4/ip_forward")
 		if err != nil {
 			return nil, fmt.Errorf("cannot detect ip forwarding: %s", err)
@@ -124,6 +159,12 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 		return nil, fmt.Errorf("no deployment resource found: %s", err)
 	}
 	this.deploymentResource = r
+
+	r, err = controller.GetMainCluster().Resources().GetByExample(&_core.Service{})
+	if err != nil {
+		return nil, fmt.Errorf("no service resource found: %s", err)
+	}
+	this.svcResource = r
 
 	controller.Infof("using runmode %s", this.config.Mode)
 	this.runmode, err = CreateRunMode(this.config.Mode, this)

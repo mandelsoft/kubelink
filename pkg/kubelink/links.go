@@ -65,6 +65,9 @@ type Links interface {
 	GetGateway() net.IP
 	IsGateway(ip net.IP) bool
 
+	SetPodMode(mode bool)
+	IsPodMode() bool
+
 	IsGatewayLink(name LinkName) bool
 	HasWireguard() bool
 	RegisterLink(name LinkName, clusterCIDR *net.IPNet, fqdn string, cidr *net.IPNet) (*Link, error)
@@ -104,16 +107,17 @@ type Links interface {
 
 	GetFirewallChains() iptables.Requests
 	GetEgressChain(mesh *net.IPNet) *iptables.ChainRequest
-	GetNatChains(clusterAddresses tcp.CIDRList, linkName string) iptables.Requests
+	GetNatChains(src net.IP, clusterAddresses tcp.CIDRList, linkName string) iptables.Requests
 	GetSNatChains(clusterAddresses tcp.CIDRList, linkName string) iptables.Requests
 	GetGatewayAddrs() tcp.CIDRList
 
 	UpdateService(svc *Service)
 	GetServices() map[string]*Service
 	GetService(key string) *Service
+	RemoveService(key string)
 	GetServiceForAddress(ip net.IP) *Service
 	VisitServices(visitor func(l *Service) bool)
-	GetServiceChains(clusterAddresses tcp.CIDRList) iptables.Requests
+	GetServiceChains(src net.IP, clusterAddresses tcp.CIDRList) iptables.Requests
 
 	Locked(func(Links) error) error
 }

@@ -54,6 +54,18 @@ func (this *synched) GetGateway() net.IP {
 	return this.impl.GetGateway()
 }
 
+func (this *synched) SetPodMode(mode bool) {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+	this.impl.SetPodMode(mode)
+}
+
+func (this *synched) IsPodMode() bool {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+	return this.impl.IsPodMode()
+}
+
 func (this *synched) LinkInfoUpdated(logger logger.LogContext, name LinkName, access *LinkAccessInfo, dns *LinkDNSInfo) *Link {
 	this.lock.Lock()
 	defer this.lock.Unlock()
@@ -141,16 +153,22 @@ func (this *synched) GetFirewallChains() iptables.Requests {
 	return this.impl.GetFirewallChains()
 }
 
-func (this *synched) GetNatChains(clusterAddresses tcp.CIDRList, linkName string) iptables.Requests {
+func (this *synched) GetNatChains(src net.IP, clusterAddresses tcp.CIDRList, linkName string) iptables.Requests {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
-	return this.impl.GetNatChains(clusterAddresses, linkName)
+	return this.impl.GetNatChains(src, clusterAddresses, linkName)
 }
 
 func (this *synched) GetSNatChains(clusterAddresses tcp.CIDRList, linkName string) iptables.Requests {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 	return this.impl.GetSNatChains(clusterAddresses, linkName)
+}
+
+func (this *synched) GetServiceChains(src net.IP, clusterAddresses tcp.CIDRList) iptables.Requests {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+	return this.impl.GetServiceChains(src, clusterAddresses)
 }
 
 func (this *synched) RegisterLink(name LinkName, clusterCIDR *net.IPNet, fqdn string, cidr *net.IPNet) (*Link, error) {

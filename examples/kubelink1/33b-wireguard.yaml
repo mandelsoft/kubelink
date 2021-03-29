@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: wireguard
-  namespace: kube-system
+  namespace: kubelink
 type: Opaque
 data:
   WireguardPrivateKey: VUZwQW9CMTRmWGxXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXDRreS85MUVGcz0K  # don't forget base64

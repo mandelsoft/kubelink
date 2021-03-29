@@ -88,7 +88,7 @@ func (this *links) GetSNatChains(clusterAddresses tcp.CIDRList, linkName string)
 			if len(clusterAddresses) == 1 { // simplified ruleset
 				natRules = append(natRules,
 					iptables.Rule{
-						iptables.R_SNATOpt(clusterAddress.IP.String()),
+						iptables.R_SNATOpt(clusterAddress.IP),
 					},
 				)
 			} else {
@@ -130,16 +130,25 @@ func (this *links) GetSNatChains(clusterAddresses tcp.CIDRList, linkName string)
 		for _, e := range nat.egress {
 			nat.chain.Rules = append(nat.chain.Rules,
 				iptables.Rule{
-					iptables.R_DestOpt(e.String()),
-					iptables.R_SNATOpt(nat.clusterAddress.IP.String()),
+					iptables.R_DestOpt(e),
+					iptables.R_SNATOpt(nat.clusterAddress.IP),
 				},
 			)
 		}
 	}
-	rules = append(append(rules[:0:0], iptables.Rule{
+	add := iptables.Rules{}
+	if this.IsPodMode() {
+		add = append(add, iptables.Rule{
+			iptables.R_OutOpt("eth0"),
+			iptables.R_CommentOpt("outbound traffic from pod to cluster"),
+			iptables.R_MASQUERADEOpt(),
+		})
+	}
+	add = append(add, iptables.Rule{
 		iptables.R_Not(iptables.R_OutOpt(linkName)),
 		iptables.R_ReturnOpt(),
-	}), rules...)
+	})
+	rules = append(add, rules...)
 	chains = append(chains, natchains...)
 	chains = append(chains, iptables.NewChainRequest(
 		TABLE_NAT,

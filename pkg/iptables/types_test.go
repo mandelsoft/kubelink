@@ -10,11 +10,13 @@ package iptables_test
 
 import (
 	"fmt"
+	"net"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
 	. "github.com/mandelsoft/kubelink/pkg/iptables"
+	"github.com/mandelsoft/kubelink/pkg/tcp"
 )
 
 func init() {
@@ -148,22 +150,24 @@ var _ = Describe("Types", func() {
 	})
 
 	Context("rules", func() {
+		ip1net := tcp.IPtoCIDR(net.ParseIP("1.1.1.1"))
+		ip2 := net.ParseIP("2.2.2.2")
 		It("comment", func() {
 			checkDirect(R_CommentOpt("test"))
-			checkDirect(R_DestOpt("1.1.1.1"), R_CommentOpt("test"))
+			checkDirect(R_DestOpt(ip1net), R_CommentOpt("test"))
 		})
 		It("snat", func() {
-			checkDirect(R_DestOpt("1.1.1.1"), R_SNATOpt("2.2.2.2"))
+			checkDirect(R_DestOpt(ip1net), R_SNATOpt(ip2))
 		})
 		It("setmark", func() {
-			checkDirect(R_DestOpt("1.1.1.1"), R_SetXMarkOpt("0x0/0x0"))
+			checkDirect(R_DestOpt(ip1net), R_SetXMarkOpt("0x0/0x0"))
 		})
 		It("checkmark", func() {
-			checkDirect(R_DestOpt("1.1.1.1"), R_CheckMarkOpt("0x0/0x0"))
+			checkDirect(R_DestOpt(ip1net), R_CheckMarkOpt("0x0/0x0"))
 		})
 
 		It("probability", func() {
-			checkDirect(R_DestOpt("1.1.1.1"), R_ProbabilityOpt(0.5), R_DNATOpt("2.2.2.2"))
+			checkDirect(R_DestOpt(ip1net), R_ProbabilityOpt(0.5), R_DNATOpt(ip2))
 		})
 	})
 
@@ -175,6 +179,11 @@ var _ = Describe("Types", func() {
 				R_CommentOpt("test"),
 				Opt("-other", "something", "else"),
 				R_DropOpt(),
+			)
+		})
+		It("masquerade", func() {
+			checkDirect(
+				R_MASQUERADEOpt(),
 			)
 		})
 	})

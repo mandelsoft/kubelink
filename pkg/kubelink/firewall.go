@@ -95,7 +95,7 @@ func (this *links) GetEgressChain(mesh *net.IPNet) *iptables.ChainRequest {
 	// allow all traffic forwarded to other links
 	for _, e := range this.GetGatewayEgress(nil, mesh) {
 		rules = append(rules, iptables.Rule{
-			iptables.R_DestOpt(e.String()),
+			iptables.R_DestOpt(e),
 			iptables.R_AcceptOpt(),
 		})
 	}

@@ -9,7 +9,7 @@ metadata:
     dns.gardener.cloud/dnsnames: kubelink.kubelink1.ringdev.shoot.dev.k8s-hana.ondemand.com
     dns.gardener.cloud/ttl: "500"
   name: kubelink
-  namespace: kube-system
+  namespace: kubelink
 spec:
   selector:
     app: kubelink
@@ -29,7 +29,7 @@ metadata:
     app: kubelink-broker
     component: kubelink-broker
   name: kubelink-broker
-  namespace: kube-system
+  namespace: kubelink
 spec:
   replicas: 1
   selector:

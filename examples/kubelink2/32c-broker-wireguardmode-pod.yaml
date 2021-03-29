@@ -1,0 +1,88 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: kubelink
+  annotations:
+    dns.gardener.cloud/class: garden
+    dns.gardener.cloud/dnsnames: kubelink.kubelink2.ringdev.shoot.dev.k8s-hana.ondemand.com
+    dns.gardener.cloud/ttl: "500"
+  name: kubelink
+  namespace: kubelink
+spec:
+  selector:
+    app: kubelink
+    component: kubelink-broker
+  ports:
+    - name: wireguard
+      port: 8777
+      protocol: UDP
+      targetPort: 8188
+  sessionAffinity: None
+  type: LoadBalancer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: kubelink-broker
+    component: kubelink-broker
+  name: kubelink-broker
+  namespace: kubelink
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubelink
+      component: kubelink-broker
+  template:
+    metadata:
+      labels:
+        app: kubelink
+        component: kubelink-broker
+    spec:
+      containers:
+        - name: broker
+          image: mandelsoft/kubelink:latest
+          imagePullPolicy: "Always"
+          args:
+            - --controllers=broker
+            - --mode=wireguard
+            - --secret=wireguard
+            - --server-port-http=8180
+            - --broker-port=8188
+            - --pod-cidr=100.96.0.0/11
+            - --node-cidr=10.250.0.0/16
+            - --node-ip=$(MY_NODEIP)
+            - --service-cidr=100.64.16.0/20
+            - --ifce-name=kubelink
+            - --ipip=shared
+            - --dns-advertisement
+            - --dns-propagation=dns
+            - --coredns-configure
+          env:
+            - name: MY_NODEIP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          securityContext:
+            privileged: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8180
+              scheme: HTTP
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+          ports:
+            - containerPort: 8180
+              protocol: TCP
+            - containerPort: 8188
+              protocol: UDP
+          resources:
+            {}
+
+      serviceAccountName: kubelink
+      terminationGracePeriodSeconds: 120
+

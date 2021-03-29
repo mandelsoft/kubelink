@@ -42,7 +42,17 @@ For the connection among the clusters two modes are available:
   *kubelink-broker* is used to maintain a wireguard device, which then
   handled the network traffic by its own.
 
-The examples just provide such a setup.
+The examples below just provide such a setup.
+
+For the deployment there are two options:
+- Node mode. It provides the networking device directly on a node.
+  Here the iptables and routing rules may conflict with the overlay network
+  implementation. For example, calico enforces a dedicated kind of MASQUERADEing
+  that is not compatible with the multi mesh node.
+- Pod Mode. Here the networking devices is maintained inside a container.
+  This offers full flexibility in configuring iptables rule and therefore
+  can support full multi mesh mode and the new
+  [mesh service feature](#mesh-services). 
 
 Besides this connection management controller there is an additional controller
 (*kubelink-router*) that manages the required routes on the cluster nodes.
@@ -75,6 +85,28 @@ The broker does not handle the inter-cluster network traffic, which is now
 completely handled by the wireguard device. Therefore the broker configures
 the wireguard device and its peers according the desired cluster links,
 which must provide a public wireguard key for the dedicated endpoint. 
+
+### Node Mode
+
+The networking device is maintained directly on a node, This saves some
+network hop and NATting, but may cause conflict and problems with
+the overlay network implementations. Therefore multi-mesh support is 
+potentially not possible and the new mesh service feature is disabled.
+
+This mode requires to run the broker with the `hostNetwork: true` option.
+
+### Pod Mode
+
+Here the networking device is maintained inside a container. It requires
+an additional network hop for inbound and outbound traffic, as well as
+an additional SNAT for outbound traffic from the pod to avoid conflicts
+with the firewall feature of the overlay network.
+
+This mode enables the full multi mesh support and the mesh service feature.
+
+It is enabled by running the broker pod NOT with `hostNetwork: true`, 
+and additionally the pod cidr and the node ip of the node the pod is
+running must be provided (with the Kubernetes downward API). (See examples below)
 
 ## Configuring a Cluster Mesh
 
@@ -196,6 +228,10 @@ additional network device.
 
 Newer versions of *Gardener* provide this option out of the box.
 
+In the node mode potentially there are further problems with the overlay network,
+therefore only a single mesh is supported and the mesh service feature is
+disabled.
+
 ## Implementation
 
 The two used controllers are bundled into one controller manager (`kubelink`)
@@ -206,7 +242,7 @@ manifests just choose the appropriate controller(s) by a dedicated command line 
 ## Example
 
 The folder `examples` contains the required manifests for two interconnected
-clusters.
+clusters. The kubelink infrastructure is deployed in namespace `kubelink`.
 
 In your scenario you have to adapt some values accordingly. The assumptions 
 here in the example files are:
@@ -250,6 +286,9 @@ and the wireguard mode ([32b](examples/kubelink1/32b-broker-wireguardmode.yaml))
 For the wireguard mode you need a [secret](examples/kubelink1/33b-wireguard.yaml)
 with at least the wireguard private key to use.
 
+For the wireguard mode there is also an example for configuring the
+[pod mode](#pod-mode) [32c](examples/kubelink1/32c-broker-wireguardmode-pod.yaml).
+ 
 Depending on your network policies it might be required to
 [enable access](examples/52-policy.yaml) from
 the kube dns server to the additional coredns deployment used by _kubelink_.
@@ -432,6 +471,91 @@ All local links in all clusters of a mesh should use the same service ip.
 The `global` sub domain is then automatically added to the mesh domain
 on the local kubeling dns servers.
 
+### Mesh Services
+
+With the new kubernetes resource `MeshService` it is possible 
+to
+- bind virtual mesh addresses to local services
+- bind ports of the local link address to dedicated services.
+
+This feature enables the usage of services of a cluster from all-over
+the mesh without exposing a unique IP range as routable part in the mesh.
+This way the service IP ranges of involved clusters might not be disjoint.
+
+For the example above this might be a service for the virtual
+address `192.168.0.100` as shown in the following example.
+
+**Virtual Mesh Address**
+```
+apiVersion: kubelink.mandelsoft.org/v1alpha1
+kind: MeshService
+metadata:
+  name: aservice
+  namespace: default
+spec:
+  service: servicename
+  meshAddress: 192.168.0.100
+```
+
+Because a complete address is used no dedicated port must be defined.
+Requests are directly redirected to the cluster ip of the kubernetes service.
+Nevertheless dedicated port mappings are possible.
+
+If no additional mesh address should be used for this, a dedicated
+port (or port set) on the local link address can be bound to service ports.
+Hereby dedicated port mappings are reguired. It is possible to refer to
+the port names used in the kubernetes service object.
+
+Additionally it is required to configure the mesh whose local link
+should be used for the port binding. By default the default-mesh is used.
+
+**Using the Local Link Address**
+```go
+apiVersion: kubelink.mandelsoft.org/v1alpha1
+kind: MeshService
+metadata:
+  name: anotherservice
+  namespace: default
+spec:
+  service: echoserver
+# mesh: <mesh name>  describing the local link address to use
+  ports:
+    - port: 8800
+  endpoints:
+    - portMappings:
+      - port: 8800
+        targetPort: http
+```
+
+Another mode is to bind any reachable endpoint or endpoint set by
+not specifying a `service` name, but any list of dedicated endpoints
+(IP addresses).
+This might be an endpoint in the cluster or some other address
+reacable from the  cluster's node network.
+
+Basically any non-conflicting IP address can be used for a mesh service
+address instead of an address of the mesh ip range as long it configured as
+allowed IP on the caller side, and not prohibited by the firewall setting for
+this link (`egress` rule). But so far it is not routed in the providing cluster.
+
+This feature might be combined with the
+[global mesh DNS feature](#mesh-global-dns-names).
+
+#### Binding external services 
+
+The same way *Mesh Services work* it is possible to provide access to
+any service provided in any environment (local openstack/vmware environment
+or any hyperscaler) to a mesh network using the wireguard mode.
+
+Therefore only a router with a wireguard endpoint has to be provided
+in such an environment. With assigning a mesh IP to this device
+and configuring the reachable wireguard endpoints of kubelink clusters (for
+example with wg-quick) such endpoints can be configured inside a kubelink 
+mesh member just by adding an approprate `KubeLink` object.
+
+On the service side a DNAT for the virtual mesh address/port pair is sufficient
+and there is access from any mesh member to the exposed service.
+
 ## Command Line Reference
 
 ```
@@ -470,8 +594,12 @@ Flags:
       --broker.meshdns-service-ip string            Default Service IP of global mesh service DNS service of controller broker
       --broker.mode string                          VPN mode (bridge, wireguard, none) of controller broker
       --broker.node-cidr string                     CIDR of node network of cluster of controller broker
+      --broker.node-ip string                       Node ip in case of pod mode of controller broker
+      --broker.pod-cidr string                      CIDR of pod network of cluster of controller broker
       --broker.pool.resync-period duration          Period for resynchronization of controller broker
       --broker.pool.size int                        Worker pool size of controller broker
+      --broker.route-table uint                     route table to use of controller broker
+      --broker.rule-priority uint                   rule priority for optional route table rule of controller broker
       --broker.secret string                        TLS or wireguard secret of controller broker
       --broker.secret-manage-mode string            Manage mode for TLS secret of controller broker
       --broker.secrets.pool.size int                Worker pool size for pool secrets of controller broker
@@ -525,11 +653,13 @@ Flags:
       --namespace string                            namespace for lease (default "kube-system")
   -n, --namespace-local-access-only                 enable access restriction for namespace local access only (deprecated)
       --node-cidr string                            CIDR of node network of cluster
+      --node-ip string                              Node ip in case of pod mode
       --omit-lease                                  omit lease for development
       --plugin-file string                          directory containing go plugins
       --pod-cidr string                             CIDR of pod network of cluster
       --pool.resync-period duration                 Period for resynchronization
       --pool.size int                               Worker pool size
+      --route-table uint                            route table to use
       --router.datafile string                      datafile for storing managed routes of controller router
       --router.default.pool.size int                Worker pool size for pool default of controller router
       --router.ipip string                          ip-ip tunnel mode (none, shared, configure of controller router
@@ -537,9 +667,12 @@ Flags:
       --router.pod-cidr string                      CIDR of pod network of cluster of controller router
       --router.pool.resync-period duration          Period for resynchronization of controller router
       --router.pool.size int                        Worker pool size of controller router
+      --router.route-table uint                     route table to use of controller router
+      --router.rule-priority uint                   rule priority for optional route table rule of controller router
       --router.service string                       service to lookup endpoint for broker of controller router
       --router.update.pool.resync-period duration   Period for resynchronization for pool update of controller router
       --router.update.pool.size int                 Worker pool size for pool update of controller router
+      --rule-priority uint                          rule priority for optional route table rule
       --secret string                               TLS or wireguard secret
       --secret-manage-mode string                   Manage mode for TLS secret
       --secrets.pool.size int                       Worker pool size for pool secrets
@@ -552,5 +685,4 @@ Flags:
       --update.pool.resync-period duration          Period for resynchronization for pool update
       --update.pool.size int                        Worker pool size for pool update
       --version                                     version for kubelink
-
 ```

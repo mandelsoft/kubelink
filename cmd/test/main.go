@@ -30,6 +30,30 @@ import (
 
 func main() {
 	addr, _ := netlink.ParseIPNet("192.168.100.1/24")
+
+	svc0 := &kubelink.Service{
+		Key: "service0",
+		Ports: []kubelink.ServicePort{
+			{
+				Protocol: "",
+				Port:     80,
+			},
+		},
+		Endpoints: kubelink.ServiceEndpoints{
+			{
+				Address: net.ParseIP("100.64.0.30"),
+				PortMappings: []kubelink.PortMapping{
+					{
+						Port: kubelink.ServicePort{
+							Port: 80,
+						},
+						TargetPort: 8080,
+					},
+				},
+			},
+		},
+	}
+
 	svc1 := &kubelink.Service{
 		Key:     "service1",
 		Address: net.ParseIP("192.168.100.21"),
@@ -79,9 +103,38 @@ func main() {
 	}
 
 	links := kubelink.NewLinks(nil, 0)
+	links.SetDefaultMesh("linkdef", addr, kubelink.LinkDNSInfo{})
+	links.UpdateService(svc0)
 	links.UpdateService(svc1)
 	links.UpdateService(svc2)
 
-	req := links.GetServiceChains(tcp.CIDRList{addr})
+	req := links.GetServiceChains(nil, tcp.CIDRList{addr})
 	fmt.Printf("%s\n", req)
+
+	other := &kubelink.Service{
+		Key: "service0",
+		Ports: []kubelink.ServicePort{
+			{
+				Protocol: "",
+				Port:     80,
+			},
+		},
+		Endpoints: kubelink.ServiceEndpoints{
+			{
+				Address: net.ParseIP("100.64.0.30"),
+				PortMappings: []kubelink.PortMapping{
+					{
+						Port: kubelink.ServicePort{
+							Port: 80,
+						},
+						TargetPort: 8080,
+					},
+				},
+			},
+		},
+	}
+
+	other.Normalize()
+
+	fmt.Printf("equal: %t\n", other.Equal(svc0))
 }

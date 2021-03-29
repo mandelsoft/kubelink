@@ -382,14 +382,14 @@ func (this *Link) GetIngressChain() *iptables.ChainRequest {
 	}
 	for _, i := range this.Ingress.Denied {
 		rules = append(rules, iptables.Rule{
-			iptables.R_DestOpt(i.String()),
+			iptables.R_DestOpt(i),
 			iptables.R_DropOpt(),
 		})
 	}
 	if this.Ingress.Allowed.IsSet() {
 		for _, i := range this.Ingress.Allowed {
 			rules = append(rules, iptables.Rule{
-				iptables.R_DestOpt(i.String()),
+				iptables.R_DestOpt(i),
 				iptables.R_ReturnOpt(),
 			})
 		}

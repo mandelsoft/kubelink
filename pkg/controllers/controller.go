@@ -45,7 +45,8 @@ func BaseController(name string, config config.OptionSource) controller.Configur
 		OptionsByExample("options", config).
 		MainResourceByGK(v1alpha1.KUBELINK).
 		WorkerPool("update", 1, 20*time.Second).
-		Commands(CMD_UPDATE)
+		Commands(CMD_UPDATE).
+		Pool(controller.DEFAULT_POOL)
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -39,19 +39,79 @@ const PROTO_UDP = "udp"
 type Service struct {
 	Key       string
 	Address   net.IP
-	Ports     []ServicePort
+	Mesh      string
+	Ports     ServicePorts
 	Endpoints ServiceEndpoints
 }
 
 func (this *Service) Normalize() {
+	if this.Address != nil {
+		this.Mesh = ""
+	}
 	ip := this.Address.To4()
 	if ip != nil {
 		this.Address = ip
 	}
-	for i := range this.Ports {
-		(&this.Ports[i]).Normalize()
-	}
+	this.Ports.Normalize()
 	this.Endpoints.Normalize()
+}
+
+func (this *Service) Equal(s *Service) bool {
+	if s == this {
+		return true
+	}
+	if s == nil || this == nil {
+		return false
+	}
+
+	if this.Key != s.Key {
+		return false
+	}
+
+	if this.Mesh != s.Mesh {
+		return false
+	}
+
+	if !tcp.EqualIP(this.Address, s.Address) {
+		return false
+	}
+
+	if !this.Ports.Equal(s.Ports) {
+		return false
+	}
+
+	return this.Endpoints.Equal(s.Endpoints)
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// service port list
+
+type ServicePorts []ServicePort
+
+func (this ServicePorts) Normalize() {
+	if this == nil {
+		return
+	}
+	for i := range this {
+		(&this[i]).Normalize()
+	}
+	sort.Slice(this, this.Less)
+}
+
+func (this ServicePorts) Less(i, j int) bool {
+	return this[i].Compare(&this[j]) < 0
+}
+
+func (this ServicePorts) Equal(s ServicePorts) bool {
+	if len(this) != len(s) {
+		return false
+	}
+	for i, p := range this {
+		if !p.Equal(&s[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -70,6 +130,26 @@ func (this *ServicePort) Normalize() {
 	}
 }
 
+func (this *ServicePort) Compare(p *ServicePort) int {
+	if this.Port < p.Port {
+		return -1
+	}
+	if this.Port == p.Port {
+		return strings.Compare(this.Protocol, p.Protocol)
+	}
+	return 1
+}
+
+func (this *ServicePort) Equal(p *ServicePort) bool {
+	if this == p {
+		return true
+	}
+	if this == nil || p == nil {
+		return false
+	}
+	return this.Port == p.Port && this.Protocol == p.Protocol
+}
+
 func (this *ServicePort) String() string {
 	if this == nil {
 		return ""
@@ -78,11 +158,53 @@ func (this *ServicePort) String() string {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// Service Endpoint list
+
+type ServiceEndpoints []ServiceEndpoint
+
+func (this ServiceEndpoints) Normalize() {
+	for i := range this {
+		(&this[i]).Normalize()
+	}
+	sort.Slice(this, this.Less)
+}
+
+func (this ServiceEndpoints) Less(i, j int) bool {
+	return this[i].Compare(&this[j]) < 0
+}
+
+func (this ServiceEndpoints) Equal(s ServiceEndpoints) bool {
+	if len(this) != len(s) {
+		return false
+	}
+
+	for i, p := range this {
+		if !p.Equal(&s[i]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (this ServiceEndpoints) Hash(port *ServicePort) hash.Hash {
+	h := md5.New()
+	if port != nil {
+		h.Write(tcp.HtoNs(uint16(port.Port)))
+		h.Write([]byte(port.Protocol))
+	}
+	for i := range this {
+		this[i].AddToHash(h, port)
+	}
+	return h
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // service endpoint
 
 type ServiceEndpoint struct {
 	Address      net.IP
-	PortMappings []PortMapping
+	PortMappings PortMappings
 }
 
 func (this *ServiceEndpoint) Normalize() {
@@ -90,21 +212,36 @@ func (this *ServiceEndpoint) Normalize() {
 	if ip != nil {
 		this.Address = ip
 	}
-	for i := range this.PortMappings {
-		(&this.PortMappings[i]).Normalize()
-	}
+	this.PortMappings.Normalize()
 }
 
-func (this *ServiceEndpoint) PortSuffix(port *ServicePort) string {
+func (this *ServiceEndpoint) Compare(e *ServiceEndpoint) int {
+	return bytes.Compare(this.Address, this.Address)
+}
+
+func (this *ServiceEndpoint) Equal(s *ServiceEndpoint) bool {
+	if this == s {
+		return true
+	}
+	if this == nil || s == nil {
+		return false
+	}
+	if !this.Address.Equal(s.Address) {
+		return false
+	}
+	return this.PortMappings.Equal(s.PortMappings)
+}
+
+func (this *ServiceEndpoint) TargetPortFor(port *ServicePort) int32 {
 	if port == nil {
-		return ""
+		return 0
 	}
 	for _, m := range this.PortMappings {
 		if m.Port == *port {
-			return fmt.Sprintf(":%d", m.TargetPort)
+			return m.TargetPort
 		}
 	}
-	return fmt.Sprintf(":%d", port.Port)
+	return port.Port
 }
 
 func (this *ServiceEndpoint) AddToHash(hash hash.Hash, port *ServicePort) {
@@ -121,6 +258,34 @@ func (this *ServiceEndpoint) AddToHash(hash hash.Hash, port *ServicePort) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// Port mapping lst
+
+type PortMappings []PortMapping
+
+func (this PortMappings) Normalize() {
+	for i := range this {
+		(&this[i]).Normalize()
+	}
+	sort.Slice(this, this.Less)
+}
+
+func (this PortMappings) Less(i, j int) bool {
+	return this[i].Compare(&this[j]) < 0
+}
+
+func (this PortMappings) Equal(p PortMappings) bool {
+	if len(this) != len(p) {
+		return false
+	}
+	for i, e := range this {
+		if !e.Equal(&p[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Port mapping
 
 type PortMapping struct {
@@ -132,36 +297,20 @@ func (this *PortMapping) Normalize() {
 	this.Port.Normalize()
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Service Endpoint list
-
-type ServiceEndpoints []ServiceEndpoint
-
-func (this ServiceEndpoints) Normalize() {
-	for i := range this {
-		(&this[i]).Normalize()
+func (this *PortMapping) Compare(p *PortMapping) int {
+	c := this.Port.Compare(&p.Port)
+	if c != 0 {
+		return c
 	}
-	sort.Slice(this, this.Less)
+	return int(this.TargetPort) - int(this.TargetPort)
 }
 
-func (this ServiceEndpoints) Hash(port *ServicePort) hash.Hash {
-	h := md5.New()
-	if port != nil {
-		h.Write(tcp.HtoNs(uint16(port.Port)))
-		h.Write([]byte(port.Protocol))
+func (this *PortMapping) Equal(p *PortMapping) bool {
+	if this == p {
+		return true
 	}
-	for i := range this {
-		this[i].AddToHash(h, port)
+	if this == nil || p == nil {
+		return false
 	}
-	return h
-}
-
-func (this ServiceEndpoints) Len() int {
-	return len(this)
-}
-func (this ServiceEndpoints) Less(i, j int) bool {
-	return bytes.Compare(this[i].Address, this[j].Address) < 0
-}
-func (this ServiceEndpoints) Swap(i, j int) {
-	this[i], this[j] = this[j], this[i]
+	return this.Port.Equal(&p.Port) && this.TargetPort == p.TargetPort
 }

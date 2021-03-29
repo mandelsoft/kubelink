@@ -42,9 +42,11 @@ github.com/gardener/controller-manager-library/pkg/controllermanager/controller/
 github.com/gardener/controller-manager-library/pkg/controllermanager/controller/lease
 github.com/gardener/controller-manager-library/pkg/controllermanager/controller/mappings
 github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile
+github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile/reconcilers
 github.com/gardener/controller-manager-library/pkg/controllermanager/extension
 github.com/gardener/controller-manager-library/pkg/controllermanager/extension/groups
 github.com/gardener/controller-manager-library/pkg/controllermanager/extension/mappings
+github.com/gardener/controller-manager-library/pkg/convert
 github.com/gardener/controller-manager-library/pkg/ctxutil
 github.com/gardener/controller-manager-library/pkg/errors
 github.com/gardener/controller-manager-library/pkg/fieldpath
@@ -58,12 +60,16 @@ github.com/gardener/controller-manager-library/pkg/resources/apiextensions
 github.com/gardener/controller-manager-library/pkg/resources/conditions
 github.com/gardener/controller-manager-library/pkg/resources/defaultscheme/v1.16
 github.com/gardener/controller-manager-library/pkg/resources/errors
+github.com/gardener/controller-manager-library/pkg/resources/filter
 github.com/gardener/controller-manager-library/pkg/resources/minimal
 github.com/gardener/controller-manager-library/pkg/resources/plain
 github.com/gardener/controller-manager-library/pkg/run
 github.com/gardener/controller-manager-library/pkg/server
 github.com/gardener/controller-manager-library/pkg/server/healthz
 github.com/gardener/controller-manager-library/pkg/sync
+github.com/gardener/controller-manager-library/pkg/types
+github.com/gardener/controller-manager-library/pkg/types/infodata
+github.com/gardener/controller-manager-library/pkg/types/infodata/simple
 github.com/gardener/controller-manager-library/pkg/utils
 github.com/gardener/controller-manager-library/pkg/utils/pkiutil
 # github.com/ghodss/yaml v1.0.0

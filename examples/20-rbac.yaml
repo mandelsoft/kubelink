@@ -7,7 +7,7 @@ metadata:
   labels:
     app: kubelink
   name: kubelink
-  namespace: kube-system
+  namespace: kubelink
 ---
 #
 # permissions
@@ -50,7 +50,6 @@ rules:
   - ""
   resources:
     - serviceaccounts
-    - services     # for --service option
     - pods
   verbs:
     - get
@@ -59,6 +58,7 @@ rules:
   - ""
   resources:
     - endpoints     # for --service option
+    - services
   verbs:
     - get
     - list
@@ -78,6 +78,8 @@ rules:
   resources:
   - kubelinks
   - kubelinks/status
+  - meshservices
+  - meshservices/status
   verbs:
   - get
   - list
@@ -108,7 +110,7 @@ metadata:
   labels:
     app: kubelink
   name: kubelink
-  namespace: kube-system
+  namespace: kubelink
 rules:
 - apiGroups:
   - ""
@@ -136,7 +138,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: kubelink
-  namespace: kube-system
+  namespace: kubelink
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1beta1
@@ -145,7 +147,7 @@ metadata:
   labels:
     app: kubelink
   name: kubelink
-  namespace: kube-system
+  namespace: kubelink
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -153,4 +155,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: kubelink
-  namespace: kube-system
+  namespace: kubelink

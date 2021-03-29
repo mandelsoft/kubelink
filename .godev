@@ -3,12 +3,19 @@
 echo "adding commands"
 export PATH="$PATH:$PWD/local"
 export RUNMODE=wireguard-pod
+export NAMESPACE=kubelink
 
-Runmode()
+function Runmode()
 {
   if [ -z "$1" ]; then
-    echo "Rumode $RUNMODE"
+    if [ -n "$NAMESPACE" ]; then
+      echo "Rumode $RUNMODE (namespace $NAMESPACE)"
+    else
+      echo "Rumode $RUNMODE"
+    fi
   else
     export RUNMODE="$1"
   fi
 }
+
+export -f Runmode

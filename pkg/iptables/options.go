@@ -20,6 +20,7 @@ package iptables
 
 import (
 	"fmt"
+	"net"
 	"reflect"
 	"sync"
 )
@@ -63,6 +64,7 @@ func init() {
 		Trailing("SNAT", 0,
 			OptType("---to-source", 1),
 		),
+		Trailing("MASQUERADE", 0),
 		AllArg,
 	)
 }
@@ -76,13 +78,15 @@ func R_OutOpt(name string) Option {
 func R_SourceOpt(addr string) Option {
 	return Opt("-s", addr)
 }
-func R_DestOpt(addr string) Option {
-	return Opt("-d", addr)
+func R_DestOpt(addr *net.IPNet) Option {
+	return Opt("-d", addr.String())
 }
 func R_PortFilter(proto string, port int32) Options {
-	return Options{Opt("-p", proto), ComposeOpt("-m", proto, Opt("--dport", fmt.Sprintf("%d", port)))}
+	return Options{R_ProtocolOpt(proto), ComposeOpt("-m", proto, Opt("--dport", fmt.Sprintf("%d", port)))}
 }
-
+func R_ProtocolOpt(proto string) Option {
+	return Opt("-p", proto)
+}
 func R_JumpChainOpt(name string) Option {
 	return Opt("-j", name)
 }
@@ -104,11 +108,18 @@ func R_SetXMarkOpt(mark string) Option {
 func R_CheckMarkOpt(mark string) Option {
 	return ComposeOpt("-m", "mark", Opt("--mark", mark))
 }
-func R_SNATOpt(ip string) Option {
-	return ComposeOpt("-j", "SNAT", Opt("--to-source", ip))
+func R_SNATOpt(ip net.IP) Option {
+	return ComposeOpt("-j", "SNAT", Opt("--to-source", ip.String()))
 }
-func R_DNATOpt(ip string) Option {
-	return ComposeOpt("-j", "DNAT", Opt("--to-destination", ip))
+func R_MASQUERADEOpt() Option {
+	return Opt("-j", "MASQUERADE")
+}
+func R_DNATOpt(ip net.IP, port ...int32) Option {
+	p := ""
+	if len(port) > 0 && port[0] > 0 {
+		p = fmt.Sprintf(":%d", port[0])
+	}
+	return ComposeOpt("-j", "DNAT", Opt("--to-destination", ip.String()+p))
 }
 func R_CommentOpt(c string) Option {
 	return ComposeOpt("-m", "comment", Opt("--comment", c))
@@ -291,11 +302,13 @@ func (this *trailingType) Consume(list []string) (int, Options, []string) {
 		return -1, nil, list
 	}
 	var trailing Options
-	if this.types.types != nil {
+	if len(this.types.types) > 0 {
 		// handle unknown trailing options as single additional option
 		trailing = this.types.ParseOptions(list[this.args+1:]...)
 	} else {
-		trailing = Options{Opt(list[this.args+1:]...)}
+		if len(list) > this.args+1 {
+			trailing = Options{Opt(list[this.args+1:]...)}
+		}
 	}
 	return this.args + 1, trailing, list[:0:0]
 }

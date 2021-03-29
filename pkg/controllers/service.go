@@ -23,10 +23,12 @@ import (
 
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller"
 	"github.com/gardener/controller-manager-library/pkg/resources"
+	"github.com/gardener/controller-manager-library/pkg/resources/filter"
 	corev1 "k8s.io/api/core/v1"
 )
 
 var SERVICE = resources.NewGroupKind("", "Service")
+var FilterServices = filter.GroupKindFilter(SERVICE)
 
 func GetServicePort(cntr controller.Interface, name string, kind string, proto corev1.Protocol) (int, error) {
 	// analyse and validate service

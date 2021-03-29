@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: kubelink-globaldns
-  namespace: kube-system
+  namespace: kubelink
 ---
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRole
@@ -33,7 +33,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: kubelink-globaldns
-  namespace: kube-system
+  namespace: kubelink
 ---
 apiVersion: v1
 kind: Service
@@ -41,7 +41,7 @@ metadata:
   labels:
     app: kubelink-globaldns
   name: kubelink-globaldns
-  namespace: kube-system
+  namespace: kubelink
 spec:
   clusterIP: 100.64.0.12
   ports:
@@ -66,7 +66,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: globaldns-corefile
-  namespace: kube-system
+  namespace: kubelink
 data:
   Corefile: |
     .:8053 {
@@ -91,7 +91,7 @@ metadata:
   labels:
     app: kubelink-globaldns
   name: kubelink-globaldns
-  namespace: kube-system
+  namespace: kubelink
 spec:
   progressDeadlineSeconds: 600
   replicas: 2

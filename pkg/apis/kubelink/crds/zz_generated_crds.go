@@ -201,50 +201,53 @@ spec:
             type: object
           spec:
             properties:
-              apiAccess:
-                description: SecretReference represents a Secret Reference. It has enough information to retrieve secret in any namespace
-                properties:
-                  name:
-                    description: Name is unique within a namespace to reference a secret resource.
-                    type: string
-                  namespace:
-                    description: Namespace defines the space within which the secret name must be unique.
-                    type: string
-                type: object
-              cidr:
-                type: string
-              clusterAddress:
-                type: string
-              dns:
-                properties:
-                  baseDomain:
-                    description: Base DNS Domain. For LocalLinks this is the mesh domain, for regular links it is the links local (cluster) domain
-                    type: string
-                  dnsIP:
-                    description: IP Address of DNS Service. For LocalLinks this is the mesh global dns service for regular links it is the link (cluster) dns service
-                    type: string
-                  omitDNSPropagation:
-                    type: boolean
-                type: object
-              egress:
+              endpoints:
                 items:
-                  type: string
+                  properties:
+                    address:
+                      type: string
+                    portMappings:
+                      items:
+                        properties:
+                          port:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            x-kubernetes-int-or-string: true
+                          protocol:
+                            type: string
+                          targetPort:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            x-kubernetes-int-or-string: true
+                        required:
+                        - port
+                        - targetPort
+                        type: object
+                      type: array
+                  type: object
                 type: array
-              endpoint:
+              mesh:
                 type: string
-              gatewayLink:
+              meshAddress:
                 type: string
-              ingress:
+              ports:
                 items:
-                  type: string
+                  properties:
+                    name:
+                      type: string
+                    port:
+                      format: int32
+                      type: integer
+                    protocol:
+                      type: string
+                  required:
+                  - port
+                  type: object
                 type: array
-              presharedKey:
+              service:
                 type: string
-              publicKey:
-                description: public key for wireguard
-                type: string
-            required:
-            - clusterAddress
             type: object
           status:
             properties:

@@ -27,6 +27,7 @@ import (
 
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
+	"github.com/gardener/controller-manager-library/pkg/utils"
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -56,6 +57,7 @@ type mode struct {
 	lock   sync.Mutex
 	err    error            // error configuring wireguard device
 	errors map[string]error // error for a dedicated cluster address
+	data   map[string]int64 // transfer count to check connectivity
 
 	finalizer func()
 
@@ -69,6 +71,7 @@ func NewWireguardMode(env runmode.RunModeEnv) (runmode.RunMode, error) {
 		RunModeBase: runmode.NewRunModeBase(config.RUN_MODE_WIREGUARD, env),
 		config:      env.Config(),
 		errors:      map[string]error{},
+		data:        map[string]int64{},
 		peerstate:   map[kubelink.LinkName]runmode.LinkState{},
 	}
 	if this.config.Port == 0 {
@@ -199,11 +202,12 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 
 	peers := Peers{}
 	activelinks := kubelink.LinkNameSet{}
+	activekeys := utils.StringSet{}
 	this.Links().VisitLinks(func(l *kubelink.Link) bool {
 		if l.PublicKey != nil && l.Endpoint != "" {
-			activelinks.Add(l.Name)
 			peer := peers.Assure(l.Name, *l.PublicKey)
-
+			activelinks.Add(l.Name)
+			activekeys.Add(peer.Key)
 			err := peer.AddPresharedKey(l.PresharedKey)
 			if err != nil {
 				this.propagateError(nil, err, peer.Links)
@@ -224,12 +228,22 @@ next:
 		peercfg := peer.GetConfig()
 		found := false
 		for _, p := range dev.Peers {
+			pub := p.PublicKey.String()
+			old := this.data[pub]
+			new := p.ReceiveBytes
+			this.data[pub] = new
 			if equalKey(&p.PublicKey, &peercfg.PublicKey) {
 				found = true
-				if !equalUDPAddr(p.Endpoint, peercfg.Endpoint) {
-					logger.Infof("  endpoint changed %s: %s -> %s", peercfg.PublicKey, p.Endpoint, peercfg.Endpoint)
-					break
+				if peercfg.Endpoint != nil {
+					if !equalUDPAddr(p.Endpoint, peercfg.Endpoint) {
+						// if connectivity still given -> keep optimized self configured endpoint
+						if old == new {
+							logger.Infof("  endpoint changed %s (and inactive since last reconcile): %s -> %s", peercfg.PublicKey, p.Endpoint, peercfg.Endpoint)
+							break
+						}
+					}
 				}
+				peercfg.Endpoint = p.Endpoint
 				if !equalIPNetList(p.AllowedIPs, peercfg.AllowedIPs) {
 					logger.Infof("  allowed ips changed %s: %v -> %v", peercfg.PublicKey, p.AllowedIPs, peercfg.AllowedIPs)
 					peercfg.ReplaceAllowedIPs = true
@@ -290,10 +304,15 @@ next:
 		}
 	}
 
-	// cleanup unused peer states
+	// cleanup unused state
 	for p := range this.peerstate {
 		if _, ok := activelinks[p]; !ok {
 			delete(this.peerstate, p)
+		}
+	}
+	for p := range this.data {
+		if _, ok := activekeys[p]; !ok {
+			delete(this.data, p)
 		}
 	}
 	if update {

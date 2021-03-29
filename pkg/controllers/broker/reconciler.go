@@ -26,8 +26,10 @@ import (
 
 	"github.com/gardener/controller-manager-library/pkg/config"
 	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile"
+	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile/reconcilers"
 	"github.com/gardener/controller-manager-library/pkg/logger"
 	"github.com/gardener/controller-manager-library/pkg/resources"
+	"github.com/gardener/controller-manager-library/pkg/utils"
 	"github.com/vishvananda/netlink"
 	_apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
@@ -54,6 +56,7 @@ type reconciler struct {
 	linkResource       resources.Interface
 	saResource         resources.Interface
 	secretResource     resources.Interface
+	svcResource        resources.Interface
 	deploymentResource resources.Interface
 	secrets            *controllers.SecretCache
 
@@ -61,6 +64,8 @@ type reconciler struct {
 	dnsInfo kubelink.LinkDNSInfo
 
 	lock            sync.RWMutex
+	meshServices    map[string]resources.ClusterObjectKeySet
+	usageCache      *reconcilers.SimpleUsageCache
 	requiredSecrets map[resources.ObjectName]resources.ObjectNameSet
 }
 
@@ -137,7 +142,7 @@ func (this *reconciler) RequiredFirewallChains() iptables.Requests {
 
 func (this *reconciler) RequiredNATChains() iptables.Requests {
 	addrs := this.Links().GetGatewayAddrs()
-	return this.Links().GetNatChains(addrs, this.runmode.GetInterface().Attrs().Name)
+	return this.Links().GetNatChains(this.NetworkInterface().IP, addrs, this.runmode.GetInterface().Attrs().Name)
 }
 
 func (this *reconciler) HandleDelete(logger logger.LogContext, name kubelink.LinkName, obj resources.Object) (bool, error) {
@@ -184,6 +189,7 @@ func (this *reconciler) HandleDelete(logger logger.LogContext, name kubelink.Lin
 						if err == nil {
 							deleted = true
 							logger.Infof("removing mesh %s", name)
+							this.triggerMeshServices(logger, m.Name())
 							links.RemoveLink(name)
 							if replacement != nil {
 								this.TriggerLink(*replacement)
@@ -295,6 +301,33 @@ func (this *reconciler) Start() {
 		this.ConnectCoredns()
 	}
 	this.Reconciler.Start()
+}
+
+func (this *reconciler) Reconcile(logger logger.LogContext, obj resources.Object) reconcile.Status {
+	switch obj.Data().(type) {
+	case *api.MeshService:
+		return this.reconcileMeshService(logger, obj)
+	default:
+		return this.Reconciler.Reconcile(logger, obj)
+	}
+}
+
+func (this *reconciler) Delete(logger logger.LogContext, obj resources.Object) reconcile.Status {
+	switch obj.Data().(type) {
+	case *api.MeshService:
+		return this.deleteMeshService(logger, obj, obj.ClusterKey())
+	default:
+		return this.Reconciler.Delete(logger, obj)
+	}
+}
+
+func (this *reconciler) Deleted(logger logger.LogContext, obj resources.ClusterObjectKey) reconcile.Status {
+	switch obj.GroupKind() {
+	case api.MESHSERVICE:
+		return this.deleteMeshService(logger, nil, obj)
+	default:
+		return this.Reconciler.Deleted(logger, obj)
+	}
 }
 
 func (this *reconciler) Command(logger logger.LogContext, cmd string) reconcile.Status {
@@ -409,12 +442,55 @@ func (this *reconciler) HandleReconcile(logger logger.LogContext, obj resources.
 				return err, nil
 			}
 		}
+		if entry.IsLocalLink() {
+			this.triggerMeshServices(logger, entry.Name.Mesh())
+		}
 	}
 
 	if entry.UpdatePending {
 		return this.updateObjectFromLink(logger, klink, entry)
 	} else {
 		return this.updateLinkFromObject(logger, klink, entry)
+	}
+}
+
+func (this *reconciler) triggerMeshServices(logger logger.LogContext, mesh string) {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+	set := this.meshServices[mesh]
+	n := utils.NewNotifier(logger, fmt.Sprintf("trigger mesh services for %s", mesh))
+	for key := range set {
+		n.Infof("  trigger mesh service %s", key.ObjectName())
+		this.Controller().EnqueueKey(key)
+	}
+}
+
+func (this *reconciler) updateMeshService(logger logger.LogContext, key resources.ClusterObjectKey, mesh string) {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+
+	logger.Infof("using mesh %q", mesh)
+	if mesh != "" {
+		set := this.meshServices[mesh]
+		if set == nil {
+			set = resources.ClusterObjectKeySet{}
+			this.meshServices[mesh] = set
+		}
+		if !set.Contains(key) {
+			logger.Infof("service based on mesh %q", mesh)
+			set.Add(key)
+		}
+	}
+	for m, s := range this.meshServices {
+		if m != mesh {
+			if s.Contains(key) {
+				logger.Infof("service does not use mesh %q anymore", m)
+				s.Remove(key)
+				if len(s) == 0 {
+					delete(this.meshServices, mesh)
+				}
+			}
+		}
 	}
 }
 

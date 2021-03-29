@@ -19,11 +19,12 @@
 package v1alpha1
 
 import (
-	"net"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
+
+const STATE_OK = "Ok"                   // service configuration ok
+const STATE_UNSUPPORTED = "Unsupported" // mesh services only supported in pod mode
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
@@ -50,7 +51,7 @@ type MeshServiceList struct {
 type MeshService struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              KubeLinkSpec `json:"spec"`
+	Spec              MeshServiceSpec `json:"spec"`
 	// +optional
 	Status KubeLinkStatus `json:"status,omitempty"`
 }
@@ -58,6 +59,8 @@ type MeshService struct {
 type MeshServiceSpec struct {
 	// +optional
 	MeshAddress string `json:"meshAddress,omitempty"`
+	// +optional
+	Mesh string `json:"mesh,omitempty"`
 	// +optional
 	Ports []ServicePort `json:"ports,omitempty"`
 	// +optional
@@ -85,7 +88,8 @@ type ServicePort struct {
 }
 
 type ServiceEndpoint struct {
-	Address net.IP `json:"address"`
+	// +optional
+	Address string `json:"address"`
 	// +optional
 	PortMappings []PortMapping `json:"portMappings"`
 }
@@ -94,5 +98,5 @@ type PortMapping struct {
 	// +optional
 	Protocol   string             `json:"protocol,omitempty"`
 	Port       intstr.IntOrString `json:"port"`
-	TargetPort int32              `json:"targetPort"`
+	TargetPort intstr.IntOrString `json:"targetPort"`
 }

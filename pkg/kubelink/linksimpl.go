@@ -43,8 +43,8 @@ type links struct {
 	initialized bool
 
 	defaultport int
-	serviceCIDR *net.IPNet
 	gateway     net.IP
+	podmode     bool
 
 	*linksdata
 }
@@ -183,6 +183,10 @@ func (this *linksdata) GetService(key string) *Service {
 	return this.services.ByKey(key)
 }
 
+func (this *linksdata) RemoveService(key string) {
+	this.services.Remove(key)
+}
+
 func (this *linksdata) VisitServices(visitor func(l *Service) bool) {
 	this.services.Visit(visitor)
 }
@@ -271,6 +275,14 @@ func (this *links) SetGateway(ip net.IP) {
 
 func (this *links) GetGateway() net.IP {
 	return this.gateway
+}
+
+func (this *links) SetPodMode(mode bool) {
+	this.podmode = mode
+}
+
+func (this *links) IsPodMode() bool {
+	return this.podmode
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -555,9 +567,9 @@ func (this *links) GetGatewayEgress(gateway net.IP, meshCIDR *net.IPNet) tcp.CID
 	return egress
 }
 
-func (this *links) GetNatChains(clusterAddresses tcp.CIDRList, linkName string) iptables.Requests {
+func (this *links) GetNatChains(src net.IP, clusterAddresses tcp.CIDRList, linkName string) iptables.Requests {
 	reqs := this.GetSNatChains(clusterAddresses, linkName)
-	dreqs := this.GetServiceChains(clusterAddresses)
+	dreqs := this.GetServiceChains(src, clusterAddresses)
 	return append(reqs, dreqs...)
 
 }
