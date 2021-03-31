@@ -27,6 +27,12 @@ func NewReferenceFrom(obj metav1.Object, dst metav1.Object) ObjectReference {
 	}
 }
 
+func NewReferenceByName(name string) ObjectReference {
+	return ObjectReference{
+		Name: name,
+	}
+}
+
 // ObjectReference is is plain reference to an object of an implicitly determined type
 type ObjectReference struct {
 	Name string `json:"name"`
@@ -75,4 +81,8 @@ func (in *ObjectReference) DeepCopy() *ObjectReference {
 
 func ObjectNameRelativeTo(name string, obj metav1.Object) resources.ObjectName {
 	return resources.NewObjectName(obj.GetNamespace(), name)
+}
+
+func ClusterKeyRelativeTo(obj resources.Object, objname string, gk schema.GroupKind) resources.ClusterObjectKey {
+	return resources.NewClusterKey(obj.GetCluster().GetId(), gk, obj.GetNamespace(), objname)
 }

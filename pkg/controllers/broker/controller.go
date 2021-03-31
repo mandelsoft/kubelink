@@ -59,25 +59,7 @@ func init() {
 ///////////////////////////////////////////////////////////////////////////////
 
 func extractServiceUsageForMeshService(obj resources.Object) resources.ClusterObjectKeySet {
-	data := obj.Data().(*api.MeshService)
-
-	// TODO: to be moved to cmlib
-	// return types.ClusterKeyRelativeTo(obj, data.Spec.Service, controllers.SERVICE)
-	ref := types.ObjectReference{
-		Name: data.Spec.Service,
-	}
-	return controllers.AsKeySet(ref.ClusterKeyRelativeTo(obj, controllers.SERVICE))
-}
-
-func extractMeshUsageForMeshService(obj resources.Object) resources.ClusterObjectKeySet {
-	data := obj.Data().(*api.MeshService)
-
-	// TODO: to be moved to cmlib
-	// return types.ClusterKeyRelativeTo(obj, data.Spec.Service, controllers.SERVICE)
-	ref := types.ObjectReference{
-		Name: data.Spec.Mesh,
-	}
-	return controllers.AsKeySet(ref.ClusterKeyRelativeTo(obj, api.KUBELINK))
+	return reconcilers.AsKeySet(types.ClusterKeyRelativeTo(obj, obj.Data().(*api.MeshService).Spec.Service, controllers.SERVICE))
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -87,10 +69,14 @@ func Create(controller controller.Interface) (reconcile.Interface, error) {
 	if err != nil {
 		return nil, err
 	}
+	relations, err := reconcilers.UsageRelationsForController(controller)
+	if err != nil {
+		return nil, err
+	}
 	this := &reconciler{
 		meshServices: map[string]resources.ClusterObjectKeySet{},
 		secrets:      controllers.GetSharedSecrets(controller),
-		usageCache:   reconcilers.GetSharedSimpleUsageCache(controller),
+		usages:       relations,
 		config:       cfg.(*config.Config),
 	}
 

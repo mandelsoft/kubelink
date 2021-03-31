@@ -83,6 +83,9 @@ func main() {
 	cidr, _ := tcp.ParseIPNet("192.168.0.13/24")
 	egress, _ := tcp.ParseIPNet("100.64.16.0/22")
 
+	fw, err := kubelink.ParseFirewallRule([]string{"100.64.0.0/16"})
+	CheckErr(err)
+
 	link := &kubelink.Link{
 		Name:           lname,
 		Ingress:        ingress,
@@ -91,11 +94,20 @@ func main() {
 	}
 	links.ReplaceLink(link)
 
+	mname := kubelink.NewLinkName("mesh", "local")
+	mlink := &kubelink.Link{
+		Name:           mname,
+		Endpoint:       kubelink.EP_LOCAL,
+		ClusterAddress: addr,
+		Ingress:        fw,
+	}
+	links.ReplaceLink(mlink)
+
 	fwChains := iptables.Requests{}
 	natChains := iptables.Requests{}
 	if !clear {
 		fwChains = links.GetFirewallChains()
-		natChains = links.GetNatChains(tcp.CIDRList{addr}, "kubelink")
+		natChains = links.GetNatChains(nil, tcp.CIDRList{addr}, "kubelink")
 	}
 
 	logger.SetLevel("debug")

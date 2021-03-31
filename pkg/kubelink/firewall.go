@@ -48,6 +48,7 @@ const TABLE_MARK_DROP_CHAIN = TABLE_LINKS_CHAIN
 
 const FW_LINK_CHAIN_PREFIX = CHAIN_PREFIX + "FW-"
 const GW_LINK_CHAIN_PREFIX = CHAIN_PREFIX + "GW-"
+const MF_LINK_CHAIN_PREFIX = CHAIN_PREFIX + "MF-"
 const TABLE_LINK_CHAIN = TABLE_MARK_DROP_CHAIN
 
 const MARK_BIT = "0x1000"
@@ -89,7 +90,7 @@ func FirewallEmbedding() ([]RuleDef, utils.StringSet) {
 func (this *links) GetEgressChain(mesh *net.IPNet) *iptables.ChainRequest {
 	rules := iptables.Rules{
 		iptables.Rule{
-			iptables.R_CommentOpt("firewall egress for link gateway " + mesh.String()),
+			iptables.R_CommentOpt("firewall routing egress for link gateway " + mesh.String()),
 		},
 	}
 	// allow all traffic forwarded to other links
@@ -99,10 +100,11 @@ func (this *links) GetEgressChain(mesh *net.IPNet) *iptables.ChainRequest {
 			iptables.R_AcceptOpt(),
 		})
 	}
-	return iptables.NewChainRequest(
+	req := iptables.NewChainRequest(
 		TABLE_LINK_CHAIN,
 		GW_LINK_CHAIN_PREFIX+encodeName(mesh.String()),
 		rules, true)
+	return req
 }
 
 func (this *links) GetFirewallChains() iptables.Requests {
@@ -115,11 +117,42 @@ func (this *links) GetFirewallChains() iptables.Requests {
 			mesh := tcp.CIDRNet(l.ClusterAddress)
 			if !egresses[mesh.String()] {
 				egresses[mesh.String()] = true
+
+				// mesh routing rules
 				egress := this.GetEgressChain(mesh)
+				mrules := iptables.Rules{
+					iptables.Rule{
+						iptables.R_CommentOpt("mesh firewall rules for %s", mesh),
+					},
+					iptables.Rule{
+						iptables.R_JumpChainOpt(egress.Chain.Chain),
+					},
+				}
 				linkchains = append(linkchains, egress)
+
+				// global local link rules
+				var ing *iptables.ChainRequest
+				m := this.meshes.meshesByCIDR[mesh.String()]
+				if m != nil {
+					ing = m.link.GetIngressChain()
+				}
+				if ing == nil {
+					ing = linkFWChain(mesh.String(), nil)
+				}
+				mrules = append(mrules, iptables.Rule{
+					iptables.R_JumpChainOpt(ing.Chain.Chain),
+				})
+				linkchains = append(linkchains, ing)
+
+				// mesh chain
+				mf := iptables.NewChainRequest(
+					TABLE_LINK_CHAIN,
+					MF_LINK_CHAIN_PREFIX+encodeName(mesh.String()),
+					mrules, true)
+				linkchains = append(linkchains, mf)
 				rules = append(rules, iptables.Rule{
 					iptables.R_SourceOpt(mesh.String()),
-					iptables.R_JumpChainOpt(egress.Chain.Chain),
+					iptables.R_JumpChainOpt(mf.Chain.Chain),
 				})
 			}
 			linkchains = append(linkchains, ing)

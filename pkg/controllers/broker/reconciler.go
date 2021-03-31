@@ -65,7 +65,7 @@ type reconciler struct {
 
 	lock            sync.RWMutex
 	meshServices    map[string]resources.ClusterObjectKeySet
-	usageCache      *reconcilers.SimpleUsageCache
+	usages          *reconcilers.ControllerUsageRelations
 	requiredSecrets map[resources.ObjectName]resources.ObjectNameSet
 }
 

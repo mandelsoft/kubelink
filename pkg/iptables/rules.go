@@ -20,9 +20,11 @@ package iptables
 
 type Rule Options
 
-func (this *Rule) Add(o Option) *Rule {
-	if this.Index(o) < 0 {
-		*this = append(*this, o)
+func (this *Rule) Add(opts ...Option) *Rule {
+	for _, o := range opts {
+		if this.Index(o) < 0 {
+			*this = append(*this, o)
+		}
 	}
 	return this
 }

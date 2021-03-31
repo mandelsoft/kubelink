@@ -84,15 +84,15 @@ type Interface interface {
 type WatchSelectionFunction func(c Interface) (namespace string, tweaker resources.TweakListOptionsFunc)
 
 type WatchResource interface {
-	ResourceType() ResourceKey
-	WatchSelectionFunction() WatchSelectionFunction
-	ShouldEnforceMinimal() bool
+	WatchResourceDef(WatchContext) WatchResourceDef
+	String() string
 }
 
 type Watch interface {
 	WatchResource
 	Reconciler() string
 	PoolName() string
+	String() string
 }
 type Command interface {
 	Key() utils.Matcher
@@ -100,7 +100,6 @@ type Command interface {
 	PoolName() string
 }
 
-// ResourceKey implementations are used as key and MUST therefore be value types
 type ResourceKey = extension.ResourceKey
 
 func NewResourceKey(group, kind string) ResourceKey {
@@ -218,6 +217,8 @@ func (this CrossClusterRefs) Map(mapping controllermanager.Mapping) CrossCluster
 	return result
 }
 
+type ExtensionKey interface{}
+
 type Definition interface {
 	extension.OrderedElem
 	extension.ElementConfigDefinition
@@ -225,7 +226,7 @@ type Definition interface {
 	// Create(Object) (Reconciler, error)
 	Reconcilers() map[string]ReconcilerType
 	Syncers() map[string]SyncerDefinition
-	MainResource() ResourceKey
+	MainResource(WatchContext) *WatchResourceDef
 	MainWatchResource() WatchResource
 	Watches() Watches
 	Commands() Commands
@@ -239,6 +240,8 @@ type Definition interface {
 	LeaseClusterName() string
 	FinalizerName() string
 	ActivateExplicitly() bool
+
+	GetDefinitionExtension(ExtensionKey) interface{}
 
 	Scheme() *runtime.Scheme
 

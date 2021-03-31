@@ -31,7 +31,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
-	"github.com/mandelsoft/kubelink/pkg/controllers"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
 )
 
@@ -45,7 +44,7 @@ func (this *reconciler) reconcileMeshService(logger logger.LogContext, obj resou
 	}
 
 	key := obj.ClusterKey()
-	defer controllers.LockAndUpdateFilteredUsages(this.usageCache, key, controllers.FilterServices, extractServiceUsageForMeshService(obj))()
+	defer this.usages.LockAndUpdateUsagesFor(obj)()
 	def, mesh, tmperr, err := this.validateMeshService(logger, data)
 
 	this.updateMeshService(logger, key, mesh)
@@ -71,7 +70,7 @@ func (this *reconciler) reconcileMeshService(logger logger.LogContext, obj resou
 }
 
 func (this *reconciler) deleteMeshService(logger logger.LogContext, obj resources.Object, key resources.ClusterObjectKey) reconcile.Status {
-	this.usageCache.UpdateUsesFor(key, nil)
+	this.usages.UpdateUsesFor(key, nil)
 	this.Links().RemoveService(fmt.Sprintf("%s.%s", key.Namespace, key.Name))
 	return reconcile.Succeeded(logger)
 }
@@ -87,7 +86,6 @@ func (this *reconciler) validateMeshService(logger logger.LogContext, svc *api.M
 			return nil, "", nil, fmt.Errorf("invalid ip for mesh service: %s", svc.Spec.MeshAddress)
 		}
 	} else {
-		// TODO: reconcile on mesh creation
 		service.Mesh = svc.Spec.Mesh
 		if service.Mesh == "" {
 			service.Mesh = kubelink.DEFAULT_MESH

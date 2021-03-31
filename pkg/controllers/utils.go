@@ -19,9 +19,6 @@
 package controllers
 
 import (
-	"sort"
-
-	"github.com/gardener/controller-manager-library/pkg/controllermanager/controller/reconcile/reconcilers"
 	"github.com/gardener/controller-manager-library/pkg/resources"
 
 	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
@@ -38,37 +35,4 @@ func ObjectName(name kubelink.LinkName) resources.ObjectName {
 
 func IsLocalLink(klink *api.KubeLink) bool {
 	return klink.Spec.Endpoint == kubelink.EP_LOCAL
-}
-
-// TODO: moved to cm lib
-
-func AsKeySet(key resources.ClusterObjectKey) resources.ClusterObjectKeySet {
-	if key.Name() == "" {
-		return resources.NewClusterObjectKeySet()
-	}
-	return resources.NewClusterObjectKeySet(key)
-}
-
-// LockAndUpdateFilteredUsage updates the usage of an object of a dedicated kind for a single used object
-// the used object is locked and an unlock function returned
-func LockAndUpdateFilteredUsage(usageCache *reconcilers.SimpleUsageCache, user resources.ClusterObjectKey, filter resources.KeyFilter, used resources.ClusterObjectKey) func() {
-	usageCache.Lock(nil, used)
-	usageCache.UpdateFilteredUsesFor(user, filter, resources.NewClusterObjectKeySet(used))
-	return func() { usageCache.Unlock(used) }
-}
-
-// LockAndUpdateFilteredUsages updates the usage of an object of a dedicated kind
-// the used object is locked and an unlock function returned
-func LockAndUpdateFilteredUsages(usageCache *reconcilers.SimpleUsageCache, user resources.ClusterObjectKey, filter resources.KeyFilter, used resources.ClusterObjectKeySet) func() {
-	keys := used.AsArray()
-	sort.Sort(keys)
-	for _, key := range keys {
-		usageCache.Lock(nil, key)
-	}
-	usageCache.UpdateFilteredUsesFor(user, filter, used)
-	return func() {
-		for _, key := range keys {
-			usageCache.Unlock(key)
-		}
-	}
 }

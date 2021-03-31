@@ -72,8 +72,8 @@ func (c *ClusterHandler) GetResource(resourceKey ResourceKey) (resources.Interfa
 	return c.cluster.GetResource(resourceKey.GroupKind())
 }
 
-func (c *ClusterHandler) register(watchResource WatchResource, namespace string, optionsFunc resources.TweakListOptionsFunc, usedpool *pool) error {
-	resourceKey := watchResource.ResourceType()
+func (c *ClusterHandler) register(def *watchDef, namespace string, optionsFunc resources.TweakListOptionsFunc, usedpool *pool) error {
+	resourceKey := def.Key
 	i := c.resources[resourceKey]
 	if i == nil {
 		resource, err := c.cluster.GetResource(resourceKey.GroupKind())
@@ -89,7 +89,7 @@ func (c *ClusterHandler) register(watchResource WatchResource, namespace string,
 		}
 		c.resources[resourceKey] = i
 
-		if watchResource.ShouldEnforceMinimal() || c.cluster.Definition().IsMinimalWatchEnforced(resourceKey.GroupKind()) {
+		if def.Minimal || c.cluster.Definition().IsMinimalWatchEnforced(resourceKey.GroupKind()) {
 			if err := resource.AddSelectedInfoEventHandler(c.GetInfoEventHandlerFuncs(), namespace, optionsFunc); err != nil {
 				return err
 			}

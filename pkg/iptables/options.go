@@ -121,8 +121,8 @@ func R_DNATOpt(ip net.IP, port ...int32) Option {
 	}
 	return ComposeOpt("-j", "DNAT", Opt("--to-destination", ip.String()+p))
 }
-func R_CommentOpt(c string) Option {
-	return ComposeOpt("-m", "comment", Opt("--comment", c))
+func R_CommentOpt(msg string, args ...interface{}) Option {
+	return ComposeOpt("-m", "comment", Opt("--comment", fmt.Sprintf(msg, args...)))
 }
 func R_ProbabilityOpt(propability float64) Option {
 	return ComposeOpt("-m", "statistic", Opt("--mode", "random"), Opt("--probability", fmt.Sprintf("%.12f", propability)))

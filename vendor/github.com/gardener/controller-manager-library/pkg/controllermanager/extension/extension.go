@@ -272,6 +272,16 @@ func AddElementConfigDefinitionToSet(def ElementConfigDefinition, setprefix stri
 
 ////////////////////////////////////////////////////////////////////////////////
 
+type ElementOptions interface {
+	GetOptionSource(name string) (config.OptionSource, error)
+	GetOption(name string) (*config.ArbitraryOption, error)
+	GetBoolOption(name string) (bool, error)
+	GetStringOption(name string) (string, error)
+	GetStringArrayOption(name string) ([]string, error)
+	GetIntOption(name string) (int, error)
+	GetDurationOption(name string) (time.Duration, error)
+}
+
 type ElementBase interface {
 	logger.LogContext
 
@@ -280,13 +290,7 @@ type ElementBase interface {
 
 	GetContext() context.Context
 
-	GetOptionSource(name string) (config.OptionSource, error)
-	GetOption(name string) (*config.ArbitraryOption, error)
-	GetBoolOption(name string) (bool, error)
-	GetStringOption(name string) (string, error)
-	GetStringArrayOption(name string) ([]string, error)
-	GetIntOption(name string) (int, error)
-	GetDurationOption(name string) (time.Duration, error)
+	ElementOptions
 }
 
 type elementBase struct {

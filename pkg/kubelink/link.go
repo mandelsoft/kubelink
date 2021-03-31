@@ -92,9 +92,6 @@ func LinkForSpec(name LinkName, created time.Time, spec *LinkSpec, defaultPort i
 		if len(spec.Egress) != 0 {
 			return nil, fmt.Errorf("no egress possible for local links")
 		}
-		if len(spec.Ingress) != 0 {
-			return nil, fmt.Errorf("no ingress possible for local links")
-		}
 	}
 	if spec.GatewayLink != "" {
 		gw := DecodeLinkNameFromString(spec.GatewayLink)
@@ -375,9 +372,15 @@ func (this *Link) GetIngressChain() *iptables.ChainRequest {
 	if !this.Ingress.IsSet() {
 		return nil
 	}
+	comment := "firewall settings for "
+	if this.IsLocalLink() {
+		comment = fmt.Sprintf("global %smesh %s[%s] ", comment, this.Name.Mesh(), tcp.CIDRNet(this.ClusterAddress))
+	} else {
+		comment += fmt.Sprintf("link %s ", this.Name.String())
+	}
 	rules := iptables.Rules{
 		iptables.Rule{
-			iptables.R_CommentOpt("firewall settings for link " + this.Name.String()),
+			iptables.R_CommentOpt(comment),
 		},
 	}
 	for _, i := range this.Ingress.Denied {
@@ -397,9 +400,17 @@ func (this *Link) GetIngressChain() *iptables.ChainRequest {
 			iptables.R_JumpChainOpt(DROP_ACTION),
 		})
 	}
+	name := this.Name.String()
+	if this.IsLocalLink() {
+		name = tcp.CIDRNet(this.ClusterAddress).String()
+	}
+	return linkFWChain(name, rules)
+}
+
+func linkFWChain(name string, rules iptables.Rules) *iptables.ChainRequest {
 	return iptables.NewChainRequest(
 		TABLE_LINK_CHAIN,
-		FW_LINK_CHAIN_PREFIX+encodeName(this.Name.String()),
+		FW_LINK_CHAIN_PREFIX+encodeName(name),
 		rules, true)
 }
 
