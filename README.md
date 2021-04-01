@@ -23,6 +23,12 @@ all clusters.
 To connect the service networks of multiple clusters their service ip ranges
 must be disjoint, for example 100.64.0.0/20, 100.64.0.16.0/20 and so on.
 
+Optionally only the mesh endpoints can be used to address services
+in a cluster mesh using the [Mesh Service](#mesh-services) feature. Hereby
+not even the service networks must be disjoint, instead services can
+explicilty be exposed by a dedicated mesh service resource assigning
+a mesh IP to a local service.
+
 Every cluster participating in such a mesh requires an endpoint with an 
 externally accessible
 IP address with an assigned DNS name. This is typically achieved by defining
@@ -158,7 +164,7 @@ spec:
 ```
 
 That's it. For the TLS based user space solution no certificate, key, nothing
-else required in best case when using the DNS and server certificate provisioning 
+else is required in best case when using the DNS and server certificate provisioning 
 controllers proposed above.
 
 For the wireguard solution only the public key of the foreign sites are required
@@ -167,6 +173,14 @@ with key`WireguardPrivateKey` )
 
 To configure a link for a dedicated cluster mesh use the mesh name as prefix
 for the object name according to `<mesh-name>--<link name>`.
+
+Endpoints may be specified by DNS names or IP addresses or the following special
+values:
+
+| Endpoint | Meaning |
+|----------|---------|
+| `LocalLink` | this constant describes a mesh's local link and defines the address of the local cluster in the mesh |
+| `Inbound` | (only for wireguard mode) Here the local cluster does not have a dedicated external endpoint. Instead the connection is established by the other sides. Only one member of every link pair may have an `Inbound` endpoint. |
 
 Links now have a more relevant state:
 
@@ -486,7 +500,7 @@ For the example above this might be a service for the virtual
 address `192.168.0.100` as shown in the following example.
 
 **Virtual Mesh Address**
-```
+```yaml
 apiVersion: kubelink.mandelsoft.org/v1alpha1
 kind: MeshService
 metadata:
@@ -510,7 +524,7 @@ Additionally it is required to configure the mesh whose local link
 should be used for the port binding. By default the default-mesh is used.
 
 **Using the Local Link Address**
-```go
+```yaml
 apiVersion: kubelink.mandelsoft.org/v1alpha1
 kind: MeshService
 metadata:
@@ -534,7 +548,7 @@ This might be an endpoint in the cluster or some other address
 reacable from the  cluster's node network.
 
 Basically any non-conflicting IP address can be used for a mesh service
-address instead of an address of the mesh ip range as long it configured as
+address instead of an address of the mesh ip range as long as it is configured as
 allowed IP on the caller side, and not prohibited by the firewall setting for
 this link (`egress` rule). But so far it is not routed in the providing cluster.
 
