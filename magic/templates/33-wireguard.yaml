@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wireguard
+  namespace: (( values.namespace ))
+type: Opaque
+data:
+  WireguardPrivateKey: (( base64(member.wireguard.key) ))
+  WireguardPublicKey: (( base64(member.wireguard.pub) ))

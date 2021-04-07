@@ -1,0 +1,89 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: kubelink
+  annotations:
+    dns.gardener.cloud/class: garden
+    dns.gardener.cloud/dnsnames: (( member.endpoint ))
+    dns.gardener.cloud/ttl: "500"
+    service.beta.kubernetes.io/aws-load-balancer-type: (( values.runmode == "wireguard" ? "nlb" :~~ ))  # On AWS an NLB has to be used for UDP
+    cert.gardener.cloud/secretname: (( values.runmode == "bridge" ? "kubelink" :~~ ))
+  name: kubelink
+  namespace: (( values.namespace ))
+spec:
+  selector:
+    app: kubelink
+    component: kubelink-broker
+  ports:
+    - name: (( values.runmode ))
+      <<: (( port ))
+  sessionAffinity: None
+  type: LoadBalancer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: kubelink-broker
+    component: kubelink-broker
+  name: kubelink-broker
+  namespace: (( values.namespace ))
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubelink
+      component: kubelink-broker
+  template:
+    metadata:
+      labels:
+        app: kubelink
+        component: kubelink-broker
+    spec:
+      hostNetwork: (( !values.podmode ))
+      containers:
+        - name: broker
+          image: mandelsoft/kubelink:qual
+          imagePullPolicy: "Always"
+          args:
+            - --controllers=broker
+            - (( "--mode="  values.runmode ))
+            - (( "--secret=" (values.runmode == "wireguard" ? "wireguard" :"kubelink") ))               # used to store wireguard key
+            - --server-port-http=8180
+            - (( "--broker-port=" port.targetPort ))
+            - (( values.podmode -or values.runmode == "bridge" ? "--pod-cidr=" member.podCIDR :~~ ))
+            - (( "--node-cidr=" member.nodeCIDR ))
+            - (( values.podmode ? "--node-ip=$(MY_NODEIP)" :~~ ))
+            - (( "--service-cidr=" member.serviceCIDR ))
+            - (( !values.podmode ? "--ipip=shared" :~~ ))
+            - --ifce-name=kubelink
+            - --dns-advertisement
+            - --dns-propagation=dns
+            - --coredns-configure
+          env:
+            - name: MY_NODEIP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          securityContext:
+            privileged: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8180
+              scheme: HTTP
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+          ports:
+            - containerPort: 8180
+              protocol: TCP
+            - containerPort: (( port.targetPort ))
+              protocol: (( port.protocol ))
+          resources:
+            {}
+
+      serviceAccountName: kubelink
+      terminationGracePeriodSeconds: 120
+

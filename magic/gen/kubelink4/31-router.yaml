@@ -1,0 +1,55 @@
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app: kubelink
+    component: kubelink-router
+  name: kubelink-router
+  namespace: kubelink
+spec:
+  selector:
+    matchLabels:
+      app: kubelink
+      component: kubelink-router
+  template:
+    metadata:
+      labels:
+        app: kubelink
+        component: kubelink-router
+    spec:
+      containers:
+      - args:
+        - --controllers=router
+        - --server-port-http=8080
+        - --pod-cidr=100.96.0.0/11
+        - --node-cidr=10.250.0.0/16
+        - --ipip=shared
+        - --service=kubelink
+        - --datafile=/mnt/data/routes
+        image: mandelsoft/kubelink:qual
+        imagePullPolicy: Always
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+        name: router
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - mountPath: /mnt/data
+          name: datadir
+      hostNetwork: true
+      serviceAccountName: kubelink
+      terminationGracePeriodSeconds: 120
+      volumes:
+      - hostPath:
+          path: /var/lib/kubelink
+          type: DirectoryOrCreate
+        name: datadir

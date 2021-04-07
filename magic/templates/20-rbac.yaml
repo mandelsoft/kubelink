@@ -1,0 +1,158 @@
+#
+# service account
+#
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app: kubelink
+  name: kubelink
+  namespace: (( values.namespace ))
+---
+#
+# permissions
+#
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  labels:
+    app: kubelink
+  name: kubelink
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - get
+  - list
+  - update
+  - watch
+
+- apiGroups:
+    - ""
+  resources:
+    - nodes
+  verbs:
+    - list
+    - get
+
+- apiGroups:
+    - apps
+  resources:
+    - deployments
+  verbs:
+    - get
+    - update
+
+- apiGroups:
+  - ""
+  resources:
+    - serviceaccounts
+    - pods
+  verbs:
+    - get
+
+- apiGroups:
+  - ""
+  resources:
+    - endpoints     # for --service option
+    - services
+  verbs:
+    - get
+    - list
+    - watch
+
+- apiGroups:
+  - ""
+  resources:
+    - configmaps
+  verbs:
+    - create
+    - get
+    - update
+
+- apiGroups:
+  - kubelink.mandelsoft.org
+  resources:
+  - kubelinks
+  - kubelinks/status
+  - meshservices
+  - meshservices/status
+  verbs:
+  - get
+  - list
+  - update
+  - watch
+
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+
+- apiGroups:
+  - apiextensions.k8s.io
+  resources:
+  - customresourcedefinitions
+  verbs:
+  - get
+  - list
+  - update
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: Role
+metadata:
+  labels:
+    app: kubelink
+  name: kubelink
+  namespace: (( values.namespace ))
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  resourceNames:
+  # lease for controller manager
+  - kubelink
+  verbs:
+  - get
+  - update
+  - create
+
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app: kubelink
+  name: kubelink
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubelink
+subjects:
+- kind: ServiceAccount
+  name: kubelink
+  namespace: (( values.namespace ))
+
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: RoleBinding
+metadata:
+  labels:
+    app: kubelink
+  name: kubelink
+  namespace: (( values.namespace ))
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kubelink
+subjects:
+- kind: ServiceAccount
+  name: kubelink
+  namespace: (( values.namespace ))

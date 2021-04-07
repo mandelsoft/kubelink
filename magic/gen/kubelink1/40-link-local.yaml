@@ -1,0 +1,11 @@
+---
+apiVersion: kubelink.mandelsoft.org/v1alpha1
+kind: KubeLink
+metadata:
+  name: kubelink1
+spec:
+  clusterAddress: 192.168.0.11
+  dns:
+    baseDomain: kubelink
+    dnsIP: 100.64.0.12
+  endpoint: LocalLink

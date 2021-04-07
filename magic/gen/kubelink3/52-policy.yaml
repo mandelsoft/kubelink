@@ -1,0 +1,35 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    gardener.cloud/description: |+
+      Allows CoreDNS to lookup DNS records for dns pods (i.e. kubelink)
+      running on port 8053
+  labels:
+    shoot.gardener.cloud/no-cleanup: "true"
+  name: mandelsoft.org--allow-kubelinkdns
+  namespace: kube-system
+spec:
+  egress:
+  - ports:
+    - port: 8053
+      protocol: TCP
+    - port: 8053
+      protocol: UDP
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 10.250.0.0/16
+    - ipBlock:
+        cidr: 192.168.0.0/24
+  podSelector:
+    matchExpressions:
+    - key: k8s-app
+      operator: In
+      values:
+      - kube-dns
+      - coredns
+  policyTypes:
+  - Egress
+  - Ingress

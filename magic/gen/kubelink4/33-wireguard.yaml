@@ -1,0 +1,10 @@
+---
+apiVersion: v1
+data:
+  WireguardPrivateKey: SU8xY1NQajU5Z0U5VURyRXJBcHNrR2I0L1BjNXp3aitsRmdOamRJMkNsQT0=
+  WireguardPublicKey: dVRtaDdST0pLeGZ5VXhBcHFQZnFaeUF4NFhQYjdVUSszSzBNQnRId3Foaz0=
+kind: Secret
+metadata:
+  name: wireguard
+  namespace: kubelink
+type: Opaque

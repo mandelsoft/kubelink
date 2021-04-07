@@ -1,0 +1,57 @@
+
+namespace: kubelink
+runmode: wireguard
+podmode: true
+
+meshName: kubelink
+meshCIDR: 192.168.0.0/24
+
+globalDNS:
+  member: kubelink1
+  ip: (( min_ip(members[member].serviceCIDR) + 12 ))
+
+#
+# default unshared cidrs for mesh members
+# can be explicitly specified in members
+#
+nodeCIDR: 10.250.0.0/16
+podCIDR:  100.96.0.0/11
+
+#
+# full mesh members (generate manifests)
+# with connected service subnets
+#
+members: (( map[[1..helper.members]|i,v|-> *helper.member] ))
+
+rollkeys: false
+
+#
+# addtitional foreign mesh member links
+#
+external:
+  - name: aws20
+    clusterAddress: (( min_ip(meshCIDR) + 20 ))
+    egress:
+    - (( min_ip(meshCIDR) + 101 ))
+    endpoint:  18.196.188.244:51820
+    publicKey: JexxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxtUY=
+
+#
+# just generate n members according to dedicated pattern
+# instead of specifying a manual list in field members above
+#
+helper:
+  <<: (( &temporary ))
+  basename: kubelink
+  basedomain: ringdev.shoot.dev.k8s-hana.ondemand.com
+  meshServiceRange: 100.64.0.0/16
+  meshStartIP: 11
+  members: 2
+
+  member:
+    <<: (( &template ))
+    name: (( _.basename v ))
+    serviceCIDR: (( _.meshServiceRange / 16 * i ))
+    clusterAddress: (( min_ip(meshCIDR) + ( _.meshStartIP + i) ))
+    endpoint: (( meshName "." name "." _.basedomain ))
+

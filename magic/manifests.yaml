@@ -1,0 +1,90 @@
+###################################################################
+# generate kubelink manifests for a dedicated set of mesh members #
+###################################################################
+#
+# specification has to placed in a values.yaml
+# the manifests are generated to the `outdir` folger (gen)
+#
+# all combinations for runmode (wireguard/bridge) and
+# podmode (true/false) can be generated
+#
+# processing based on spiff https://github.com/mandelsoft/spiff
+#
+
+outdir: "gen"
+values: (( read("values.yaml", "yaml") ))
+templates: (( utilities.generate.yamlFiles("templates") ))
+
+#
+# filter defines rules for conditional manifest generation
+# for templates
+filter:
+  <<: (( &temporary ))
+  60-globaldns.yaml: (( |m|->m.name == values.globalDNS.member ))
+  33-wireguard.yaml: (( |m|->values.runmode == "wireguard" ))
+
+#
+# some settings used for the dedicated runmodes
+#
+config:
+  <<: (( &temporary ))
+  ports:
+    wireguard:
+      port: 8777
+      protocol: UDP
+      targetPort: 8188
+    bridge:
+      port: 80
+      protocol: TCP
+      targetPort: 8188
+
+#
+# validate pod and runmode to avaid strange processing faults
+#
+validate:
+  <<: (( &temporary ))
+  rmode:  (( validate(values.runmode, [ "valueset", ["bridge","wireguard"]]) ))
+  pmode:  (( validate(values.podmode, [ "type", "bool"]) ))
+
+#
+# state includes the generated wireguard keys
+# to regenerate the keys use rollkeys: true in values.yaml
+#
+state:
+  <<: (( &state(merge none) ))
+  wireguard: (( map{helper.names|m|-> utilities.certs.wireguardKey(values.rollkeys || false, [m])} ))
+
+#
+# enrich member spec in values by keys and defaults
+#
+settings: (( values {$members=map[values.members|i,m|->m *helper.addendum]} ))
+
+#
+# and here comes the spiff magic
+#
+helper:
+  <<: (( &temporary ))
+  addendum:
+    <<: (( &template ))
+    wireguard: (( state.wireguard[m.name].value ))
+    podCIDR: (( m.podCIDR || values.podCIDR ))
+    nodeCIDR: (( m.nodeCIDR || values.nodeCIDR ))
+
+  names: (( map[values.members|v|->v.name] ))
+  useManifest: (( |name,file|-> .filter[basename(file)](values.members[name]) || true ))
+  templates: (( |name, dir|-> map[.templates|v|->_.useManifest(name,v) ? write(dir "/" basename(v), read(v,"multiyaml"), "multiyaml") :~ ] ))
+  links: (( |name, dir|-> map[_.names|m|->($link=m) m == name ? ~~ :write(dir "/40-link-" m ".yaml", read("templates/link/link.yaml", "yaml")) ] ))
+  external: (( |dir|-> map[values.external|l|->($link=l) write(dir "/70-link-" l.name ".yaml", read("templates/link/external.yaml", "yaml")) ] ))
+  member: (( |name, dir|-> { $name=name, $manifests=_.templates(name,dir) _.links(name,dir) _.external(dir)} ))
+
+#
+# loop over all members,
+# set the values binding for template processing and
+# generate the member manifests
+#
+# The manifests will be written to the outdir folder
+# therefore the output node is omited here
+out:
+  <<: (( &temporary ))
+  members: (( map[values.members|data|->($values= .settings { $name=data.name }, $member=.settings.members[data.name], $port=config.ports[values.runmode]) helper.member(data.name, mkdir(outdir "/" data.name))] ))
+

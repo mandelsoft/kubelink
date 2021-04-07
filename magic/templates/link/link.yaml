@@ -1,0 +1,8 @@
+apiVersion: kubelink.mandelsoft.org/v1alpha1
+kind: KubeLink
+metadata:
+  name: (( link ))
+spec:
+  cidr: (( values.members[link].serviceCIDR ))
+  clusterAddress: (( values.members[link].clusterAddress ))
+  endpoint: (( values.members[link].endpoint ))
