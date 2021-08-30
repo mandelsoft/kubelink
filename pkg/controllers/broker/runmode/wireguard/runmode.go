@@ -144,13 +144,10 @@ func (this *mode) RequiredIPTablesChains() iptables.Requests {
 }
 
 func (this *mode) ReconcileInterface(logger logger.LogContext) error {
+	this.Controller().Infof("reconcile wireguard")
 	link, err := netlink.LinkByName(this.config.Interface)
 
 	if IsLinkNotFound(err) {
-		if !this.Links().HasWireguard() {
-			this.link = nil
-			return nil
-		}
 		this.Controller().Infof("creating wireguard interface %q", this.config.Interface)
 		attrs := netlink.NewLinkAttrs()
 		attrs.Name = this.config.Interface

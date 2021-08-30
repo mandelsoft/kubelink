@@ -45,7 +45,7 @@ spec:
       hostNetwork: (( !values.podmode ))
       containers:
         - name: broker
-          image: mandelsoft/kubelink:qual
+          image: (( values.image ":" values.version ))
           imagePullPolicy: "Always"
           args:
             - --controllers=broker

@@ -84,10 +84,10 @@ func (this *synched) ReplaceLink(link *Link) *Link {
 	return this.impl.ReplaceLink(link)
 }
 
-func (this *synched) UpdateLink(klink *api.KubeLink) (*Link, bool, *Link, error) {
+func (this *synched) UpdateLink(klink *api.KubeLink, mod ...LinkModifier) (*Link, bool, *Link, error) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
-	return this.impl.UpdateLink(klink)
+	return this.impl.UpdateLink(klink, mod...)
 }
 
 func (this *synched) GetMeshMembersFor(name string) LinkNameSet {
@@ -171,10 +171,10 @@ func (this *synched) GetServiceChains(src net.IP, clusterAddresses tcp.CIDRList)
 	return this.impl.GetServiceChains(src, clusterAddresses)
 }
 
-func (this *synched) RegisterLink(name LinkName, clusterCIDR *net.IPNet, fqdn string, cidr *net.IPNet) (*Link, error) {
+func (this *synched) RegisterLink(name LinkName, clusterCIDR *net.IPNet, fqdn string, cidr *net.IPNet, mod ...LinkModifier) (*Link, error) {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
-	return this.impl.RegisterLink(name, clusterCIDR, fqdn, cidr)
+	return this.impl.RegisterLink(name, clusterCIDR, fqdn, cidr, mod...)
 }
 
 func (this *synched) Locked(f func(Links) error) error {

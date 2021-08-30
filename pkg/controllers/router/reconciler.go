@@ -29,7 +29,7 @@ import (
 	"github.com/gardener/controller-manager-library/pkg/utils"
 	"github.com/vishvananda/netlink"
 
-	"github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
+	api "github.com/mandelsoft/kubelink/pkg/apis/kubelink/v1alpha1"
 	"github.com/mandelsoft/kubelink/pkg/controllers"
 	"github.com/mandelsoft/kubelink/pkg/iptables"
 	"github.com/mandelsoft/kubelink/pkg/kubelink"
@@ -56,11 +56,11 @@ func (this *reconciler) BaseConfig(cfg config.OptionSource) *controllers.Config 
 	return &cfg.(*Config).Config
 }
 
-func (this *reconciler) Gateway(obj *v1alpha1.KubeLink) (*controllers.LocalGatewayInfo, error) {
+func (this *reconciler) Gateway(obj *api.KubeLink) (*controllers.LocalGatewayInfo, error) {
 	return nil, nil
 }
 
-func (this *reconciler) GetLinkInfo(link *v1alpha1.KubeLink) *controllers.LinkInfo {
+func (this *reconciler) GetLinkInfo(link *api.KubeLink) *controllers.LinkInfo {
 	return nil
 }
 
@@ -247,4 +247,8 @@ func (this *reconciler) ReconcileEndpoint(logger logger.LogContext, obj resource
 		}
 	}
 	return reconcile.Succeeded(logger)
+}
+
+func (this *reconciler) ModifyLink(*kubelink.Link) error {
+	return nil
 }

@@ -6,3 +6,4 @@ spec:
   cidr: (( values.members[link].serviceCIDR ))
   clusterAddress: (( values.members[link].clusterAddress ))
   endpoint: (( values.members[link].endpoint ))
+  publicKey: (( values.members[link].wireguard.pub || ~~ ))

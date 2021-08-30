@@ -72,3 +72,7 @@ func (this *dummy) HandleDelete(logger logger.LogContext, name kubelink.LinkName
 func (this *dummy) HandleReconcile(logger logger.LogContext, obj resources.Object, entry *kubelink.Link) (error, error) {
 	return nil, nil
 }
+
+func (this *dummy) ModifyLink(*kubelink.Link) error {
+	return nil
+}

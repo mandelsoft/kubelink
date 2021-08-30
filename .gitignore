@@ -5,3 +5,4 @@
 /bridge
 /cmd/ipt/ipt
 /main
+.*.sw[pq]

@@ -142,7 +142,7 @@ func (this *reconciler) RequiredFirewallChains() iptables.Requests {
 
 func (this *reconciler) RequiredNATChains() iptables.Requests {
 	addrs := this.Links().GetGatewayAddrs()
-	return this.Links().GetNatChains(this.NetworkInterface().IP, addrs, this.runmode.GetInterface().Attrs().Name)
+	return this.Links().GetNatChains(this.NetworkInterface().IP, addrs, this.config.Interface)
 }
 
 func (this *reconciler) HandleDelete(logger logger.LogContext, name kubelink.LinkName, obj resources.Object) (bool, error) {
@@ -236,12 +236,31 @@ func (this *reconciler) HandleDelete(logger logger.LogContext, name kubelink.Lin
 
 ///////////////////////////////////////////////////////////////////////////////
 
-func (this *reconciler) MatchLink(obj *api.KubeLink) (bool, net.IP) {
+func (this *reconciler) IsResponsibleFor(name kubelink.LinkName, cidr *net.IPNet) bool {
+	if this.config.Responsible.Contains("all") {
+		return true
+	}
+	if this.config.Responsible.Contains(cidr.String()) || this.config.Responsible.Contains(name.Mesh()) {
+		return true
+	}
+	return false
+}
+
+func (this *reconciler) getIPFor(obj *api.KubeLink) net.IP {
 	ip, cidr, err := net.ParseCIDR(obj.Spec.ClusterAddress)
 	if err != nil {
-		return false, nil
+		return nil
 	}
-	if !this.config.Responsible.Contains("all") && !this.config.Responsible.Contains(cidr.String()) {
+	ln := kubelink.DecodeLinkNameFromString(obj.Name)
+	if this.IsResponsibleFor(ln, cidr) {
+		return ip
+	}
+	return nil
+}
+
+func (this *reconciler) MatchLink(obj *api.KubeLink) (bool, net.IP) {
+	ip := this.getIPFor(obj)
+	if ip == nil {
 		return false, nil
 	}
 	for _, m := range this.Links().GetMeshInfos() {
@@ -250,6 +269,18 @@ func (this *reconciler) MatchLink(obj *api.KubeLink) (bool, net.IP) {
 		}
 	}
 	return false, ip
+}
+
+func (this *reconciler) ModifyLink(link *kubelink.Link) error {
+	this.Controller().Infof("bŕoker link check for %s", link.Name)
+	if this.IsResponsibleFor(link.Name, link.ClusterAddress) && this.config.Mode == ctrlcfg.RUN_MODE_WIREGUARD {
+		if !link.IsLocalLink() && link.PublicKey == nil {
+			this.Controller().Infof("wireguard link %s check failed: public key missing")
+			return fmt.Errorf("public wireguard key required for wireguard link")
+		}
+		this.Controller().Infof("wireguard link %s checked", link.Name)
+	}
+	return nil
 }
 
 ///////////////////////////////////////////////////////////////////////////////

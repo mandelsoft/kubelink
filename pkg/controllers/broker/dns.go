@@ -459,12 +459,16 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 	}
 
 	// handle local cluster for all meshes
-	for n, m := range meshes {
-		if m.PropagateDNS() {
-			log.Debugf("creating local core entry for %s[%s]", n, m.ClusterName())
-			corefile += coreEntry(&first, "", m.ClusterName(), m.ClusterDomain(), ip, this.dnsInfo.ClusterDomain, true)
-		} else {
-			log.Debugf("no local core entry for %s[%s]", n, m.ClusterName())
+	if len(meshes) == 0 {
+		corefile = coreEntry(&first, "", "", "", "", "", true)
+	} else {
+		for n, m := range meshes {
+			if m.PropagateDNS() {
+				log.Debugf("creating local core entry for %s[%s]", n, m.ClusterName())
+				corefile += coreEntry(&first, "", m.ClusterName(), m.ClusterDomain(), ip, this.dnsInfo.ClusterDomain, true)
+			} else {
+				log.Debugf("no local core entry for %s[%s]", n, m.ClusterName())
+			}
 		}
 	}
 

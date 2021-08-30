@@ -25,7 +25,7 @@ spec:
             type: DirectoryOrCreate
       containers:
         - name: router
-          image: mandelsoft/kubelink:qual
+          image: (( values.image ":" values.version ))
           imagePullPolicy: "Always"
           args:
             - --controllers=router

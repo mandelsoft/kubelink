@@ -1,0 +1,11 @@
+
+support:
+  <<: (( &temporary &inject ))
+  members: (( |settings|->map[[1..settings.members]|i,v|-> *support.member] ))
+  member:
+    <<: (( &template ))
+    name: (( settings.basename v ))
+    serviceCIDR: (( settings.meshServiceRange / 16 * i ))
+    clusterAddress: (( min_ip(meshCIDR) + ( settings.meshStartIP + i) "/" split("/", meshCIDR)[1] ))
+    endpoint: (( meshName "." name "." settings.basedomain ))
+

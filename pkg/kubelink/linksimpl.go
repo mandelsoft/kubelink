@@ -368,7 +368,7 @@ func linkErr(msg string, args ...interface{}) (*Link, bool, *Link, error) {
 	return nil, true, nil, fmt.Errorf(msg, args...)
 }
 
-func (this *links) UpdateLink(klink *api.KubeLink) (*Link, bool, *Link, error) {
+func (this *links) UpdateLink(klink *api.KubeLink, mod ...LinkModifier) (*Link, bool, *Link, error) {
 	name := DecodeLinkNameFromString(klink.Name)
 
 	l, err := LinkForSpec(name, klink.CreationTimestamp.Time, &klink.Spec, this.defaultport, net.ParseIP(klink.Status.Gateway))
@@ -376,6 +376,13 @@ func (this *links) UpdateLink(klink *api.KubeLink) (*Link, bool, *Link, error) {
 		return nil, false, nil, err
 	}
 
+	//fmt.Printf("update link %s with %d mods\n", klink.Name, len(mod))
+	for _, m := range mod {
+		err = m.ModifyLink(l)
+		if err != nil {
+			return nil, false, nil, err
+		}
+	}
 	stale := true
 	var redo *Link
 
@@ -574,7 +581,7 @@ func (this *links) GetNatChains(src net.IP, clusterAddresses tcp.CIDRList, linkN
 
 }
 
-func (this *links) RegisterLink(name LinkName, clusterCIDR *net.IPNet, fqdn string, cidr *net.IPNet) (*Link, error) {
+func (this *links) RegisterLink(name LinkName, clusterCIDR *net.IPNet, fqdn string, cidr *net.IPNet, mod ...LinkModifier) (*Link, error) {
 	kl := &api.KubeLink{}
 	kl.Name = name.String()
 	kl.Spec.ClusterAddress = clusterCIDR.IP.String()
@@ -584,7 +591,7 @@ func (this *links) RegisterLink(name LinkName, clusterCIDR *net.IPNet, fqdn stri
 	if err != nil {
 		return nil, err
 	}
-	l, _, _, err := this.UpdateLink(kl)
+	l, _, _, err := this.UpdateLink(kl, mod...)
 	return l, err
 }
 

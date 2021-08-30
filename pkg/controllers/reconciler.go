@@ -74,6 +74,8 @@ type ReconcilerImplementation interface {
 
 	HandleReconcile(logger logger.LogContext, obj resources.Object, entry *kubelink.Link) (error, error)
 	HandleDelete(logger logger.LogContext, name kubelink.LinkName, obj resources.Object) (bool, error)
+
+	kubelink.LinkModifier
 }
 
 type Common struct {
@@ -236,7 +238,7 @@ func (this *Reconciler) ReconcileAndGetLink(logger logger.LogContext, obj resour
 	}
 
 	var uerr error
-	ldata, valid, redo, lerr := this.links.UpdateLink(link)
+	ldata, valid, redo, lerr := this.links.UpdateLink(link, this.impl)
 	if lerr != nil {
 		if valid {
 			logger.Warnf("invalid link: %s", lerr)

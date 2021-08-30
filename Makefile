@@ -5,7 +5,7 @@ RELEASE                     := true
 NAME                        := kubelink
 REPOSITORY                  := github.com/mandelsoft/kubelink
 #REGISTRY                    := eu.gcr.io/gardener-project
-REGISTRY                    :=
+REGISTRY                    := ghcr.io/
 IMAGEORG                    := mandelsoft
 IMAGE_PREFIX                := $(REGISTRY)$(IMAGEORG)
 REPO_ROOT                   := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
@@ -85,6 +85,10 @@ docker-login:
 .PHONY: images-dev
 images-dev:
 	@docker build -t $(IMAGE_PREFIX)/$(NAME):$(VERSION)-$(COMMIT) -t $(IMAGE_PREFIX)/$(NAME):latest -f Dockerfile -m 6g --build-arg TARGETS=dev --target $(NAME) .
+	@docker push $(IMAGE_PREFIX)/$(NAME):latest
+
+.PHONY: push-dev
+push-dev:
 	@docker push $(IMAGE_PREFIX)/$(NAME):latest
 
 .PHONY: images-release

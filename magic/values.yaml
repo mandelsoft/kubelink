@@ -2,6 +2,8 @@
 namespace: kubelink
 runmode: wireguard
 podmode: true
+image:   ghcr.io/mandelsoft/kubelink
+version: latest
 
 meshName: kubelink
 meshCIDR: 192.168.0.0/24
@@ -20,8 +22,10 @@ podCIDR:  100.96.0.0/11
 #
 # full mesh members (generate manifests)
 # with connected service subnets
+# support.members is a utility function that generates standard members based on
+# a settings object by successive usage of ip ranges name enumerated names
 #
-members: (( map[[1..helper.members]|i,v|-> *helper.member] ))
+members: (( support.members(settings) ))
 
 rollkeys: false
 
@@ -37,21 +41,19 @@ external:
     publicKey: JexxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxtUY=
 
 #
-# just generate n members according to dedicated pattern
-# instead of specifying a manual list in field members above
+# just generate n members according to a dedicated pattern
+# instead of specifying a manual list in field members above.
+# This setting is used by the function suppotz.members above.
 #
-helper:
+settings:
   <<: (( &temporary ))
-  basename: kubelink
-  basedomain: ringdev.shoot.dev.k8s-hana.ondemand.com
-  meshServiceRange: 100.64.0.0/16
-  meshStartIP: 11
+  # number of members to generate
   members: 2
-
-  member:
-    <<: (( &template ))
-    name: (( _.basename v ))
-    serviceCIDR: (( _.meshServiceRange / 16 * i ))
-    clusterAddress: (( min_ip(meshCIDR) + ( _.meshStartIP + i) ))
-    endpoint: (( meshName "." name "." _.basedomain ))
-
+  # basename for member names
+  basename: kubelink
+  # basedomain for dns names for clusters
+  basedomain: ringdev.shoot.dev.k8s-hana.ondemand.com
+  # ip range to select member service ip ranges from
+  meshServiceRange: 100.64.0.0/16
+  # start ip to use for members of mesh network
+  meshStartIP: 11

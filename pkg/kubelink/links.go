@@ -57,6 +57,10 @@ func GetSharedLinks(controller controller.Interface, defaultport int) Links {
 	}).(Links)
 }
 
+type LinkModifier interface {
+	ModifyLink(*Link) error
+}
+
 type Links interface {
 	Setup(logger logger.LogContext, list []resources.Object)
 	SetDefaultMesh(clusterName string, clusterAddress *net.IPNet, meshDNS LinkDNSInfo)
@@ -70,14 +74,14 @@ type Links interface {
 
 	IsGatewayLink(name LinkName) bool
 	HasWireguard() bool
-	RegisterLink(name LinkName, clusterCIDR *net.IPNet, fqdn string, cidr *net.IPNet) (*Link, error)
+	RegisterLink(name LinkName, clusterCIDR *net.IPNet, fqdn string, cidr *net.IPNet, mod ...LinkModifier) (*Link, error)
 
 	GetLinks() map[LinkName]*Link
 	GetLink(name LinkName) *Link
 	LinkInfoUpdated(logger logger.LogContext, name LinkName, access *LinkAccessInfo, dns *LinkDNSInfo) *Link
 	UpdateLinkInfo(logger logger.LogContext, name LinkName, access *LinkAccessInfo, dns *LinkDNSInfo, pending bool) (*Link, bool)
 	ReplaceLink(link *Link) *Link
-	UpdateLink(klink *api.KubeLink) (*Link, bool, *Link, error)
+	UpdateLink(klink *api.KubeLink, mod ...LinkModifier) (*Link, bool, *Link, error)
 	RemoveLink(name LinkName)
 	VisitLinks(visitor func(l *Link) bool)
 	GetLinkForClusterAddress(ip net.IP) *Link

@@ -12,8 +12,17 @@
 #
 
 outdir: "gen"
-values: (( read("values.yaml", "yaml") ))
-templates: (( utilities.generate.yamlFiles("templates") ))
+values: (( defaults merge(read("values.yaml", "import"), read(__ctx.DIR "/utils.yaml")) ))
+templates: (( utilities.generate.yamlFiles(__ctx.DIR "/templates") ))
+
+defaults:
+  namespace: kubelink
+  runmode:   wireguard
+  podmode:   true
+  image:     ghcr.io/mandelsoft/kubelink
+  version:   latest
+  meshName:  kubelink
+  meshCIDR:  192.168.0.0/24
 
 #
 # filter defines rules for conditional manifest generation
@@ -66,15 +75,15 @@ helper:
   <<: (( &temporary ))
   addendum:
     <<: (( &template ))
-    wireguard: (( state.wireguard[m.name].value ))
+    wireguard: (( values.runmode == "wireguard" ? state.wireguard[m.name].value :~~ ))
     podCIDR: (( m.podCIDR || values.podCIDR ))
     nodeCIDR: (( m.nodeCIDR || values.nodeCIDR ))
 
   names: (( map[values.members|v|->v.name] ))
   useManifest: (( |name,file|-> .filter[basename(file)](values.members[name]) || true ))
   templates: (( |name, dir|-> map[.templates|v|->_.useManifest(name,v) ? write(dir "/" basename(v), read(v,"multiyaml"), "multiyaml") :~ ] ))
-  links: (( |name, dir|-> map[_.names|m|->($link=m) m == name ? ~~ :write(dir "/40-link-" m ".yaml", read("templates/link/link.yaml", "yaml")) ] ))
-  external: (( |dir|-> map[values.external|l|->($link=l) write(dir "/70-link-" l.name ".yaml", read("templates/link/external.yaml", "yaml")) ] ))
+  links: (( |name, dir|-> map[_.names|m|->($link=m) m == name ? ~~ :write(dir "/40-link-" m ".yaml", read(__ctx.DIR "/templates/link/link.yaml", "yaml")) ] ))
+  external: (( |dir|-> map[values.external|l|->($link=l) write(dir "/70-link-" l.name ".yaml", read(__ctx.DIR "/templates/link/external.yaml", "yaml")) ] ))
   member: (( |name, dir|-> { $name=name, $manifests=_.templates(name,dir) _.links(name,dir) _.external(dir)} ))
 
 #
@@ -85,6 +94,6 @@ helper:
 # The manifests will be written to the outdir folder
 # therefore the output node is omited here
 out:
-  <<: (( &temporary ))
+  <<: (( &temporary )) 
   members: (( map[values.members|data|->($values= .settings { $name=data.name }, $member=.settings.members[data.name], $port=config.ports[values.runmode]) helper.member(data.name, mkdir(outdir "/" data.name))] ))
 
