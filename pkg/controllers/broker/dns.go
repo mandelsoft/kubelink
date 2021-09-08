@@ -86,31 +86,36 @@ func (this Kubeconfig) AddCluster(name, url, ca, token string) {
 	})
 }
 
-func coreEntry(first *bool, kubekey, clusterName string, basedomain string, dnsIP, clusterDomain string, local bool) string {
+func defaultEntry(logClass string) string {
+	return fmt.Sprintf(`
+.:8053 {
+    errors
+    log . {
+      class %s
+    }
+    health
+    ready
+    forward . /etc/resolv.conf
+    cache 30
+    loop
+    reload
+    loadbalance round_robin
+}
+`, logClass)
+}
+
+func coreEntry(kubekey, clusterName string, basedomain string, dnsIP, clusterDomain string, local bool) string {
 	if !strings.HasSuffix(clusterDomain, ".") {
 		clusterDomain += "."
 	}
 	escapedDomain := strings.Replace(clusterDomain, ".", `\.`, -1)
-	header := ""
-	if *first {
-		*first = false
-		header = fmt.Sprintf(`
-.:8053 {
-    errors
-    log . {
-        class error
-    }
-    health
-    ready
-`)
-	} else {
-		header = fmt.Sprintf(`
+
+	header := fmt.Sprintf(`
 %s.%s:8053 {
     errors
     log
 `, clusterName, basedomain)
 
-	}
 	footer := `
     cache 30
     loop
@@ -402,7 +407,6 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 	log.Debugf("update corefile")
 	data := map[string][]byte{}
 
-	first := true
 	meshDomains := map[kubelink.LinkName]string{}
 	keys := []string{}
 
@@ -447,7 +451,6 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 	data["kubeconfig"] = b
 	sort.Strings(keys)
 
-	corefile := ""
 	ip := ""
 	if this.config.DNSPropagation == config.DNSMODE_DNS {
 		if this.dnsInfo.DnsIP != nil {
@@ -455,20 +458,17 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 		} else {
 			ip = tcp.SubIP(this.config.ServiceCIDR, config.CLUSTER_DNS_IP).String()
 		}
-		log.Debugf("using local dns servide %s", ip)
+		log.Debugf("using local dns service %s", ip)
 	}
 
 	// handle local cluster for all meshes
-	if len(meshes) == 0 {
-		corefile = coreEntry(&first, "", "", "", "", "", true)
-	} else {
-		for n, m := range meshes {
-			if m.PropagateDNS() {
-				log.Debugf("creating local core entry for %s[%s]", n, m.ClusterName())
-				corefile += coreEntry(&first, "", m.ClusterName(), m.ClusterDomain(), ip, this.dnsInfo.ClusterDomain, true)
-			} else {
-				log.Debugf("no local core entry for %s[%s]", n, m.ClusterName())
-			}
+	corefile := defaultEntry(this.config.DNSLogClass)
+	for n, m := range meshes {
+		if m.PropagateDNS() {
+			log.Debugf("creating local core entry for %s[%s]", n, m.ClusterName())
+			corefile += coreEntry("", m.ClusterName(), m.ClusterDomain(), ip, this.dnsInfo.ClusterDomain, true)
+		} else {
+			log.Debugf("no local core entry for %s[%s]", n, m.ClusterName())
 		}
 	}
 
@@ -490,7 +490,7 @@ func (this *reconciler) updateCorefile(logger logger.LogContext) {
 			}
 		}
 		log.Debugf("create core entry for link %s mapping domain %s to %s [%s]", l.Name, clusterDomain, meshDomains[name], ip)
-		corefile += coreEntry(&first, KubeKey(name), name.Name(), meshDomains[name], ip, clusterDomain, false)
+		corefile += coreEntry(KubeKey(name), name.Name(), meshDomains[name], ip, clusterDomain, false)
 	}
 	data["Corefile"] = []byte(corefile)
 

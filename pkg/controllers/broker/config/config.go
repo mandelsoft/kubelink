@@ -79,12 +79,13 @@ type Config struct {
 	KeyFile    string
 	CACertFile string
 
-	Secret     string
-	ManageMode string
-	DNSName    string
-	Service    string
-	Interface  string
-	MeshDomain string
+	Secret      string
+	ManageMode  string
+	DNSName     string
+	DNSLogClass string
+	Service     string
+	Interface   string
+	MeshDomain  string
 
 	serviceAccount   string
 	ServiceAccount   resources.ObjectName
@@ -119,6 +120,7 @@ func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	set.AddStringOption(&this.Secret, "secret", "", "", "TLS or wireguard secret")
 	set.AddStringOption(&this.Mode, "mode", "", RUN_MODE_BRIDGE, "VPN mode (bridge, wireguard, none)")
 	set.AddStringOption(&this.ManageMode, "secret-manage-mode", "", MANAGE_MODE_NONE, "Manage mode for TLS secret")
+	set.AddStringOption(&this.DNSLogClass, "dns-log-class", "", "error", "DNS Log Class for coredns")
 	set.AddStringOption(&this.DNSName, "dns-name", "", "", "DNS Name for managed certificate")
 	set.AddStringOption(&this.Service, "service", "", "", "Service name for wireguard or managed certificate")
 	set.AddStringOption(&this.Interface, "ifce-name", "", "kubelink", "Name of the tun/wireguard interface")

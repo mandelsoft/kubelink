@@ -76,6 +76,7 @@ spec:
         - -conf
         - /etc/coredns/Corefile
         image: eu.gcr.io/sap-se-gcr-k8s-public/coredns/coredns:1.6.3
+        image: coredns/coredns:1.8.4
         imagePullPolicy: IfNotPresent
         livenessProbe:
           failureThreshold: 5

@@ -61,6 +61,7 @@ spec:
             - --ifce-name=kubelink
             - --dns-advertisement
             - --dns-propagation=dns
+            - (( values.dnsLogClass ? "--dns-log-class=" values.dnsLogClass :~~ ))
             - --coredns-configure
           env:
             - name: MY_NODEIP
