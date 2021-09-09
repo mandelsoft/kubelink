@@ -30,6 +30,7 @@ defaults:
 filter:
   <<: (( &temporary ))
   60-globaldns.yaml: (( |m|->m.name == values.globalDNS.member ))
+  61-corednsentry.yaml: (( |m|->m.name == values.globalDNS.member ))
   33-wireguard.yaml: (( |m|->values.runmode == "wireguard" ))
 
 #

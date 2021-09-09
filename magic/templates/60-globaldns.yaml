@@ -80,6 +80,9 @@ data:
         forward kubelink 100.64.0.11 {
           except global.kubelink
         }
+        template ANY ANY {
+          rcode NXDOMAIN
+        }
         cache 30
         loop
         reload
