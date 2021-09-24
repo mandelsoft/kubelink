@@ -55,5 +55,7 @@ settings:
   basedomain: ringdev.shoot.dev.k8s-hana.ondemand.com
   # ip range to select member service ip ranges from
   meshServiceRange: 100.64.0.0/16
+  # number of service nets to split service range into
+  meshServiceNetCount: 16
   # start ip to use for members of mesh network
   meshStartIP: 11
