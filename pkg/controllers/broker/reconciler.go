@@ -365,6 +365,10 @@ func (this *reconciler) Command(logger logger.LogContext, cmd string) reconcile.
 	err := this.runmode.ReconcileInterface(logger)
 	if err != nil {
 		this.Controller().Errorf("wireguard reconcilation failed: %s", err)
+	} else {
+		if this.config.MTU > 0 {
+			netlink.LinkSetMTU(this.runmode.GetInterface(), this.config.MTU)
+		}
 	}
 	if this.config.ServiceAccount != nil {
 		logger.Debug("update service account")

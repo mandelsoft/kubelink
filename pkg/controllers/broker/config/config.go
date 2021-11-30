@@ -61,6 +61,7 @@ type Config struct {
 	nodeip      string
 
 	NodeIP net.IP
+	MTU         int
 
 	ClusterName    string
 	ClusterAddress *net.IPNet
@@ -109,6 +110,7 @@ type Config struct {
 
 func (this *Config) AddOptionsToSet(set config.OptionSet) {
 	this.Config.AddOptionsToSet(set)
+	set.AddIntOption(&this.MTU, "mtu", "", 0, "MTU size for network interface")
 	set.AddStringOption(&this.nodeip, "node-ip", "", "", "Node ip in case of pod mode")
 	set.AddStringOption(&this.serviceCIDR, "service-cidr", "", "", "CIDR of local service network")
 	set.AddStringOption(&this.responsible, "served-links", "", "all", "Comma separated list of links to serve")

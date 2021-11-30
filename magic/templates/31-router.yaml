@@ -32,6 +32,7 @@ spec:
             - --server-port-http=8080
             - (( "--pod-cidr=" member.podCIDR ))
             - (( "--node-cidr=" member.nodeCIDR ))
+            - (( "--route-table=" values.routeTable || ~~ )) 
             - --ipip=shared
             - --service=kubelink
             - --datafile=/mnt/data/routes

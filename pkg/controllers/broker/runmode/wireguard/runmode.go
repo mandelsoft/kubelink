@@ -151,6 +151,9 @@ func (this *mode) ReconcileInterface(logger logger.LogContext) error {
 		this.Controller().Infof("creating wireguard interface %q", this.config.Interface)
 		attrs := netlink.NewLinkAttrs()
 		attrs.Name = this.config.Interface
+		if this.config.MTU!= 0 {
+		  attrs.MTU=this.config.MTU
+		}
 		link = &netlink.GenericLink{
 			LinkAttrs: attrs,
 			LinkType:  "wireguard",

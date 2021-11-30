@@ -30,6 +30,12 @@ members: (( support.members(settings) ))
 rollkeys: false
 
 #
+# networking
+#
+# routeTable: 251  # routetable id used by router daemon
+# MTU: 1320        # MTU size for kubelink network device
+
+#
 # addtitional foreign mesh member links
 #
 external:

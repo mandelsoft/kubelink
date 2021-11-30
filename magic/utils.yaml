@@ -7,5 +7,6 @@ support:
     name: (( settings.basename v ))
     serviceCIDR: (( settings.meshServiceRange / settings.meshServiceNetCount * i ))
     clusterAddress: (( min_ip(meshCIDR) + ( settings.meshStartIP + i) "/" split("/", meshCIDR)[1] ))
-    endpoint: (( meshName "." name "." settings.basedomain ))
+    dnsname: (( settings.dnsnames[name] || name ))
+    endpoint: (( meshName "." ( index(dnsname,".") < 0 ? dnsname "." settings.basedomain :dnsname )  ))
 

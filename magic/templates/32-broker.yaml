@@ -59,6 +59,7 @@ spec:
             - (( "--service-cidr=" member.serviceCIDR ))
             - (( !values.podmode ? "--ipip=shared" :~~ ))
             - --ifce-name=kubelink
+            - (( "--mtu=" values.MTU || ~~ ))
             - --dns-advertisement
             - --dns-propagation=dns
             - (( values.dnsLogClass ? "--dns-log-class=" values.dnsLogClass :~~ ))
