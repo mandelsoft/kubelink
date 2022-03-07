@@ -43,7 +43,7 @@ metadata:
   name: kubelink-globaldns
   namespace: (( values.namespace ))
 spec:
-  clusterIP: (( values.globalDNS.ip ))
+  clusterIP: (( values.globalDNS.clusterIP ))
   ports:
   - name: dns
     port: 53

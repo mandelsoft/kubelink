@@ -2,7 +2,7 @@
 
 set -e
 
-DIR="$(dirname "${BASH_SOURCE[0]}")"
+DIR=$(dirname $(readlink -f ${BASH_SOURCE[0]}))
 export SPIFF_FEATURES=interpolation
 
 #lib=~/dev/go/spiff/src/github.com/mandelsoft/spiff/libraries

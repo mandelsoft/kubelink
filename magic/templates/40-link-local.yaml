@@ -7,4 +7,4 @@ spec:
   clusterAddress: (( values.members[member.name].clusterAddress ))
   dns:
     baseDomain: (( values.meshName ))
-    dnsIP: (( values.globalDNS.ip ))        # at local links: address of mesh global dns server
+    dnsIP: (( values.globalDNS.ip || values.globalDNS.clusterIP ))   # at local links: address of mesh global dns server

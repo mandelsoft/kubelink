@@ -10,7 +10,8 @@ meshCIDR: 192.168.0.0/24
 
 globalDNS:
   member: kubelink1
-  ip: (( min_ip(members[member].serviceCIDR) + 12 ))
+  clusterIP: (( min_ip(members[member].serviceCIDR) + 12 ))
+  ip: (( clusterIP ))
 
 #
 # default unshared cidrs for mesh members

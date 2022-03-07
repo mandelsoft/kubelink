@@ -1,9 +1,0 @@
----
-apiVersion: kubelink.mandelsoft.org/v1alpha1
-kind: KubeLink
-metadata:
-  name: kubelink4
-spec:
-  cidr: 100.64.48.0/20
-  clusterAddress: 192.168.0.14
-  endpoint: kubelink.kubelink4.ringdev.shoot.dev.k8s-hana.ondemand.com

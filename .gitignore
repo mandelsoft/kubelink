@@ -4,5 +4,7 @@
 /problem
 /bridge
 /cmd/ipt/ipt
+/magic/gen
+/magic/state*
 /main
 .*.sw[pq]

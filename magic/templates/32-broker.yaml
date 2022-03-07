@@ -62,7 +62,7 @@ spec:
             - (( "--mtu=" values.MTU || ~~ ))
             - --dns-advertisement
             - --dns-propagation=dns
-            - (( values.dnsLogClass ? "--dns-log-class=" values.dnsLogClass :~~ ))
+            - (( defined(values.dnsLogClass) ? "--dns-log-class=" values.dnsLogClass :~~ ))
             - --coredns-configure
           env:
             - name: MY_NODEIP
