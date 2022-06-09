@@ -51,7 +51,7 @@ This should show all of the configured kubelinks. Ensure that they have the stat
 ### Further Debugging
 
 You can login to the broker pod and check the status of wireguard tunnels:
-kubectl -n kubelink exec -ti kubelink-broker-xxxx -- /bin/bash
+`kubectl -n kubelink exec -ti kubelink-broker-xxxx -- /bin/bash`
 
 
 
